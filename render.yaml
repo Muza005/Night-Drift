@@ -1,0 +1,10 @@
+# Render Blueprint for the multiplayer server (Dashboard → New → Blueprint → this repo).
+services:
+  - type: web
+    name: night-drift-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
