@@ -1,8 +1,10 @@
-# Render Blueprint for the multiplayer server (Dashboard → New → Blueprint → this repo).
+# Render Blueprint for the game + multiplayer server (Dashboard → New → Blueprint → this repo).
+# Frankfurt is the closest Render region to Uzbekistan and the CIS (~80–120 ms ping).
 services:
   - type: web
-    name: night-drift-server
+    name: night-drift-eu
     runtime: node
+    region: frankfurt
     rootDir: server
     plan: free
     buildCommand: npm install

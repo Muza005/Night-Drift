@@ -217,7 +217,7 @@ body{margin:0}
 
   <div class="card" id="pOnline" hidden>
     <h1>Онлайн <span>заезд</span></h1>
-    <p>До 6 игроков в комнате, 3 круга, общий старт. Машины соперников не сталкиваются с вашей: это призраки, поэтому никто не может вытолкнуть вас с трассы.</p>
+    <p>До 6 игроков в комнате, 3 круга, общий старт. Машины сталкиваются: можно толкаться, вытеснять с траектории и раскручивать соперников ударом в бок.</p>
     <label class="field"><span class="lbl">Ваше имя</span><input id="nameIn" maxlength="16" autocomplete="nickname" placeholder="Например, Muza"></label>
     <div class="row-btns"><button class="cta small" id="createRoom" type="button">Создать комнату</button></div>
     <div class="join-row">
@@ -467,7 +467,7 @@ function makeCar(color, local){
   return {root, body, wheels, pivots, tailMat, under, paint, lastMark:[null,null], spin:0, roll:0};
 }
 const car = Object.assign(makeCar(0xff3b6b, true),
-  {x:0,z:0,h:0,vx:0,vz:0,vF:0,vR:0,steer:0,idx:0,prog:0,off:false,pitch:0});
+  {x:0,z:0,h:0,vx:0,vz:0,vF:0,vR:0,steer:0,idx:0,prog:0,off:false,pitch:0,spinV:0});
 function disposeCar(m){
   scene.remove(m.root);
   m.root.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(o.material.map&&o.material.map!==glowTex) o.material.map.dispose(); o.material.dispose(); } });
@@ -577,7 +577,7 @@ try{ const b=parseFloat(localStorage.getItem('nightdrift.best')); if(b>0) best=b
 const drift={pts:0,time:0,grace:0,mult:1,active:false};
 
 function placeAt(i){
-  const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.steer=0; car.idx=i;
+  const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.steer=0; car.spinV=0; car.idx=i;
   car.lastMark=[null,null];
 }
 // Starting grid: two columns behind the start line, 7 m between rows.
@@ -627,6 +627,8 @@ function physics(dt){
   if(hb||sliding) yawK*=1.5;
   car.vx=fx*vF+rx*vR; car.vz=fz*vF+rz*vR;
   car.h-=car.steer*yawK*dt*(vF<-.5?-1:1);
+  // spin left over from being hit by another car
+  car.h+=car.spinV*dt; car.spinV*=Math.exp(-2.5*dt);
   car.x+=car.vx*dt; car.z+=car.vz*dt;
   car.vF=vF; car.vR=vR;
 
@@ -735,7 +737,7 @@ placeAt(START);
 // cars are predicted forward to the present moment (position + velocity × age of the
 // update) and eased toward each new prediction, so what you see matches what they see.
 const NET={client:null,room:null,online:false,me:null,offset:0,bestRtt:1e9,ghosts:new Map(),
-  sendT:0,standT:0,rtt:0,finished:false,leaving:false,token:null,laps:3,pingTimer:0};
+  sendT:0,standT:0,rtt:0,hitAt:{},sentAt:{},finished:false,leaving:false,token:null,laps:3,pingTimer:0};
 const NOINPUT={up:0,down:0,left:0,right:0,hb:0};
 const serverNow=()=>Date.now()+NET.offset;
 const hex=c=>'#'+(c>>>0).toString(16).padStart(6,'0');
@@ -793,6 +795,7 @@ function bindRoom(room){
   for(let i=0;i<6;i++) setTimeout(ping,i*180);
   NET.pingTimer=setInterval(()=>{ NET.bestRtt+=10; ping(); },2000);
   room.onMessage('event',m=>info(m.text));
+  room.onMessage('bump',onBump);
   room.onMessage('lapTime',m=>{
     const last=m.lap>=room.state.laps;
     flash(last?'Финиш!':'Круг '+m.lap+' из '+room.state.laps, fmtT(m.ms/1000)+(m.lap>1&&m.best===m.ms?' · лучший круг':''), 2.6);
@@ -883,6 +886,64 @@ function predict(s0,s1,nowS){
   const turn=w*age, c=Math.cos(-turn/2), sn=Math.sin(-turn/2);
   return {x:s1.x+(s1.vx*c-s1.vz*sn)*age, z:s1.z+(s1.vx*sn+s1.vz*c)*age, h:s1.h+turn};
 }
+// Our local guess of how an opponent reacts to a hit we just gave them, used until their
+// own updates (which include the real reaction) arrive. Velocity fades like tyre grip would.
+function kickDisp(g,nowS){
+  const K=g.kick; if(!K) return {x:0,z:0,h:0,vx:0,vz:0,w:0};
+  const tau=Math.max(0,(nowS-K.t)/1000), e=Math.exp(-K.k*tau), f=(1-e)/K.k;
+  return {x:K.bx+K.vx*f, z:K.bz+K.vz*f, h:K.bh+K.w*f, vx:K.vx*e, vz:K.vz*e, w:K.w*e};
+}
+
+/* ---------- car-to-car collisions ----------
+   Each car is two overlapping circles (front and rear), which follows the long box shape
+   closely and is cheap to test. Each player resolves the hit for their own car against
+   the predicted position of the other car, and also sends the other car's half of the hit
+   through the server. Whoever notices the contact first decides it; the second notice
+   within 0.3 s is ignored, so a hit is never applied twice. */
+const CAR_R=1.05, CAR_OFF=1.15, CAR_I=1.87, BOUNCE=.3;
+function carCircles(x,z,h){ const fx=Math.sin(h), fz=Math.cos(h); return [[x+fx*CAR_OFF,z+fz*CAR_OFF],[x-fx*CAR_OFF,z-fz*CAR_OFF]]; }
+const clampN=(v,a)=>Math.max(-a,Math.min(a,v));
+function collideGhosts(){
+  if(!NET.online || !NET.room || state!=='race' || NET.finished) return;
+  const now=performance.now();
+  for(const g of NET.ghosts.values()){
+    if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
+    if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
+    let best=null;
+    for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
+      const dx=a[0]-b[0], dz=a[1]-b[1], d=Math.hypot(dx,dz);
+      if(d<2*CAR_R && (!best||d<best.d)) best={d,dx,dz,b};
+    }
+    if(!best) continue;
+    const d=Math.max(best.d,1e-3), nx=best.dx/d, nz=best.dz/d, pen=2*CAR_R-d;
+    car.x+=nx*pen*.5; car.z+=nz*pen*.5;              // the other car moves the other half
+    const vn=(car.vx-g.vx)*nx+(car.vz-g.vz)*nz;
+    if(vn>=0) continue;                                // already moving apart
+    const cx=best.b[0]+nx*CAR_R, cz=best.b[1]+nz*CAR_R; // contact point
+    const j=-(1+BOUNCE)*vn/2, Jx=nx*j, Jz=nz*j;        // equal masses
+    car.vx+=Jx; car.vz+=Jz;
+    car.spinV=clampN(car.spinV+((cz-car.z)*Jx-(cx-car.x)*Jz)/CAR_I*.6,4);
+    NET.hitAt[g.id]=now;
+    if(-vn>3) crash(-vn);
+    if(now-(NET.sentAt[g.id]||0)>250){
+      NET.sentAt[g.id]=now;
+      const w=clampN(((cz-g.z)*-Jx-(cx-g.x)*-Jz)/CAR_I*.6,4);
+      NET.room.send('bump',{to:g.id,jx:-Jx,jz:-Jz,w,dx:-nx*pen*.5,dz:-nz*pen*.5});
+      // Show the opponent reacting right away instead of after a round trip.
+      const nowS=serverNow(), kd=kickDisp(g,nowS);
+      g.kick={t:nowS,k:3,bx:kd.x,bz:kd.z,bh:kd.h,vx:kd.vx-Jx,vz:kd.vz-Jz,w:kd.w+w};
+    }
+  }
+}
+function onBump(m){
+  if(state!=='race' || NET.finished || !m) return;
+  const now=performance.now();
+  if(now-(NET.hitAt[m.from]||0)<300) return;        // we already handled this contact ourselves
+  NET.hitAt[m.from]=now;
+  car.vx+=m.jx; car.vz+=m.jz; car.spinV=clampN(car.spinV+m.w,4);
+  car.x+=m.dx; car.z+=m.dz;
+  const hit=Math.hypot(m.jx,m.jz)*1.5; if(hit>3) crash(hit);
+}
 function updateGhosts(dt){
   const show=NET.online && (state==='count'||state==='race'||state==='results');
   const nowS=serverNow();
@@ -899,14 +960,20 @@ function updateGhosts(dt){
     // car itself never trails behind the prediction.
     if(!g.off) g.off={x:0,z:0,h:0};
     if(g.last && g.last!==s1){
-      const O=predict(g.lastPrev,g.last,nowS);
-      g.off.x+=O.x-T.x; g.off.z+=O.z-T.z; g.off.h+=angDiff(T.h,O.h);
+      const O=predict(g.lastPrev,g.last,nowS), ko=kickDisp(g,nowS);
+      // The opponent's own updates include our hit once they have had time to react;
+      // from then on stop adding our local guess of that hit.
+      if(g.kick && s1.t>g.kick.t+(NET.rtt||250)+80) g.kick=null;
+      const kn=kickDisp(g,nowS);
+      g.off.x+=O.x+ko.x-T.x-kn.x; g.off.z+=O.z+ko.z-T.z-kn.z; g.off.h+=angDiff(T.h+kn.h,O.h+ko.h);
     }
     g.last=s1; g.lastPrev=s0;
+    { const kd=kickDisp(g,nowS); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
+      g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; }
     if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
     const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
     const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
-    g.x=s.x; g.z=s.z;
+    g.x=s.x; g.z=s.z; g.h=s.h;
     m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
@@ -1015,7 +1082,7 @@ function frame(now){
   }
   if(state==='race'){
     raceT+=dt; lapT+=dt;
-    const h=dt/2; physics(h); physics(h);
+    const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
     info=scoring(dt);
   }
 

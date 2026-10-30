@@ -143,6 +143,23 @@ class RaceRoom extends Room {
       const p = this.state.players.get(client.sessionId);
       if (p && m) p.score = Math.round(finite(m.score, 0, 1e7, p.score));
     });
+
+    // Car-to-car hits: the player who noticed the contact sends the other car's share of
+    // the impulse, and the server passes it on. Values are clamped to what a real hit
+    // between two cars can produce, so a modified client can't launch anyone off the map.
+    this.onMessage('bump', (client, m) => {
+      if (this.state.phase !== 'race' || !m) return;
+      const from = this.state.players.get(client.sessionId), to = this.state.players.get(m.to);
+      if (!from || !to || from.finished || to.finished) return;
+      if (Math.hypot(from.x - to.x, from.z - to.z) > 25) return;   // they weren't even close (positions here are a ping old)
+      const target = this.clients.find(c => c.sessionId === m.to);
+      if (!target) return;
+      target.send('bump', {
+        from: client.sessionId,
+        jx: finite(m.jx, -30, 30), jz: finite(m.jz, -30, 30), w: finite(m.w, -4, 4),
+        dx: finite(m.dx, -1.5, 1.5), dz: finite(m.dz, -1.5, 1.5),
+      });
+    });
   }
 
   onJoin(client, options) {
