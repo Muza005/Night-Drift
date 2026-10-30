@@ -30,6 +30,8 @@ class Player extends Schema {
     this.connected = true;
     this.x = 0; this.z = 0; this.h = 0;
     this.vf = 0; this.steer = 0; this.slide = 0;
+    this.vx = 0; this.vz = 0;
+    this.t = 0;              // sender's synced clock (server ms) when this position was true
     this.lap = 0;            // completed laps
     this.prog = 0;           // progress along the current lap, 0..900
     this.score = 0;
@@ -43,6 +45,7 @@ defineTypes(Player, {
   name: 'string', color: 'number', slot: 'uint8', connected: 'boolean',
   x: 'float32', z: 'float32', h: 'float32',
   vf: 'float32', steer: 'float32', slide: 'float32',
+  vx: 'float32', vz: 'float32', t: 'float64',
   lap: 'uint8', prog: 'int16', score: 'uint32', bestLap: 'number',
   finished: 'boolean', finishTime: 'number', place: 'uint8',
 });
@@ -62,7 +65,10 @@ defineTypes(RaceState, {
   players: { map: Player },
 });
 
-const finite = (v, lo, hi, d = 0) => (typeof v === 'number' && Number.isFinite(v)) ? Math.min(hi, Math.max(lo, v)) : d;
+const finite = (v, lo, hi, d = 0) => {
+  if (typeof v === 'bigint') v = Number(v);   // large integers (e.g. timestamps) arrive as BigInt
+  return (typeof v === 'number' && Number.isFinite(v)) ? Math.min(hi, Math.max(lo, v)) : d;
+};
 const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16) || 'Гонщик';
 
 async function freeCode() {
@@ -80,6 +86,7 @@ class RaceRoom extends Room {
     this.maxClients = MAX_PLAYERS;
     this.roomId = await freeCode();
     this.setState(new RaceState());
+    this.setPatchRate(33);       // send updates ~30 times a second
     this.lapStamp = new Map();   // sessionId -> server ms when the current lap started
     this.lastState = new Map();  // sessionId -> { t, x, z } for sanity checks
     this.timers = [];
@@ -112,6 +119,9 @@ class RaceRoom extends Room {
       p.vf = finite(m.vf, -20, 60);
       p.steer = finite(m.steer, -1, 1);
       p.slide = finite(m.slide, 0, 1);
+      p.vx = finite(m.vx, -70, 70); p.vz = finite(m.vz, -70, 70);
+      // Trust the sender's timestamp only within a sane window around the server clock.
+      p.t = finite(m.t, now - 1500, now, now);
       p.prog = Math.round(finite(m.prog, -50, 900));
       if (!p.finished) p.score = Math.round(finite(m.score, 0, 1e7, p.score));
     });

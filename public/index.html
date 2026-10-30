@@ -38,6 +38,8 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #lapbox .lapn{font-family:var(--f-display);font-weight:800;font-size:18px}
 #lapbox .lapt{font-size:22px;font-weight:700}
 #lapbox .best{font-size:12px;color:var(--amber)}
+#lapbox .ping{font-size:11px;color:var(--dim)}
+#lapbox .ping.bad{color:var(--rose)}
 .btns{position:absolute;top:calc(var(--top) + 118px);left:var(--lft);display:flex;gap:8px;pointer-events:auto}
 .btns button{font:600 12px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:7px 10px;cursor:pointer}
 .btns button:focus-visible,.cta:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
@@ -155,6 +157,7 @@ body{margin:0}
     <div class="lapn num" id="lapn">1</div>
     <div class="lapt num" id="lapt">0:00.00</div>
     <div class="best num" id="best">Лучший —</div>
+    <div class="ping num" id="ping" hidden></div>
   </div>
   <div class="btns">
     <button id="bPause" type="button">Пауза</button>
@@ -727,13 +730,13 @@ placeAt(START);
 
 /* ---------- online ---------- */
 // Each player's car is simulated on their own computer and streamed to the server
-// 20 times a second. The server owns the race itself: the room, the start moment,
-// lap times, finishing order. Other players' cars are drawn ~120 ms in the past
-// and interpolated between updates, so they move smoothly even with jittery Wi-Fi.
+// ~30 times a second, stamped with a clock synced to the server. The server owns the
+// race itself: the room, the start moment, lap times, finishing order. Other players'
+// cars are predicted forward to the present moment (position + velocity × age of the
+// update) and eased toward each new prediction, so what you see matches what they see.
 const NET={client:null,room:null,online:false,me:null,offset:0,bestRtt:1e9,ghosts:new Map(),
-  sendT:0,standT:0,finished:false,leaving:false,token:null,laps:3,pingTimer:0};
+  sendT:0,standT:0,rtt:0,finished:false,leaving:false,token:null,laps:3,pingTimer:0};
 const NOINPUT={up:0,down:0,left:0,right:0,hb:0};
-const RENDER_DELAY=120;
 const serverNow=()=>Date.now()+NET.offset;
 const hex=c=>'#'+(c>>>0).toString(16).padStart(6,'0');
 const angDiff=(a,b)=>{ const t=Math.PI*2; return (((b-a+Math.PI)%t)+t)%t-Math.PI; };
@@ -784,9 +787,11 @@ function bindRoom(room){
   Object.assign(NET,{room,online:true,leaving:false,token:room.reconnectionToken,bestRtt:1e9});
   // Clock sync: keep the reply with the shortest round trip; it is the most accurate.
   const ping=()=>{ if(NET.room===room) room.send('ping',{t:Date.now()}); };
-  room.onMessage('pong',m=>{ const rtt=Date.now()-m.t; if(rtt<=NET.bestRtt){ NET.bestRtt=rtt; NET.offset=m.server+rtt/2-Date.now(); } });
+  room.onMessage('pong',m=>{ const rtt=Date.now()-m.t;
+    NET.rtt=NET.rtt?NET.rtt*.7+rtt*.3:rtt;
+    if(rtt<=NET.bestRtt){ NET.bestRtt=rtt; NET.offset=m.server+rtt/2-Date.now(); } });
   for(let i=0;i<6;i++) setTimeout(ping,i*180);
-  NET.pingTimer=setInterval(()=>{ NET.bestRtt+=20; ping(); },4000);
+  NET.pingTimer=setInterval(()=>{ NET.bestRtt+=10; ping(); },2000);
   room.onMessage('event',m=>info(m.text));
   room.onMessage('lapTime',m=>{
     const last=m.lap>=room.state.laps;
@@ -863,31 +868,44 @@ function addGhost(id,p){
 function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
 function pushSnap(g,p){
-  if(NET.room && NET.room.state.phase==='lobby'){ g.buf.length=0; return; }
-  const now=performance.now(), b=g.buf, l=b[b.length-1];
-  if(l && l.x===p.x && l.z===p.z && l.h===p.h && now-l.t<200) return;
-  b.push({t:now,x:p.x,z:p.z,h:p.h,vf:p.vf,steer:p.steer,slide:p.slide});
-  if(b.length>60) b.shift();
+  if(NET.room && NET.room.state.phase==='lobby'){ g.buf.length=0; g.last=g.lastPrev=null; g.off=null; return; }
+  const b=g.buf, l=b[b.length-1];
+  if(!p.t || (l && p.t<=l.t)) return;      // nothing new, or an out-of-date update
+  // t is the sender's clock (synced to the server) at the moment this position was true.
+  b.push({t:p.t,x:p.x,z:p.z,h:p.h,vx:p.vx,vz:p.vz,vf:p.vf,steer:p.steer,slide:p.slide});
+  if(b.length>2) b.shift();
+}
+// Where a car is at server time nowS: its last reported position moved forward by its
+// velocity for as long as the update was travelling, turning at its last turn rate.
+function predict(s0,s1,nowS){
+  const age=Math.min(.5,Math.max(0,(nowS-s1.t)/1000));
+  let w=0; if(s0){ const span=(s1.t-s0.t)/1000; if(span>.005) w=Math.max(-3,Math.min(3,angDiff(s0.h,s1.h)/span)); }
+  const turn=w*age, c=Math.cos(-turn/2), sn=Math.sin(-turn/2);
+  return {x:s1.x+(s1.vx*c-s1.vz*sn)*age, z:s1.z+(s1.vx*sn+s1.vz*c)*age, h:s1.h+turn};
 }
 function updateGhosts(dt){
   const show=NET.online && (state==='count'||state==='race'||state==='results');
-  const rt=performance.now()-RENDER_DELAY;
+  const nowS=serverNow();
   for(const g of NET.ghosts.values()){
     const b=g.buf, m=g.m;
     m.root.visible=show && b.length>0 && g.p.connected;
     if(!m.root.visible) continue;
-    while(b.length>2 && b[1].t<rt) b.shift();
-    let s;
-    if(b.length===1 || rt<=b[0].t) s=b[0];
-    else if(rt>=b[b.length-1].t){
-      // No fresh update yet: keep the car moving for up to 250 ms instead of freezing it.
-      const s1=b[b.length-1], s0=b[b.length-2], e=Math.min(250,rt-s1.t)/Math.max(1,s1.t-s0.t);
-      s={x:s1.x+(s1.x-s0.x)*e, z:s1.z+(s1.z-s0.z)*e, h:s1.h+angDiff(s0.h,s1.h)*e, vf:s1.vf, steer:s1.steer, slide:s1.slide};
-    } else {
-      const s0=b[0], s1=b[1], a=(rt-s0.t)/Math.max(1,s1.t-s0.t);
-      s={x:s0.x+(s1.x-s0.x)*a, z:s0.z+(s1.z-s0.z)*a, h:s0.h+angDiff(s0.h,s1.h)*a,
-         vf:s0.vf+(s1.vf-s0.vf)*a, steer:s0.steer+(s1.steer-s0.steer)*a, slide:s0.slide+(s1.slide-s0.slide)*a};
+    // Predict where the car is right now: last known position moved forward by its
+    // velocity for as long as the update was travelling, turning at its last turn rate.
+    const s1=b[b.length-1], s0=b.length>1?b[0]:null;
+    const T=predict(s0,s1,nowS);
+    // When a fresh update moves the prediction, keep the drawn car where it was and fade
+    // that small correction out over ~0.1 s, so corrections never look like jumps and the
+    // car itself never trails behind the prediction.
+    if(!g.off) g.off={x:0,z:0,h:0};
+    if(g.last && g.last!==s1){
+      const O=predict(g.lastPrev,g.last,nowS);
+      g.off.x+=O.x-T.x; g.off.z+=O.z-T.z; g.off.h+=angDiff(T.h,O.h);
     }
+    g.last=s1; g.lastPrev=s0;
+    if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
+    const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
+    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
     g.x=s.x; g.z=s.z;
     m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
@@ -981,7 +999,9 @@ let last=performance.now(), menuA=0, prevCount=3;
 const camPos=new THREE.Vector3(), camLook=new THREE.Vector3(); let camInit=false;
 function frame(now){
   requestAnimationFrame(frame);
-  const dt=Math.min(.05,(now-last)/1000); last=now;
+  const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
+  // Below 20 fps the game runs in slow motion; others must predict this car at its real pace.
+  NET.pace=(NET.pace||1)*.9+(dt/realDt)*.1;
   let info={drifting:false,ang:0,speed:Math.hypot(car.vF,car.vR)};
 
   if(state==='count'){
@@ -1020,8 +1040,8 @@ function frame(now){
   }
   if(NET.online && NET.room && (state==='race'||state==='count')){
     NET.sendT+=dt;
-    if(NET.sendT>=.05){ NET.sendT=0;
-      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vf:car.vF,steer:car.steer,slide,prog:car.prog,score}); }
+    if(NET.sendT>=.033){ NET.sendT=0;
+      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score,t:serverNow()}); }
   }
   updateGhosts(dt);
   updateSmoke(dt);
@@ -1064,7 +1084,8 @@ function frame(now){
     setT('lapn',NET.finished?'Финиш':lap+' / '+NET.laps);
     setT('lapt',fmtT(NET.finished&&NET.me?NET.me.finishTime/1000:lapT));
     setT('best',myBest?'Лучший '+fmtT(myBest):'Лучший —');
-    NET.standT-=dt; if(NET.standT<=0){ NET.standT=.25; renderStandings(); }
+    NET.standT-=dt; if(NET.standT<=0){ NET.standT=.25; renderStandings();
+      const pe=$('ping'); pe.hidden=!NET.rtt; if(NET.rtt){ pe.textContent='Пинг '+Math.round(NET.rtt)+' мс'; pe.classList.toggle('bad',NET.rtt>180); } }
   } else {
     setT('lapn',String(lap)); setT('lapt',fmtT(lapT)); setT('best',best?'Лучший '+fmtT(best):'Лучший —');
   }
@@ -1084,6 +1105,7 @@ function frame(now){
   drawMap();
   renderer.render(scene,camera);
 }
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (state==='race'||state==='count')) pause(); });
 })();
