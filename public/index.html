@@ -741,6 +741,8 @@ const el=(tag,cls,text)=>{ const e=document.createElement(tag); if(cls) e.classN
 
 function endpoint(){
   try{ const q=new URLSearchParams(location.search).get('server'); if(q) return q; }catch(e){}
+  // Served by the game server itself (Render, or localhost:2567): talk to the same address.
+  if(location.port==='2567' || /\.onrender\.com$/.test(location.hostname)) return (location.protocol==='https:'?'wss://':'ws://')+location.host;
   if(window.NIGHT_DRIFT_SERVER) return window.NIGHT_DRIFT_SERVER;
   if(/^(localhost|127\.0\.0\.1|\[::1\]|)$/.test(location.hostname)) return 'ws://localhost:2567';
   return '';

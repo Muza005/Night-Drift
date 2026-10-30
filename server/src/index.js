@@ -6,6 +6,7 @@
 // and streamed here 20 times a second; cars are "ghosts" and don't collide.
 
 const http = require('http');
+const path = require('path');
 const express = require('express');
 const { Server, Room, matchMaker } = require('colyseus');
 const { WebSocketTransport } = require('@colyseus/ws-transport');
@@ -213,7 +214,8 @@ class RaceRoom extends Room {
 }
 
 const app = express();
-app.get('/', (_req, res) => res.type('text/plain').send('Night Drift server is running'));
+// The same server also hands out the game itself, so one link is enough to play.
+app.use(express.static(path.join(__dirname, '..', '..', 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const server = http.createServer(app);
