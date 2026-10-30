@@ -5,4 +5,4 @@
 //
 // Leave it empty while developing: on localhost the game connects to ws://localhost:2567.
 // You can also override it for a single visit with ?server=wss://... in the page address.
-window.NIGHT_DRIFT_SERVER = 'wss://night-drift.onrender.com';
+window.NIGHT_DRIFT_SERVER = 'wss://night-drift-eu.onrender.com';
