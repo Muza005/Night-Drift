@@ -19,7 +19,17 @@ import { setT, fmtN, fmtT, showPanel } from './ui/hud.js';
 
 if (isTouch) document.body.classList.add('touch');
 try{ const b=parseFloat(localStorage.getItem('nightdrift.best')); if(b>0) G.best=b; }catch(e){}
-G.mode = trackMode;
+// Mode. Until the menu gets its mode picker (stage 5), the highway opens with ?mode=traffic.
+const MODE = new URLSearchParams(location.search).get('mode');
+if (MODE === 'traffic') {
+  const { trafficMode } = await import('./modes/traffic/index.js');
+  trackMode.hide(); G.mode = trafficMode;
+  // Not online yet (stage 6), and the menu text is still about the track.
+  $('toOnline').hidden = true;
+  document.querySelector('#pMain h1').innerHTML = 'Night <span>Traffic</span>';
+  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: пока без машин. Проверяем дорогу, камеру сверху и управление.';
+} else G.mode = trackMode;
+G.mode.show();
 
 /* ---------- physics step ---------- */
 function physics(dt){
@@ -56,7 +66,7 @@ function showCount(t){ const c=$('count'); c.textContent=t; c.classList.remove('
 function pause(){ G.state='pause'; clearInput(); audioSuspend();
   showPanel('pMain'); $('go').textContent='Продолжить'; renderBest(); }
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
-function renderBest(){ $('menuBest').textContent=G.best?'Лучший круг: '+fmtT(G.best):''; }
+function renderBest(){ $('menuBest').textContent=G.best&&G.mode.id==='track'?'Лучший круг: '+fmtT(G.best):''; }
 $('go').addEventListener('click',()=>{ if(G.state==='pause') resume(); else startRace(); });
 renderBest();
 G.mode.idle(car);
@@ -109,6 +119,8 @@ function frame(now){
   updateSmoke(dt);
   car.under.material.opacity=.45+slide*.35;
 
+  G.mode.world(car,dt);
+
   // camera
   if(G.state==='menu'||G.state==='lobby'||G.state==='results'){
     menuA+=dt*.22; rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
@@ -141,6 +153,6 @@ function frame(now){
   G.mode.drawMap(car);
   renderer.render(scene,camera);
 }
-if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G};
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

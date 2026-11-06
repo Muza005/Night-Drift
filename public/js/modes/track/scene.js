@@ -42,24 +42,29 @@ function vribbon(off,y0,y1){
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.computeVertexNormals(); return g;
 }
 
+// Everything the track adds to the scene lives in this group, so the track mode can
+// hide it while another mode is active.
+export const group = new THREE.Group();
+scene.add(group);
+
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400,2400).rotateX(-Math.PI/2), new THREE.MeshStandardMaterial({map:groundTex, roughness:.95}));
-ground.receiveShadow = true; scene.add(ground);
+ground.receiveShadow = true; group.add(ground);
 
 const runoffMat = new THREE.MeshStandardMaterial({color:0x17142a, roughness:1});
-for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10), runoffMat); m.receiveShadow=true; m.material.side=THREE.DoubleSide; scene.add(m); }
+for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10), runoffMat); m.receiveShadow=true; m.material.side=THREE.DoubleSide; group.add(m); }
 
 const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, 32), new THREE.MeshStandardMaterial({map:roadTex, roughness:.82, metalness:.05, side:THREE.DoubleSide}));
-road.receiveShadow = true; scene.add(road);
+road.receiveShadow = true; group.add(road);
 
 const cRed=new THREE.Color(0xff2e5a), cWhite=new THREE.Color(0xf0f0f6);
 const curbMat = new THREE.MeshStandardMaterial({vertexColors:true, roughness:.6, side:THREE.DoubleSide});
-for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; scene.add(m); }
+for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; group.add(m); }
 
 const wallMat = new THREE.MeshStandardMaterial({color:0x161929, roughness:.7, side:THREE.DoubleSide});
 for(const [s,col] of [[1,0x3ef0ff],[-1,0xff3b6b]]){
-  scene.add(new THREE.Mesh(vribbon(s*WALL,0,.95), wallMat));
+  group.add(new THREE.Mesh(vribbon(s*WALL,0,.95), wallMat));
   const neon = new THREE.Mesh(vribbon(s*(WALL-.02),.78,.95), new THREE.MeshBasicMaterial({color:col, side:THREE.DoubleSide, toneMapped:false}));
-  scene.add(neon);
+  group.add(neon);
 }
 
 /* start gantry */
@@ -71,7 +76,7 @@ for(const [s,col] of [[1,0x3ef0ff],[-1,0xff3b6b]]){
   for(const s of [1,-1]){ const p=new THREE.Mesh(new THREE.BoxGeometry(.6,7,.6),dark); p.position.set(s*(HALF+2.2),3.5,0); p.castShadow=true; g.add(p); }
   const beam=new THREE.Mesh(new THREE.BoxGeometry(ROAD+5,.9,.7),dark); beam.position.y=7; g.add(beam);
   const strip=new THREE.Mesh(new THREE.BoxGeometry(ROAD+4.6,.22,.74),new THREE.MeshBasicMaterial({color:0xffc23d,toneMapped:false})); strip.position.y=6.75; g.add(strip);
-  scene.add(g); }
+  group.add(g); }
 
 /* lamps */
 { const idx=[]; for(let i=0;i<N;i+=16) idx.push(i);
@@ -87,10 +92,10 @@ for(const [s,col] of [[1,0x3ef0ff],[-1,0xff3b6b]]){
     e.set(0,ang,0); q.setFromEuler(e); m.compose(v,q,one); posts.setMatrixAt(k,m);
     const hp=v.clone().addScaledVector(n,-s*1.1); hp.y=7.4; m.compose(hp,q,one); heads.setMatrixAt(k,m);
     const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:0xffb15a,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:.8}));
-    sp.position.copy(hp); sp.scale.set(6,6,1); scene.add(sp);
-    const pool=new THREE.Mesh(poolG,poolMat); pool.position.copy(P[i]).addScaledVector(n,s*(WALL-3.5)); pool.position.y=.05; scene.add(pool);
+    sp.position.copy(hp); sp.scale.set(6,6,1); group.add(sp);
+    const pool=new THREE.Mesh(poolG,poolMat); pool.position.copy(P[i]).addScaledVector(n,s*(WALL-3.5)); pool.position.y=.05; group.add(pool);
   });
-  posts.castShadow=true; scene.add(posts, heads); }
+  posts.castShadow=true; group.add(posts, heads); }
 
 /* city */
 { const cnt=150, g=new THREE.BoxGeometry(1,1,1).translate(0,.5,0);
@@ -105,5 +110,5 @@ for(const [s,col] of [[1,0x3ef0ff],[-1,0xff3b6b]]){
     if(!ok) continue;
     e.set(0,Math.random()*Math.PI,0); q.setFromEuler(e); m.compose(new THREE.Vector3(x,0,z),q,new THREE.Vector3(w,h,d)); city.setMatrixAt(placed++,m);
   }
-  city.count=placed; city.castShadow=true; city.receiveShadow=true; scene.add(city); }
+  city.count=placed; city.castShadow=true; city.receiveShadow=true; group.add(city); }
 
