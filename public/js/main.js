@@ -21,13 +21,15 @@ if (isTouch) document.body.classList.add('touch');
 try{ const b=parseFloat(localStorage.getItem('nightdrift.best')); if(b>0) G.best=b; }catch(e){}
 // Mode. Until the menu gets its mode picker (stage 5), the highway opens with ?mode=traffic.
 const MODE = new URLSearchParams(location.search).get('mode');
+let trafficMod = null;
 if (MODE === 'traffic') {
-  const { trafficMode } = await import('./modes/traffic/index.js');
+  trafficMod = await import('./modes/traffic/index.js');
+  const { trafficMode } = trafficMod;
   trackMode.hide(); G.mode = trafficMode;
   // Not online yet (stage 6), and the menu text is still about the track.
   $('toOnline').hidden = true;
   document.querySelector('#pMain h1').innerHTML = 'Night <span>Traffic</span>';
-  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: пока без машин. Проверяем дорогу, камеру сверху и управление.';
+  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: трафик уже едет, но столкновений и очков пока нет — машина проезжает сквозь ботов.';
 } else G.mode = trackMode;
 G.mode.show();
 
@@ -153,6 +155,6 @@ function frame(now){
   G.mode.drawMap(car);
   renderer.render(scene,camera);
 }
-if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer};
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,traffic:trafficMod&&trafficMod.traffic};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

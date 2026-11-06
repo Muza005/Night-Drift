@@ -51,11 +51,11 @@ test('start grid: six cars, in lanes, never overlapping', () => {
     assert.ok(Math.abs(P[i].x - P[j].x) >= 4 || Math.abs(P[i].z - P[j].z) >= 6, `slots ${i} and ${j} overlap`);
 });
 
-test('top-down camera shows at least 2.5 s of closing in on traffic, on every screen shape', () => {
+test('top-down camera shows at least 3 s of closing in on traffic (55 m minimum), on every screen shape', () => {
   for (const aspect of [21 / 9, 16 / 9, 4 / 3, 1, 3 / 4, 9 / 16, 9 / 20]) {
     for (let v = 0; v <= 50; v += 2.5) {
       const V = H.topDownView(v, aspect);
-      const need = Math.max(H.CAM.minAhead, 2.5 * (v - H.TRAFFIC_MIN_SPEED));
+      const need = Math.max(H.CAM.minAhead, H.CAM.aheadSeconds * (v - H.TRAFFIC_MIN_SPEED));
       assert.ok(V.visibleAhead >= need - 1e-6, `aspect ${aspect.toFixed(2)}, ${v} m/s: sees ${V.visibleAhead.toFixed(1)} m, needs ${need.toFixed(1)} m`);
       assert.ok(V.pitch - V.fovV / 2 > 5, 'the top of the screen must stay below the horizon');
       // the whole highway fits across the screen at the car's distance
