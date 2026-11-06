@@ -29,7 +29,7 @@ if (MODE === 'traffic') {
   // Not online yet (stage 6), and the menu text is still about the track.
   $('toOnline').hidden = true;
   document.querySelector('#pMain h1').innerHTML = 'Night <span>Traffic</span>';
-  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: обгоняй поток. Задел бота — он притормозит, влетел в него на скорости — авария. Очки появятся на следующем этапе.';
+  document.querySelector('#pMain p').textContent = 'Шоссе в разработке. Обгоняй поток впритык выше 80 км/ч: чем ближе и быстрее, тем больше очков, а обгоны подряд копят комбо до ×5. Задел бота — комбо сгорает, влетел в него на скорости — авария.';
 } else G.mode = trackMode;
 G.mode.show();
 
@@ -73,7 +73,10 @@ function showCount(t){ const c=$('count'); c.textContent=t; c.classList.remove('
 function pause(){ G.state='pause'; clearInput(); audioSuspend();
   showPanel('pMain'); $('go').textContent='Продолжить'; renderBest(); }
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
-function renderBest(){ $('menuBest').textContent=G.best&&G.mode.id==='track'?'Лучший круг: '+fmtT(G.best):''; }
+function renderBest(){
+  if(G.mode.id==='traffic'){ const b=G.mode.best(); $('menuBest').textContent=b?'Рекорд: '+fmtN(b)+' очков':''; return; }
+  $('menuBest').textContent=G.best?'Лучший круг: '+fmtT(G.best):'';
+}
 $('go').addEventListener('click',()=>{ if(G.state==='pause') resume(); else startRace(); });
 
 // Crash screen (traffic mode, solo). The full results screen arrives with the menu (stage 5).
@@ -123,6 +126,7 @@ function frame(now){
     G.raceT+=dt; G.lapT+=dt;
     const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
     info=scoring(dt);
+    if(G.mode.score) G.mode.score(car,dt,info);              // traffic mode: near misses, combo, distance
   } else if(G.state==='crash'){
     const h=gdt/2; physics(h); physics(h);
     if(G.crashT>=1.2) showOver();

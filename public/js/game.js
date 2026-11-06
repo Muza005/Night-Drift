@@ -8,6 +8,7 @@ export function resetToTrack(){ G.mode.respawn(car); dropDrift(); flash('На т
 
 export function crash(power){
   G.shake=Math.min(1,power/14); thud(power);
+  if(G.mode && G.mode.breakCombo) G.mode.breakCombo();     // traffic mode: any touch ends the combo
   if(drift.pts>30){ popup('Удар — занос сгорел', true); }
   dropDrift();
 }
@@ -50,6 +51,7 @@ function onTrafficHit(hit){
   if(G.state!=='race') return;
   if(!hit.hard){ crash(Math.max(4, hit.impact)); return; }
   G.state='crash'; G.crashT=0; G.shake=1; thud(30); dropDrift();
+  if(G.mode.breakCombo) G.mode.breakCombo();
 }
 
 // What the physics step reports back to the game: wall hits, completed laps, traffic hits.
