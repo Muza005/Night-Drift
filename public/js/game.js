@@ -44,5 +44,13 @@ export function finishLap(){
   flash((rec?'Новый рекорд круга':'Круг '+(G.lap-1)+' пройден'), fmtT(t), 2.6);
 }
 
-// What the physics step reports back to the game: wall hits and completed laps.
-export const physicsHooks = { onWall: crash, onLap: finishLap };
+// Traffic mode: a hit with a bot. Soft: like a wall hit (shake, sound, the drift
+// burns). Hard: the run ends — the main loop plays the crash and shows the result.
+function onTrafficHit(hit){
+  if(G.state!=='race') return;
+  if(!hit.hard){ crash(Math.max(4, hit.impact)); return; }
+  G.state='crash'; G.crashT=0; G.shake=1; thud(30); dropDrift();
+}
+
+// What the physics step reports back to the game: wall hits, completed laps, traffic hits.
+export const physicsHooks = { onWall: crash, onLap: finishLap, onTrafficHit };

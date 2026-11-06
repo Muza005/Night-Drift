@@ -6,12 +6,13 @@ export const $ = id => document.getElementById(id);
 export const isTouch = matchMedia('(pointer:coarse)').matches;
 
 export const G = {
-  state: 'menu',      // menu | count | race | pause | lobby | results
+  state: 'menu',      // menu | count | race | crash | over | pause | lobby | results
   mode: null,         // the active game mode (see modes/track/index.js for the interface)
   cd: 0, prevCount: 3,
   raceT: 0, lapT: 0, lap: 1,
   score: 0, best: null,
   shake: 0, wrongT: 0, toastT: 0,
+  crashT: 0,          // seconds since a crash (traffic mode)
 };
 
 export const drift = { pts: 0, time: 0, grace: 0, mult: 1, active: false };

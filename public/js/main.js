@@ -29,15 +29,16 @@ if (MODE === 'traffic') {
   // Not online yet (stage 6), and the menu text is still about the track.
   $('toOnline').hidden = true;
   document.querySelector('#pMain h1').innerHTML = 'Night <span>Traffic</span>';
-  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: трафик уже едет, но столкновений и очков пока нет — машина проезжает сквозь ботов.';
+  document.querySelector('#pMain p').textContent = 'Шоссе в разработке: обгоняй поток. Задел бота — он притормозит, влетел в него на скорости — авария. Очки появятся на следующем этапе.';
 } else G.mode = trackMode;
 G.mode.show();
 
 /* ---------- physics step ---------- */
 function physics(dt){
-  const I=(NET.online&&NET.finished)?NOINPUT:input;
+  const I=((NET.online&&NET.finished)||G.state==='crash')?NOINPUT:input;
   stepCar(car,I,dt);
   G.mode.constrain(car,dt,physicsHooks);
+  if(G.mode.collide) G.mode.collide(car,physicsHooks);   // traffic mode: hits with bots
 }
 
 /* ---------- keys ---------- */
@@ -50,6 +51,10 @@ addEventListener('keydown',e=>{
     else if((e.code==='KeyP') && G.state==='pause') resume();
   }
   if(e.code==='KeyM') toggleSound();
+  if(G.state==='over'){
+    if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); startRace(); }
+    else if(e.code==='Escape') toMenu();
+  }
 });
 addEventListener('keyup',e=>{ const k=KEYMAP[e.code]; if(k) input[k]=0; });
 addEventListener('blur',()=>{ clearInput(); });
@@ -70,6 +75,21 @@ function pause(){ G.state='pause'; clearInput(); audioSuspend();
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
 function renderBest(){ $('menuBest').textContent=G.best&&G.mode.id==='track'?'Лучший круг: '+fmtT(G.best):''; }
 $('go').addEventListener('click',()=>{ if(G.state==='pause') resume(); else startRace(); });
+
+// Crash screen (traffic mode, solo). The full results screen arrives with the menu (stage 5).
+function showOver(){
+  G.state='over'; clearInput();
+  const box=$('overStats'); box.replaceChildren();
+  for(const [k,v] of (G.mode.summary ? G.mode.summary() : [])){
+    const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;
+    const b=document.createElement('b'); b.className='num'; b.textContent=v; d.append(a,b); box.append(d);
+  }
+  showPanel('pOver'); $('retry').focus();
+}
+function toMenu(){ G.state='menu'; G.mode.idle(car); clearMarks(); showPanel('pMain'); $('go').textContent='Поехали'; renderBest(); }
+// a key press on a focused button also fires its click: act only once
+$('retry').addEventListener('click',()=>{ if(G.state==='over') startRace(); });
+$('overMenu').addEventListener('click',()=>{ if(G.state==='over') toMenu(); });
 renderBest();
 G.mode.idle(car);
 
@@ -91,10 +111,21 @@ function frame(now){
       else if(n>0) showCount(String(n));
       else { showCount('Старт!'); G.state='race'; G.lapT=Math.max(0,-G.cd); setTimeout(()=>{ if($('count').textContent==='Старт!') $('count').textContent=''; },900); } }
   }
+  // A crash plays in slow motion for 0.6 s, the car sliding on without input; the
+  // crash screen follows at 1.2 s.
+  let gdt=dt;
+  if(G.state==='crash'){ G.crashT+=dt; if(G.crashT<0.6) gdt=dt*0.25; }
+  // The mode's world goes first (the traffic moves), so the physics below collides with
+  // bots exactly where they are drawn this frame.
+  G.mode.world(car,gdt);
+
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
     const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
     info=scoring(dt);
+  } else if(G.state==='crash'){
+    const h=gdt/2; physics(h); physics(h);
+    if(G.crashT>=1.2) showOver();
   }
 
   /* visuals */
@@ -120,8 +151,6 @@ function frame(now){
   updateGhosts(dt);
   updateSmoke(dt);
   car.under.material.opacity=.45+slide*.35;
-
-  G.mode.world(car,dt);
 
   // camera
   if(G.state==='menu'||G.state==='lobby'||G.state==='results'){

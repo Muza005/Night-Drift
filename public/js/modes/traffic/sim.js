@@ -150,7 +150,7 @@ export function createTraffic(seed = 1) {
     const t = pickType(lane), T = TYPES[t];
     const v0 = T.vMin + (T.vMax - T.vMin) * rnd() + LANE_BIAS[lane];
     const bot = { id: sim.nextId++, t, lane, from: lane, to: lane, p: 0, x: laneCenter(lane), z, px: laneCenter(lane), pz: z,
-      v: v0 * (0.9 + 0.1 * rnd()), v0, a: 0, dir: 0, blink: 0, wait: 0, cool: 2 * rnd(), think: 0.5 + 1.5 * rnd(), color: (rnd() * 1e6) | 0 };
+      v: v0 * (0.9 + 0.1 * rnd()), v0, a: 0, dir: 0, blink: 0, wait: 0, hazard: 0, off: 0, cool: 2 * rnd(), think: 0.5 + 1.5 * rnd(), color: (rnd() * 1e6) | 0 };
     sim.bots.push(bot);
     return bot;
   }
@@ -218,6 +218,7 @@ export function createTraffic(seed = 1) {
       b.ease = Math.max(0, (b.ease || 0) - dt);
       const v0 = b.v0;
       if (b.ease > 0) b.v0 = v0 * 0.85;
+      if (b.hazard > 0) b.v0 = v0 * 0.6;               // just hit: hazard lights on, slows to 60 %
       b.a = idmAccel(b, lead); b.lead = lead;
       b.v0 = v0;
     }
@@ -235,6 +236,7 @@ export function createTraffic(seed = 1) {
     // 5. lane changes
     for (const b of sim.bots) {
       b.cool = Math.max(0, b.cool - dt);
+      b.hazard = Math.max(0, b.hazard - dt);
       if (b.p > 0) {                                     // moving over
         b.p += dt / CFG.change;
         if (b.p >= 1) { b.lane = b.to; b.from = b.to; b.p = 0; b.dir = 0; b.cool = CFG.cooldown; }
@@ -245,6 +247,7 @@ export function createTraffic(seed = 1) {
           if (safeToEnter(b, L, players, lanes)) { b.from = b.lane; b.to = L; b.p = dt / CFG.change; }
           else if ((b.wait += dt) > CFG.blinkWait) { b.dir = 0; b.wait = 0; b.cool = 2; }
         }
+      } else if (b.hazard > 0) {                         // just hit: no lane changes until it recovers
       } else if ((b.think -= dt) <= 0) {                 // deciding
         b.think = 0.8 + 1.6 * rnd();
         if (b.cool > 0) continue;
@@ -263,7 +266,9 @@ export function createTraffic(seed = 1) {
     }
     // 6. lateral position
     for (const b of sim.bots) {
-      b.x = b.p > 0 ? laneCenter(b.from) + (laneCenter(b.to) - laneCenter(b.from)) * smooth(Math.min(1, b.p)) : laneCenter(b.lane);
+      // a knock from a hit fades back toward the lane centre at 0.8 m/s
+      b.off = b.off > 0 ? Math.max(0, b.off - 0.8 * dt) : Math.min(0, b.off + 0.8 * dt);
+      b.x = (b.p > 0 ? laneCenter(b.from) + (laneCenter(b.to) - laneCenter(b.from)) * smooth(Math.min(1, b.p)) : laneCenter(b.lane)) + b.off;
     }
     // 7. remove bots far behind every player or far ahead of all of them, then refill
     if (players.length) {
@@ -286,7 +291,19 @@ export function createTraffic(seed = 1) {
     sim.alpha = acc / STEP;
   };
   sim.stepOnce = players => step(players);
+  // A player hit bot `id`. dv: change of its speed along the road (m/s), dx: sideways
+  // knock (m). The bot turns its hazard lights on for 3 s, slows to 60 % and drops any
+  // lane change it was signalling; the knock fades back into its lane. Deterministic,
+  // so online the server can apply the same event and every player sees the same bot.
+  sim.hit = (id, { dv = 0, dx = 0 } = {}) => {
+    const b = sim.bots.find(o => o.id === id); if (!b) return null;
+    b.v = Math.max(0, b.v + dv);
+    b.off = Math.max(-1.2, Math.min(1.2, b.off + dx));
+    b.hazard = 3;
+    if (b.p === 0) { b.dir = 0; b.blink = 0; b.wait = 0; }
+    return b;
+  };
   // Plain copy of everything that defines the traffic (for tests and, later, the network).
-  sim.snapshot = () => sim.bots.map(b => [b.id, b.t, b.lane, b.from, b.to, b.p, b.x, b.z, b.v, b.v0, b.dir, b.blink]);
+  sim.snapshot = () => sim.bots.map(b => [b.id, b.t, b.lane, b.from, b.to, b.p, b.x, b.z, b.v, b.v0, b.dir, b.blink, b.hazard, b.off]);
   return sim;
 }

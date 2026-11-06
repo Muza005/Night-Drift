@@ -53,12 +53,13 @@ function shapes(T) {
   }
 }
 
+// No reds or pinks: the player's car is the only rose-coloured car on the road.
 const PALETTE = {
-  sedan: [0xd23b3b, 0x2d6cdf, 0xe8e8ee, 0x22252f, 0x7a8494, 0xf0b429, 0x3aa776, 0x8e44ad],
-  hatch: [0xff7a45, 0x2d6cdf, 0xe8e8ee, 0x5cc8ff, 0xd23b3b, 0x3aa776],
+  sedan: [0x6d7f3a, 0x2d6cdf, 0xe8e8ee, 0x22252f, 0x7a8494, 0xf0b429, 0x3aa776, 0x8e44ad],
+  hatch: [0xff9a3c, 0x2d6cdf, 0xe8e8ee, 0x5cc8ff, 0x2f8f9d, 0x3aa776],
   van:   [0xe8e8ee, 0xc9ced8, 0x2d6cdf, 0x22252f],
-  truck: [0x2d6cdf, 0xd23b3b, 0x3aa776, 0xf0b429],
-  bus:   [0xf0b429, 0x2d6cdf, 0xd23b3b],
+  truck: [0x2d6cdf, 0x8a5a2b, 0x3aa776, 0xf0b429],
+  bus:   [0xf0b429, 0x2d6cdf, 0x3aa776],
 };
 
 const mats = {
@@ -85,8 +86,13 @@ const parts = TYPES.map(T => {
   return out;
 });
 // blinkers (all types share one mesh) and the pools of headlight on the road
-const blinkers = new THREE.InstancedMesh(new THREE.BoxGeometry(.26, .16, .14), new THREE.MeshBasicMaterial({ color: 0xffb020, toneMapped: false }), MAX * 2);
+// Blinkers: a lamp on each corner plus a soft amber glow around it, big enough to read
+// from the top-down camera.
+const blinkers = new THREE.InstancedMesh(new THREE.BoxGeometry(.5, .2, .4), new THREE.MeshBasicMaterial({ color: 0xffb020, toneMapped: false }), MAX * 4);
 blinkers.count = 0; blinkers.frustumCulled = false; group.add(blinkers);
+const blinkGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.6, 2.6).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ map: glowTex, color: 0xffa020, transparent: true, opacity: .75, blending: THREE.AdditiveBlending, depthWrite: false }), MAX * 4);
+blinkGlow.count = 0; blinkGlow.frustumCulled = false; group.add(blinkGlow);
 const pools = new THREE.InstancedMesh(new THREE.PlaneGeometry(3.6, 8).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ map: glowTex, color: 0xbfd4ff, transparent: true, opacity: .22, blending: THREE.AdditiveBlending, depthWrite: false }), MAX);
 pools.count = 0; pools.frustumCulled = false; group.add(pools);
@@ -111,12 +117,15 @@ export function drawTraffic(sim) {
     }
     // headlight pool ahead of the bot
     v.set(x + Math.sin(yaw) * (T.len / 2 + 4), .03, z + Math.cos(yaw) * (T.len / 2 + 4)); m4.compose(v, q, one); pools.setMatrixAt(np++, m4);
-    // blinkers on the side it is moving to (+1 = toward lane+1 = to the driver's right = -X)
-    if (b.dir !== 0 && blinkOn) {
-      const side = -b.dir * (T.wid / 2 + .02);
+    // blinkers on the side it is moving to (+1 = toward lane+1 = to the driver's right = -X);
+    // after a hit: hazard lights, both sides
+    const sides = b.hazard > 0 ? [-1, 1] : b.dir !== 0 ? [b.dir] : [];
+    if (blinkOn) for (const d of sides) {
+      const side = -d * (T.wid / 2 + .02);
       for (const f of [T.len / 2 - .15, -T.len / 2 + .15]) {
         v.set(x + Math.cos(yaw) * side + Math.sin(yaw) * f, .75, z - Math.sin(yaw) * side + Math.cos(yaw) * f);
-        m4.compose(v, q, one); blinkers.setMatrixAt(nb++, m4);
+        m4.compose(v, q, one); blinkers.setMatrixAt(nb, m4);
+        v.y = 1.6; m4.compose(v, q, one); blinkGlow.setMatrixAt(nb++, m4);
       }
     }
   }
@@ -124,5 +133,6 @@ export function drawTraffic(sim) {
     m.count = counts[t]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }));
   blinkers.count = nb; blinkers.instanceMatrix.needsUpdate = true;
+  blinkGlow.count = nb; blinkGlow.instanceMatrix.needsUpdate = true;
   pools.count = np; pools.instanceMatrix.needsUpdate = true;
 }
