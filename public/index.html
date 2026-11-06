@@ -49,6 +49,25 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #score{font-size:24px;font-weight:700;color:var(--cyan)}
 #map{width:150px;height:150px;display:block}
 
+#combo[hidden]{display:none}
+#combo{padding:10px 14px;display:grid;gap:4px;justify-items:end;min-width:120px}
+#cmult{font-family:var(--f-display);font-weight:800;font-size:30px;line-height:1;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.55)}
+#cmult.bump{animation:cbump .25s ease-out}
+#cmult.max{animation:cmax .5s ease-in-out infinite alternate}
+@keyframes cbump{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+@keyframes cmax{0%{color:var(--amber)}100%{color:var(--rose)}}
+.cbar{width:100%;height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
+.cbar i{display:block;height:100%;width:0;background:var(--amber)}
+#ctag{font-size:12px;font-weight:700;color:var(--cyan);visibility:hidden}
+#ctag.on{visibility:visible}
+#speedo.hot{box-shadow:0 0 0 1px rgba(62,240,255,.55),0 0 22px rgba(62,240,255,.35)}
+.nm{position:absolute;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;white-space:nowrap;pointer-events:none;animation:nmrise 1.1s ease-out forwards;text-align:center;line-height:1.05}
+.nm small{display:block;font-size:.62em;opacity:.9}
+.nm.t1{font-size:20px;color:var(--cyan);text-shadow:0 0 14px rgba(62,240,255,.7)}
+.nm.t2{font-size:24px;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.7)}
+.nm.t3{font-size:30px;color:var(--rose);text-shadow:0 0 18px rgba(255,59,107,.8)}
+@keyframes nmrise{0%{opacity:0;margin-top:8px}12%{opacity:1}70%{opacity:1}100%{opacity:0;margin-top:-46px}}
+@media (prefers-reduced-motion:reduce){.nm,#cmult.bump,#cmult.max{animation:none}}
 #drift{position:absolute;top:calc(var(--top) + 8px);left:50%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .2s}
 #drift.on{opacity:1}
 #dpts{font-family:var(--f-display);font-weight:800;font-size:44px;line-height:1;color:var(--ink);text-shadow:0 0 18px rgba(255,59,107,.7)}
@@ -171,6 +190,12 @@ body{margin:0}
   <div id="scorebox">
     <div class="sc panel"><div class="lbl">Очки дрифта</div><div id="score" class="num">0</div></div>
     <canvas id="map" class="panel" width="300" height="300" aria-label="Мини-карта"></canvas>
+    <div id="combo" class="panel" hidden>
+      <div class="lbl">Комбо</div>
+      <div id="cmult" class="num">×1</div>
+      <div class="cbar"><i></i></div>
+      <div id="ctag">×2 дрифт</div>
+    </div>
   </div>
 
   <div id="drift">
