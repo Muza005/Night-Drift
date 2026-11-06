@@ -3,10 +3,17 @@
 // The server is the single source of truth for everything that decides the race:
 // who is in the room, when the race starts, lap times, finishing order and results.
 // Car movement is calculated on each player's computer (no lag for your own car)
-// and streamed here 20 times a second; cars are "ghosts" and don't collide.
+// and streamed here ~30 times a second.
+//
+// Two modes. "track": the drift track, 3 laps (unchanged). "traffic": the highway, a
+// timed run ranked by score. In traffic mode this server also runs the traffic itself
+// (the same simulation file the game uses solo, public/js/modes/traffic/sim.js), so
+// every player sees the same bots: 20 steps a second, a snapshot to everyone 10 times
+// a second, players' hits on bots applied here and passed on in the next snapshot.
 
 const http = require('http');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const express = require('express');
 const { Server, Room, matchMaker } = require('colyseus');
 const { WebSocketTransport } = require('@colyseus/ws-transport');
@@ -19,6 +26,23 @@ const COUNTDOWN_MS = 4000;      // time from "start" to green light
 const MIN_LAP_MS = Number(process.env.MIN_LAP_MS) || 20000;       // no lap on this track can be faster than this
 const FINISH_GRACE_MS = Number(process.env.FINISH_GRACE_MS) || 45000;  // after the winner finishes, others get this long
 const COLORS = [0xff3b6b, 0x3ef0ff, 0xffc23d, 0x9b7bff, 0x4dff9a, 0xff8a3d];
+const MODES = ['track', 'traffic'];
+// Traffic run lengths (s) the host can pick. EXTRA_DURATION adds one (tests use a short run).
+const DURATIONS = [120, 180, 300].concat(Number(process.env.EXTRA_DURATION) > 0 ? [Number(process.env.EXTRA_DURATION)] : []);
+const WRECK_MS = 3000, GHOST_MS = 1500;     // online crash: stopped and blinking, then can't be hit
+const SNAPSHOT_EVERY = 2;                    // traffic steps (1/20 s) per snapshot: 10 a second
+
+// The traffic simulation is an ES module shared with the game; load it once.
+let T = null;
+async function trafficLib() {
+  if (!T) {
+    const dir = path.join(__dirname, '..', '..', 'public', 'js', 'modes', 'traffic');
+    const load = f => import(pathToFileURL(path.join(dir, f)).href);
+    const [sim, geo, codec] = await Promise.all([load('sim.js'), load('geometry.js'), load('netcodec.js')]);
+    T = { ...sim, ...geo, ...codec };
+  }
+  return T;
+}
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 class Player extends Schema {
@@ -39,6 +63,11 @@ class Player extends Schema {
     this.finished = false;
     this.finishTime = 0;     // ms since green light, measured by the server
     this.place = 0;
+    // traffic mode
+    this.wreckUntil = 0;     // server ms: crashed into a bot, stopped and blinking until then
+    this.ghostUntil = 0;     // server ms: until then bots and other cars pass through
+    this.misses = 0;         // near misses this run (reported by the player)
+    this.wrecks = 0;         // crashes this run (counted here)
   }
 }
 defineTypes(Player, {
@@ -48,6 +77,7 @@ defineTypes(Player, {
   vx: 'float32', vz: 'float32', t: 'float64',
   lap: 'uint8', prog: 'int16', score: 'uint32', bestLap: 'number',
   finished: 'boolean', finishTime: 'number', place: 'uint8',
+  wreckUntil: 'float64', ghostUntil: 'float64', misses: 'uint16', wrecks: 'uint8',
 });
 
 class RaceState extends Schema {
@@ -57,11 +87,16 @@ class RaceState extends Schema {
     this.hostId = '';
     this.laps = LAPS;
     this.startAt = 0;        // server clock (ms) of the green light
+    this.mode = 'track';     // track | traffic, picked by the host in the lobby
+    this.duration = 180;     // traffic: run length, s
+    this.endAt = 0;          // traffic: server clock (ms) when the run ends
+    this.seed = 0;           // traffic: seed of this run's traffic
     this.players = new MapSchema();
   }
 }
 defineTypes(RaceState, {
   phase: 'string', hostId: 'string', laps: 'uint8', startAt: 'number',
+  mode: 'string', duration: 'uint16', endAt: 'float64', seed: 'uint32',
   players: { map: Player },
 });
 
@@ -82,10 +117,14 @@ async function freeCode() {
 }
 
 class RaceRoom extends Room {
-  async onCreate() {
+  async onCreate(options) {
     this.maxClients = MAX_PLAYERS;
     this.roomId = await freeCode();
     this.setState(new RaceState());
+    if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
+    this.traffic = null;         // traffic mode: the simulation of the current run
+    this.trafficTimer = null;
+    this.botHitAt = new Map();   // bot id -> server ms of the last accepted hit
     this.setPatchRate(33);       // send updates ~30 times a second
     this.lapStamp = new Map();   // sessionId -> server ms when the current lap started
     this.lastState = new Map();  // sessionId -> { t, x, z } for sanity checks
@@ -101,11 +140,21 @@ class RaceRoom extends Room {
       this.beginCountdown();
     });
 
+    // Host only, between runs: pick the mode and (traffic) the run length.
+    this.onMessage('config', (client, m) => {
+      if (client.sessionId !== this.state.hostId || !m) return;
+      if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
+      if (MODES.includes(m.mode)) this.state.mode = m.mode;
+      if (DURATIONS.includes(m.duration)) this.state.duration = m.duration;
+    });
+
     this.onMessage('state', (client, m) => {
       const p = this.state.players.get(client.sessionId);
       if (!p || !m || this.state.phase === 'lobby') return;
       const now = Date.now();
-      const x = finite(m.x, -2000, 2000, p.x), z = finite(m.z, -2000, 2000, p.z);
+      // the track fits in ±2000 m; the highway runs on for as long as anyone can drive
+      const hw = this.state.mode === 'traffic';
+      const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, p.x), z = finite(m.z, hw ? -200 : -2000, hw ? 1e7 : 2000, p.z);
       const last = this.lastState.get(client.sessionId);
       if (last) {
         // A car tops out around 50 m/s. Allow generous slack for lag spikes and the
@@ -123,12 +172,41 @@ class RaceRoom extends Room {
       // Trust the sender's timestamp only within a sane window around the server clock.
       p.t = finite(m.t, now - 1500, now, now);
       p.prog = Math.round(finite(m.prog, -50, 900));
-      if (!p.finished) p.score = Math.round(finite(m.score, 0, 1e7, p.score));
+      if (!p.finished) p.score = this.acceptScore(p, finite(m.score, 0, 1e8, p.score), now);
+      if (hw) p.misses = Math.round(finite(m.misses, p.misses, 65535, p.misses));
+    });
+
+    // Traffic: a player hit a bot. The player's game resolved the hit for its own car at
+    // once; here the bot gets its share, so every player sees it slow down. The hit must
+    // be plausible: the bot exists and was near that player (positions here are up to a
+    // ping old, so allow 9 m), and one bot can't be hit by the same player twice in 0.3 s.
+    this.onMessage('hitBot', (client, m) => {
+      if (this.state.mode !== 'traffic' || this.state.phase !== 'race' || !this.traffic || !m) return;
+      const p = this.state.players.get(client.sessionId);
+      if (!p || Date.now() < p.ghostUntil) return;
+      const id = Math.round(finite(m.id, 0, 1e9, -1));
+      const b = this.traffic.bots.find(o => o.id === id);
+      if (!b) return;
+      const P = this.playerNow(p, Date.now());
+      if (Math.abs(P.z - b.z) > 9 + T.TYPES[b.t].len / 2 || Math.abs(P.x - b.x) > 6) return;
+      const key = client.sessionId + ':' + id, now = Date.now();
+      if (now - (this.botHitAt.get(key) || 0) < 300) return;
+      this.botHitAt.set(key, now);
+      this.traffic.hit(id, { dv: finite(m.dv, -12, 6), dx: finite(m.dx, -1.2, 1.2) });
+    });
+
+    // Traffic: a player crashed hard into a bot. The car stops and blinks for 3 s for
+    // everyone, then has 1.5 s in which bots and other cars pass through it.
+    this.onMessage('wreck', (client) => {
+      if (this.state.mode !== 'traffic' || this.state.phase !== 'race') return;
+      const p = this.state.players.get(client.sessionId), now = Date.now();
+      if (!p || now < p.ghostUntil) return;                  // already wrecked or still ghosted
+      p.wreckUntil = now + WRECK_MS; p.ghostUntil = now + WRECK_MS + GHOST_MS; p.wrecks += 1;
     });
 
     this.onMessage('lap', (client) => {
       const p = this.state.players.get(client.sessionId);
-      if (!p || p.finished || this.state.phase !== 'race') return;
+      if (!p || p.finished || this.state.phase !== 'race' || this.state.mode !== 'track') return;
       const now = Date.now();
       const lapMs = now - (this.lapStamp.get(client.sessionId) || this.state.startAt);
       if (lapMs < MIN_LAP_MS) return;           // impossible lap: ignore
@@ -141,7 +219,7 @@ class RaceRoom extends Room {
 
     this.onMessage('score', (client, m) => {
       const p = this.state.players.get(client.sessionId);
-      if (p && m) p.score = Math.round(finite(m.score, 0, 1e7, p.score));
+      if (p && m) p.score = this.acceptScore(p, finite(m.score, 0, 1e8, p.score), Date.now());
     });
 
     // Car-to-car hits: the player who noticed the contact sends the other car's share of
@@ -151,6 +229,8 @@ class RaceRoom extends Room {
       if (this.state.phase !== 'race' || !m) return;
       const from = this.state.players.get(client.sessionId), to = this.state.players.get(m.to);
       if (!from || !to || from.finished || to.finished) return;
+      const now = Date.now();
+      if (now < from.ghostUntil || now < to.ghostUntil) return;   // a crashed, blinking car can't push or be pushed
       if (Math.hypot(from.x - to.x, from.z - to.z) > 25) return;   // they weren't even close (positions here are a ping old)
       const target = this.clients.find(c => c.sessionId === m.to);
       if (!target) return;
@@ -195,7 +275,50 @@ class RaceRoom extends Room {
     }
   }
 
-  onDispose() { this.timers.forEach(clearTimeout); }
+  onDispose() { this.timers.forEach(clearTimeout); this.stopTraffic(); }
+
+  // Score sanity: on the highway a score can't climb faster than the best possible
+  // near misses allow (a ×5 combo, ×2 drift, 180 km/h: ~9 000 a pass); 30 000 a second
+  // leaves room for lag bursts. The track keeps its old rule.
+  acceptScore(p, v, now) {
+    v = Math.round(v);
+    if (this.state.mode !== 'traffic') return Math.min(v, 1e7);
+    const last = p._scoreAt || this.state.startAt || now, dt = Math.max(0, (now - last) / 1000);
+    p._scoreAt = now;
+    return Math.max(p.score, Math.min(v, p.score + 30000 * Math.max(dt, 0.05)));
+  }
+
+  // A player's position now: the last report moved on by its velocity (at most 0.5 s).
+  playerNow(p, now) {
+    const age = Math.min(0.5, Math.max(0, (now - p.t) / 1000));
+    return { x: p.x + p.vx * age, z: p.z + p.vz * age, v: p.vz };
+  }
+  trafficPlayers(now) {
+    return [...this.state.players.values()].filter(p => p.connected).sort((a, b) => a.slot - b.slot)
+      .map(p => ({ ...this.playerNow(p, now), ghost: now < p.ghostUntil }));
+  }
+  async startTraffic() {
+    this.stopTraffic();
+    const lib = await trafficLib();
+    const s = this.state;
+    s.seed = (Math.random() * 0xffffffff) >>> 0;
+    this.traffic = lib.createTraffic(s.seed);
+    const grid = [...s.players.values()].sort((a, b) => a.slot - b.slot).map(p => ({ ...lib.startPose(p.slot), v: 0 }));
+    this.traffic.reset(s.seed, grid);
+    this.botHitAt.clear();
+    let last = Date.now(), steps = 0;
+    this.trafficTimer = setInterval(() => {
+      const now = Date.now(), sim = this.traffic;
+      if (!sim) return;
+      const before = Math.round(sim.time / lib.STEP);
+      sim.advance((now - last) / 1000, this.trafficPlayers(now)); last = now;
+      steps += Math.round(sim.time / lib.STEP) - before;
+      // stamp the snapshot with the moment its positions are true: the simulation keeps a
+      // remainder of less than one step that it has not simulated yet
+      if (steps >= SNAPSHOT_EVERY) { steps = 0; this.broadcast('tr', lib.encodeSnapshot(sim, now - sim.alpha * lib.STEP * 1000)); }
+    }, 25);
+  }
+  stopTraffic() { if (this.trafficTimer) clearInterval(this.trafficTimer); this.trafficTimer = null; this.traffic = null; }
 
   later(ms, fn) { const t = setTimeout(fn, ms); this.timers.push(t); return t; }
 
@@ -205,11 +328,17 @@ class RaceRoom extends Room {
     s.players.forEach((p) => {
       p.lap = 0; p.prog = 0; p.score = 0; p.bestLap = 0;
       p.finished = false; p.finishTime = 0; p.place = 0;
+      p.wreckUntil = 0; p.ghostUntil = 0; p.misses = 0; p.wrecks = 0; p._scoreAt = 0;
     });
     this.lapStamp.clear(); this.lastState.clear();
     s.phase = 'countdown';
     s.startAt = Date.now() + COUNTDOWN_MS;
+    s.endAt = s.mode === 'traffic' ? s.startAt + s.duration * 1000 : 0;
     this.lock();
+    if (s.mode === 'traffic') {
+      this.startTraffic();
+      this.later(COUNTDOWN_MS + s.duration * 1000, () => this.endRace());
+    } else this.stopTraffic();
     this.later(COUNTDOWN_MS, () => { s.phase = 'race'; });
   }
 
@@ -223,13 +352,22 @@ class RaceRoom extends Room {
   }
 
   checkRaceOver() {
-    if (this.state.phase !== 'race') return;
+    if (this.state.phase !== 'race' || this.state.mode !== 'track') return;   // a traffic run ends on time
     const active = [...this.state.players.values()].filter(p => p.connected);
     if (active.length && active.every(p => p.finished)) this.endRace();
   }
 
   endRace() {
     if (this.state.phase !== 'race') return;
+    if (this.state.mode === 'traffic') {
+      // Ranked by score; equal scores by distance.
+      [...this.state.players.values()].sort((a, b) => (b.score - a.score) || (b.z - a.z))
+        .forEach((p, i) => { p.place = i + 1; p.finished = true; });
+      this.stopTraffic();
+      this.state.phase = 'results';
+      this.unlock();
+      return;
+    }
     // Unfinished players are ranked by distance covered.
     const rest = [...this.state.players.values()].filter(p => !p.finished)
       .sort((a, b) => (b.lap * 1000 + b.prog) - (a.lap * 1000 + a.prog));
@@ -241,9 +379,16 @@ class RaceRoom extends Room {
 }
 
 const app = express();
+trafficLib().catch(e => console.error('traffic simulation failed to load:', e));
 // The same server also hands out the game itself, so one link is enough to play.
 app.use(express.static(path.join(__dirname, '..', '..', 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
+// The server clock, for the game's clock sync (net/clock-worker.js). Any origin may ask:
+// the game may be hosted elsewhere (Netlify, Vercel) and talk to this server.
+app.get('/time', (_req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  res.json({ t: Date.now() });
+});
 
 const server = http.createServer(app);
 const gameServer = new Server({ transport: new WebSocketTransport({ server }) });

@@ -41,12 +41,13 @@ async function setMode(id){
   LS.set('nightdrift.mode', m.id);
 }
 G.mode = trackMode; trackMode.show();
+G.setMode = setMode;            // net.js switches to the room's mode
 { const q=new URLSearchParams(location.search).get('mode'), id=(q==='traffic'||q==='track') ? q : LS.get('nightdrift.mode');
   if(id==='traffic') await setMode('traffic'); }
 
 /* ---------- physics step ---------- */
 function physics(dt){
-  const I=((NET.online&&NET.finished)||G.state==='crash')?NOINPUT:input;
+  const I=((NET.online&&NET.finished)||G.state==='crash'||(G.mode.inputBlocked&&G.mode.inputBlocked()))?NOINPUT:input;
   stepCar(car,I,dt);
   G.mode.constrain(car,dt,physicsHooks);
   if(G.mode.collide) G.mode.collide(car,physicsHooks);   // traffic mode: hits with bots
@@ -104,13 +105,10 @@ function renderMenu(){
   const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
   $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : '';
   $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) + ' очков' : '';
-  $('goTrack').textContent = together ? 'Комната с друзьями' : 'Поехали';
-  // online traffic is the next stage
-  $('mTraffic').setAttribute('aria-disabled', String(together));
-  $('goTraffic').textContent = together ? 'Онлайн — скоро' : 'Поехали';
+  $('goTrack').textContent = $('goTraffic').textContent = together ? 'Комната с друзьями' : 'Поехали';
   $('mTrack').classList.toggle('last', G.mode.id==='track');
-  $('mTraffic').classList.toggle('last', G.mode.id==='traffic' && !together);
-  $('menuNote').textContent = together ? 'С друзьями пока только трасса: шоссе онлайн появится в следующем обновлении.' : '';
+  $('mTraffic').classList.toggle('last', G.mode.id==='traffic');
+  $('menuNote').textContent = together ? 'Создай комнату и отправь код друзьям. Режим можно сменить и в комнате.' : '';
 }
 function setTogether(v){ together=v; LS.set('nightdrift.play', v?'friends':'solo'); renderMenu(); }
 $('segSolo').addEventListener('click',()=>setTogether(false));
@@ -118,8 +116,8 @@ $('segFriends').addEventListener('click',()=>setTogether(true));
 async function pick(id){
   if(G.state!=='menu') return;
   if(together){
-    if(id!=='track') return;
-    await setMode('track');
+    await setMode(id);
+    NET.wantMode = id;                   // a room created now starts in this mode
     showPanel('pOnline'); netStatus('netStatus',''); $('nameIn').focus();
     return;
   }
@@ -242,6 +240,6 @@ function frame(now){
   G.mode.drawMap(car);
   renderer.render(scene,camera);
 }
-if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,get traffic(){ return trafficMod&&trafficMod.traffic; },setMode};
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

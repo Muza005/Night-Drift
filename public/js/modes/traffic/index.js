@@ -1,22 +1,36 @@
 // Traffic mode: the endless highway, the top-down camera, the traffic (stage 2),
-// collisions with it (stage 3) and scoring (stage 4: near misses, combo, distance).
+// collisions with it (stage 3), scoring (stage 4) and playing it online (stage 6:
+// the server's traffic, crashing without leaving the run).
 // Same interface as the track mode (see modes/track/index.js), so the car drives
 // through the same frozen stepCar().
-import { $, G, drift } from '../../state.js';
+import { $, G, NET, drift, serverNow } from '../../state.js';
 import { scene, camera, moon, sky, stars } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, fmtN, flash } from '../../ui/hud.js';
-import { whoosh } from '../../core/audio.js';
+import { renderStandings } from '../../net/net.js';
+import { whoosh, thud } from '../../core/audio.js';
 import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView } from './geometry.js';
 import { group, updateChunks, followGround } from './scene.js';
-import { createTraffic } from './sim.js';
+import { createTraffic, TYPES } from './sim.js';
+import { createRemoteTraffic } from './remote.js';
 import { drawTraffic } from './view.js';
 import { collideWithTraffic } from './collide.js';
 import { createScoring, COMBO_WINDOW, COMBO_MAX } from './score.js';
 
-// Solo: a new seed every run. Online (stage 6) the server will hand out the seed.
+// Solo: the simulation runs here, a new seed every run. Online: the server runs it and
+// `remote` predicts its bots to the present moment (remote.js). `src` is the one in use.
 const newSeed = () => (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
 export const traffic = createTraffic(1);
+export const remote = createRemoteTraffic({ now: serverNow, send: (t, m) => NET.room && NET.room.send(t, m), rtt: () => NET.rtt });
+let src = traffic;
+
+// Online crash: stopped and blinking for 3 s, then back on a free lane at traffic
+// speed and 1.5 s in which bots and other cars pass through (the server keeps the same
+// times in the player's wreckUntil / ghostUntil, so everyone sees the same).
+const WRECK_MS = 3000, GHOST_MS = 1500;
+let wreckUntil = 0, ghostUntil = 0, respawned = true, wrecks = 0;
+const wrecked = () => serverNow() < wreckUntil;
+const ghosted = () => serverNow() < ghostUntil;
 const asPlayer = car => ({ x: car.x, z: car.z, v: car.vz });
 export const score = createScoring();
 
@@ -32,7 +46,7 @@ function nearMissPopup(car, ev){
   const x = (_v.x * .5 + .5) * innerWidth + (ev.side === 'left' ? -1 : 1) * Math.min(130, innerWidth * .2);
   const y = (-_v.y * .5 + .5) * innerHeight - 40;
   const d = document.createElement('div');
-  d.className = 'nm t' + ev.level.tier;
+  d.className = 'nmpop t' + ev.level.tier;
   d.style.left = x + 'px'; d.style.top = y + 'px';
   d.textContent = ev.level.name.toUpperCase() + ' +' + fmtN(ev.points);
   const extra = [ev.mult > 1 ? '×' + String(ev.mult).replace('.', ',') : '', ev.drift ? 'в заносе ×2' : ''].filter(Boolean).join(' · ');
@@ -47,6 +61,15 @@ let lastZ = 0, fogDensity = 0, hintWas = '', shadowWas = null, view = null, camS
 function pose(car, x, z){
   car.x=x; car.z=z; car.h=0; car.vx=car.vz=0; car.steer=0; car.spinV=0; car.idx=0; car.prog=0; car.off=false;
   car.lastMark=[null,null];
+}
+
+// Back on the road after an online crash: the nearest lane with no bot within 30 m,
+// at the speed of the traffic (80 km/h), facing down the road.
+function comeBack(car){
+  const order = [0, 1, 2, 3].sort((a, b) => Math.abs(laneCenter(a) - car.x) - Math.abs(laneCenter(b) - car.x));
+  const free = order.find(L => !src.bots.some(b => Math.abs(b.z - car.z) < 30 + TYPES[b.t].len / 2 && Math.abs(b.x - laneCenter(L)) < 3)) ?? order[0];
+  pose(car, laneCenter(free), car.z);
+  car.vz = 22; car.vF = 22;
 }
 
 export const trafficMode = {
@@ -79,18 +102,39 @@ export const trafficMode = {
     $('hint').innerHTML = hintWas;
   },
 
-  enter(car, {slot=0, seed=newSeed()}={}){
-    const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; topSpeed=0; traffic.reset(seed, [asPlayer(car)]);
+  enter(car, {slot=0, seed=newSeed(), online=false}={}){
+    const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; topSpeed=0;
+    if(online){ src = remote; remote.reset(); } else { src = traffic; traffic.reset(seed, [asPlayer(car)]); }
     score.reset(); banked=0; record=false; summarised=false;
+    wreckUntil = ghostUntil = 0; respawned = true; wrecks = 0; car.root.visible = true;
   },
-  idle(car){ const p=startPose(0); pose(car, p.x, p.z); traffic.reset(newSeed(), [asPlayer(car)]); },
-  respawn(car){ pose(car, laneCenter(nearestLane(car.x)), car.z); },
-  constrain(car, dt, hooks){ constrainToHighway(car, dt, hooks); },
-  // after every physics substep: hits with the traffic (hooks.onTrafficHit)
-  collide(car, hooks){ collideWithTraffic(car, traffic, hooks); },
+  idle(car){ const p=startPose(0); pose(car, p.x, p.z); src = traffic; traffic.reset(newSeed(), [asPlayer(car)]);
+    wreckUntil = ghostUntil = 0; respawned = true; car.root.visible = true; },
+  respawn(car){ if(wrecked()) return; pose(car, laneCenter(nearestLane(car.x)), car.z); },
+  constrain(car, dt, hooks){
+    constrainToHighway(car, dt, hooks);
+    // a wrecked car comes to a stop within ~0.3 s (a force from outside, like a hit:
+    // the physics itself is untouched)
+    if(wrecked()){ const k=Math.exp(-12*dt); car.vx*=k; car.vz*=k; car.spinV*=k; }
+  },
+  // after every physics substep: hits with the traffic (hooks.onTrafficHit); none while ghosted
+  collide(car, hooks){ if(!ghosted()) collideWithTraffic(car, src, hooks); },
+  inputBlocked(){ return wrecked(); },
+  isGhost(){ return ghosted(); },
+  // Online: a hard hit does not end the run. Stop, blink 3 s, come back.
+  wreck(car){
+    const t = serverNow();
+    wreckUntil = t + WRECK_MS; ghostUntil = t + WRECK_MS + GHOST_MS; respawned = false; wrecks++;
+    score.breakCombo(); G.shake = 1; thud(30);
+    if(NET.room) NET.room.send('wreck');
+    flash('Авария', 'возврат через 3 секунды', 1.2);
+  },
+  netTraffic(arr){ remote.push(arr); },
+  stats(){ return { misses: score.misses, wrecks }; },
   // Every race frame, after the physics and the drift scoring: near misses, combo, distance.
   score(car, dt, info){
-    const events = score.update(car, traffic, dt, info.drifting);
+    if(ghosted()){ score.passes.clear(); return; }      // passing through bots after a crash earns nothing
+    const events = score.update(car, src, dt, info.drifting);
     G.score += score.points - banked; banked = score.points;     // drift points are added by game.js
     for(const ev of events){
       nearMissPopup(car, ev);
@@ -121,8 +165,16 @@ export const trafficMode = {
   // Every frame, in any state: keep road, ground and sky around the car, run the traffic
   // (it keeps moving behind the menu too, but stops while the game is paused).
   world(car, dt){
-    if(G.state!=='pause') traffic.advance(dt, [asPlayer(car)]);
-    drawTraffic(traffic);
+    if(src === remote) remote.advance(dt);
+    else if(G.state!=='pause') traffic.advance(dt, [asPlayer(car)]);
+    drawTraffic(src);
+    // online crash: blink while wrecked (fast) and ghosted (slow); then back on the road
+    if(wreckUntil){
+      const t = serverNow();
+      if(!respawned && t >= wreckUntil){ respawned = true; comeBack(car); $('count').textContent = ''; }
+      car.root.visible = t >= ghostUntil ? true : Math.floor(t / (t < wreckUntil ? 62 : 125)) % 2 === 0;
+      if(G.state==='race' && t < wreckUntil) $('count').textContent = String(Math.ceil((wreckUntil - t) / 1000));
+    }
     updateChunks(car.z); followGround(car.x, car.z);
     sky.position.set(car.x, 150, car.z); stars.position.set(car.x, 0, car.z);
   },
@@ -151,7 +203,13 @@ export const trafficMode = {
   hud(car, dt, info){
     if(G.state==='race'){ lastZ = car.z; topSpeed = Math.max(topSpeed, Math.hypot(car.vx, car.vz)); }
     setT('lapn', (Math.max(0, car.z)/1000).toFixed(2).replace('.', ',') + ' км');
-    setT('lapt', fmtT(G.lapT));
+    if(NET.online && NET.room && NET.room.state.endAt){
+      // online: time left in the run, the live ranking by score, the ping
+      const left = Math.max(0, (NET.room.state.endAt - serverNow()) / 1000);
+      setT('lapt', G.state==='count' ? fmtT(NET.room.state.duration) : 'осталось ' + Math.floor(left / 60) + ':' + String(Math.floor(left % 60)).padStart(2, '0'));
+      NET.standT -= dt; if(NET.standT <= 0){ NET.standT = .25; renderStandings();
+        const pe=$('ping'); pe.hidden=!NET.rtt; if(NET.rtt){ pe.textContent='Пинг '+Math.round(NET.rtt)+' мс'; pe.classList.toggle('bad',NET.rtt>180); } }
+    } else setT('lapt', fmtT(G.lapT));
     setT('best', best ? 'Рекорд ' + fmtN(best) : 'Рекорд —');
     // combo panel
     const on = score.chain > 0;
