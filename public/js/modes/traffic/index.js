@@ -100,18 +100,21 @@ export const trafficMode = {
     }
   },
   breakCombo(){ score.breakCombo(); },
-  // what the crash screen shows (the run's score is checked against the record once)
+  // What the crash screen shows. The run's score is checked against the record once.
   summary(){
     if(!summarised){ summarised = true;
-      if(G.score > best){ record = best > 0; best = G.score; try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {} } }
-    return [
-      ['Очки' + (record ? ' · рекорд' : ''), fmtN(G.score)],
-      ['Дистанция', (Math.max(0, lastZ)/1000).toFixed(2).replace('.', ',') + ' км'],
-      ['Обгонов впритык', String(score.misses)],
-      ['Макс. комбо', '×' + String(score.maxMult).replace('.', ',')],
-      ['Макс. скорость', Math.round(topSpeed*3.6) + ' км/ч'],
-      ['Время', fmtT(G.lapT)],
-    ];
+      record = G.score > best && G.score > 0;
+      if(record){ best = G.score; try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {} } }
+    return {
+      score: G.score, record, best,
+      stats: [
+        ['Дистанция', (Math.max(0, lastZ)/1000).toFixed(2).replace('.', ',') + ' км'],
+        ['Обгонов впритык', String(score.misses)],
+        ['Макс. комбо', '×' + String(score.maxMult).replace('.', ',')],
+        ['Макс. скорость', Math.round(topSpeed*3.6) + ' км/ч'],
+        ['Время', fmtT(G.lapT)],
+      ],
+    };
   },
   best: () => best,
 

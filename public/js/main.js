@@ -15,23 +15,34 @@ import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline } from './net/net.js';
-import { setT, fmtN, fmtT, showPanel } from './ui/hud.js';
+import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
 
 if (isTouch) document.body.classList.add('touch');
-try{ const b=parseFloat(localStorage.getItem('nightdrift.best')); if(b>0) G.best=b; }catch(e){}
-// Mode. Until the menu gets its mode picker (stage 5), the highway opens with ?mode=traffic.
-const MODE = new URLSearchParams(location.search).get('mode');
+const LS = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+};
+{ const b=parseFloat(LS.get('nightdrift.best')); if(b>0) G.best=b; }
+
+/* ---------- modes ----------
+   The drift track is built at start-up; the highway module loads the first time it is
+   needed. Switching hides one mode's scenery and HUD and shows the other's. */
+const modes = { track: trackMode, traffic: null };
 let trafficMod = null;
-if (MODE === 'traffic') {
-  trafficMod = await import('./modes/traffic/index.js');
-  const { trafficMode } = trafficMod;
-  trackMode.hide(); G.mode = trafficMode;
-  // Not online yet (stage 6), and the menu text is still about the track.
-  $('toOnline').hidden = true;
-  document.querySelector('#pMain h1').innerHTML = 'Night <span>Traffic</span>';
-  document.querySelector('#pMain p').textContent = 'Шоссе в разработке. Обгоняй поток впритык выше 80 км/ч: чем ближе и быстрее, тем больше очков, а обгоны подряд копят комбо до ×5. Задел бота — комбо сгорает, влетел в него на скорости — авария.';
-} else G.mode = trackMode;
-G.mode.show();
+async function loadMode(id){
+  if(id==='traffic' && !modes.traffic){ trafficMod = await import('./modes/traffic/index.js'); modes.traffic = trafficMod.trafficMode; }
+  return modes[id] || trackMode;
+}
+async function setMode(id){
+  const m = await loadMode(id);
+  if(G.mode===m) return;
+  G.mode.hide(); m.show(); G.mode=m;
+  m.idle(car); clearMarks(); rig.init=false;
+  LS.set('nightdrift.mode', m.id);
+}
+G.mode = trackMode; trackMode.show();
+{ const q=new URLSearchParams(location.search).get('mode'), id=(q==='traffic'||q==='track') ? q : LS.get('nightdrift.mode');
+  if(id==='traffic') await setMode('traffic'); }
 
 /* ---------- physics step ---------- */
 function physics(dt){
@@ -48,11 +59,11 @@ addEventListener('keydown',e=>{
   if(e.code==='KeyR' && G.state==='race' && !NET.finished) resetToTrack();
   if(!NET.online){
     if((e.code==='KeyP'||e.code==='Escape') && (G.state==='race'||G.state==='count')) pause();
-    else if((e.code==='KeyP') && G.state==='pause') resume();
+    else if((e.code==='KeyP'||e.code==='Escape') && G.state==='pause'){ e.preventDefault(); resume(); }
   }
   if(e.code==='KeyM') toggleSound();
   if(G.state==='over'){
-    if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); startRace(); }
+    if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); startRace(true); }
     else if(e.code==='Escape') toMenu();
   }
 });
@@ -62,39 +73,82 @@ $('bSound').addEventListener('click',()=>{ toggleSound(); canvas.focus(); });
 $('bPause').addEventListener('click',()=>{ if(NET.online) leaveOnline(); else if(G.state==='race'||G.state==='count') pause(); });
 
 /* ---------- flow ---------- */
-function startRace(){
+// quick: straight after a crash, skip the 3-2-1 (back on the road in under a second)
+function startRace(quick=false){
   audioInit();
   $('menu').hidden=true; canvas.focus();
   G.mode.enter(car,{slot:0});
   G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
-  G.state='count'; G.cd=3; G.prevCount=3; showCount('3');
+  G.state='count';
+  if(quick){ G.cd=0.45; G.prevCount=1; $('count').textContent=''; }
+  else { G.cd=3; G.prevCount=3; showCount('3'); }
 }
 function showCount(t){ const c=$('count'); c.textContent=t; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
-function pause(){ G.state='pause'; clearInput(); audioSuspend();
-  showPanel('pMain'); $('go').textContent='Продолжить'; renderBest(); }
+function pause(){ G.state='pause'; clearInput(); audioSuspend(); showPanel('pPause'); $('resume').focus(); }
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
-function renderBest(){
-  if(G.mode.id==='traffic'){ const b=G.mode.best(); $('menuBest').textContent=b?'Рекорд: '+fmtN(b)+' очков':''; return; }
-  $('menuBest').textContent=G.best?'Лучший круг: '+fmtT(G.best):'';
+function toMenu(){
+  if(G.state==='pause') audioResume();
+  G.state='menu'; G.mode.idle(car); clearMarks(); $('count').textContent=''; showPanel('pMain'); renderMenu();
+  (G.mode.id==='traffic' ? $('mTraffic') : $('mTrack')).focus();
 }
-$('go').addEventListener('click',()=>{ if(G.state==='pause') resume(); else startRace(); });
+// a key press on a focused button also fires its click: act only in the right state
+$('resume').addEventListener('click',()=>{ if(G.state==='pause') resume(); });
+$('restart').addEventListener('click',()=>{ if(G.state==='pause'){ audioResume(); startRace(); } });
+$('pauseMenu').addEventListener('click',()=>{ if(G.state==='pause') toMenu(); });
 
-// Crash screen (traffic mode, solo). The full results screen arrives with the menu (stage 5).
+/* main menu: "Одному / С друзьями" and the two mode cards */
+let together = LS.get('nightdrift.play')==='friends';
+function renderMenu(){
+  $('segSolo').setAttribute('aria-pressed', String(!together));
+  $('segFriends').setAttribute('aria-pressed', String(together));
+  const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
+  $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : '';
+  $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) + ' очков' : '';
+  $('goTrack').textContent = together ? 'Комната с друзьями' : 'Поехали';
+  // online traffic is the next stage
+  $('mTraffic').setAttribute('aria-disabled', String(together));
+  $('goTraffic').textContent = together ? 'Онлайн — скоро' : 'Поехали';
+  $('mTrack').classList.toggle('last', G.mode.id==='track');
+  $('mTraffic').classList.toggle('last', G.mode.id==='traffic' && !together);
+  $('menuNote').textContent = together ? 'С друзьями пока только трасса: шоссе онлайн появится в следующем обновлении.' : '';
+}
+function setTogether(v){ together=v; LS.set('nightdrift.play', v?'friends':'solo'); renderMenu(); }
+$('segSolo').addEventListener('click',()=>setTogether(false));
+$('segFriends').addEventListener('click',()=>setTogether(true));
+async function pick(id){
+  if(G.state!=='menu') return;
+  if(together){
+    if(id!=='track') return;
+    await setMode('track');
+    showPanel('pOnline'); netStatus('netStatus',''); $('nameIn').focus();
+    return;
+  }
+  await setMode(id);
+  startRace();
+}
+$('mTrack').addEventListener('click',()=>pick('track'));
+$('mTraffic').addEventListener('click',()=>pick('traffic'));
+
+// Crash screen (traffic mode, solo): the score big, a record badge, the run's numbers.
 function showOver(){
   G.state='over'; clearInput();
+  const R = G.mode.summary();
+  $('overScore').textContent = fmtN(R.score);
+  $('overRecord').hidden = !R.record;
+  $('overBest').textContent = R.record ? '' : (R.best ? 'Рекорд ' + fmtN(R.best) : '');
   const box=$('overStats'); box.replaceChildren();
-  for(const [k,v] of (G.mode.summary ? G.mode.summary() : [])){
+  for(const [k,v] of R.stats){
     const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;
     const b=document.createElement('b'); b.className='num'; b.textContent=v; d.append(a,b); box.append(d);
   }
   showPanel('pOver'); $('retry').focus();
 }
-function toMenu(){ G.state='menu'; G.mode.idle(car); clearMarks(); showPanel('pMain'); $('go').textContent='Поехали'; renderBest(); }
-// a key press on a focused button also fires its click: act only once
-$('retry').addEventListener('click',()=>{ if(G.state==='over') startRace(); });
+$('retry').addEventListener('click',()=>{ if(G.state==='over') startRace(true); });
 $('overMenu').addEventListener('click',()=>{ if(G.state==='over') toMenu(); });
-renderBest();
+renderMenu();
 G.mode.idle(car);
+// The "?room=CODE" invite link opens the online panel: that is the track, with friends.
+if(!$('pOnline').hidden){ together=true; renderMenu(); }
 
 /* ---------- loop ---------- */
 let last=performance.now(), menuA=0;
@@ -188,6 +242,6 @@ function frame(now){
   G.mode.drawMap(car);
   renderer.render(scene,camera);
 }
-if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,traffic:trafficMod&&trafficMod.traffic};
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,get traffic(){ return trafficMod&&trafficMod.traffic; },setMode};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

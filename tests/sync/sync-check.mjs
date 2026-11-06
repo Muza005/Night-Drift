@@ -105,10 +105,10 @@ async function runOnce(browser) {
   const A = await openPlayer(browser, url, errors, 'A'), B = await openPlayer(browser, url, errors, 'B');
   let step = 'create room';
   try {
-    await A.click('#toOnline'); await A.fill('#nameIn', 'A'); await A.click('#createRoom');
+    await A.click('#segFriends'); await A.click('#mTrack'); await A.fill('#nameIn', 'A'); await A.click('#createRoom');
     await A.waitForFunction(() => document.getElementById('roomCode').textContent !== '----');
     const code = (await A.innerText('#roomCode')).trim();
-    step = 'B joins'; await B.click('#toOnline'); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
+    step = 'B joins'; await B.click('#segFriends'); await B.click('#mTrack'); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
     step = 'race start'; await A.click('#startRace');
