@@ -106,6 +106,9 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 @media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
 @media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
 /* online */
+.over-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.over-stats div{display:grid;gap:4px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px}
+.over-stats b{font-size:22px;font-weight:700}
 .row-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .ghost-btn{font:700 14px var(--f-body);color:var(--ink);background:transparent;border:1px solid var(--edge);border-radius:10px;padding:13px 20px;cursor:pointer}
 .ghost-btn:hover{border-color:var(--cyan)}
@@ -248,6 +251,16 @@ body{margin:0}
       <button class="ghost-btn" id="leaveRes" type="button">Выйти в меню</button>
     </div>
     <div class="status" id="resStatus" role="status"></div>
+  </div>
+
+  <div class="card" id="pOver" hidden>
+    <h1>Авария <span>на шоссе</span></h1>
+    <div class="over-stats" id="overStats"></div>
+    <div class="row-btns">
+      <button class="cta" id="retry" type="button">Ещё раз</button>
+      <button class="ghost-btn" id="overMenu" type="button">В меню</button>
+    </div>
+    <div class="tip">Пробел или Enter — сразу ещё раз. Влететь в бота сзади на скорости — авария, задеть бортом — только касание.</div>
   </div>
 </div>
 

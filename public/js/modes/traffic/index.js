@@ -1,6 +1,5 @@
-// Traffic mode: the endless highway, the top-down camera and the traffic (stage 2).
-// Collisions with traffic and scoring arrive in stages 3 and 4; for now the player's
-// car passes through bots. Same interface as the track mode
+// Traffic mode: the endless highway, the top-down camera, the traffic (stage 2) and
+// collisions with it (stage 3). Scoring arrives in stage 4. Same interface as the track mode
 // (see modes/track/index.js), so the car drives through the same frozen stepCar().
 import { $, G } from '../../state.js';
 import { scene, camera, moon, sky, stars } from '../../core/render.js';
@@ -10,6 +9,7 @@ import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView } f
 import { group, updateChunks, followGround } from './scene.js';
 import { createTraffic } from './sim.js';
 import { drawTraffic } from './view.js';
+import { collideWithTraffic } from './collide.js';
 
 // Solo: a new seed every run. Online (stage 6) the server will hand out the seed.
 const newSeed = () => (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
@@ -17,7 +17,7 @@ export const traffic = createTraffic(1);
 const asPlayer = car => ({ x: car.x, z: car.z, v: car.vz });
 
 const HINT = '<b>W A S D</b> руль и газ · <b>Пробел</b> ручник · <b>R</b> на дорогу';
-let fogDensity = 0, hintWas = '', shadowWas = null, view = null, camSpeed = 0;
+let lastZ = 0, fogDensity = 0, hintWas = '', shadowWas = null, view = null, camSpeed = 0, topSpeed = 0;
 
 function pose(car, x, z){
   car.x=x; car.z=z; car.h=0; car.vx=car.vz=0; car.steer=0; car.spinV=0; car.idx=0; car.prog=0; car.off=false;
@@ -52,10 +52,18 @@ export const trafficMode = {
     $('hint').innerHTML = hintWas;
   },
 
-  enter(car, {slot=0, seed=newSeed()}={}){ const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; traffic.reset(seed, [asPlayer(car)]); },
+  enter(car, {slot=0, seed=newSeed()}={}){ const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; topSpeed=0; traffic.reset(seed, [asPlayer(car)]); },
   idle(car){ const p=startPose(0); pose(car, p.x, p.z); traffic.reset(newSeed(), [asPlayer(car)]); },
   respawn(car){ pose(car, laneCenter(nearestLane(car.x)), car.z); },
   constrain(car, dt, hooks){ constrainToHighway(car, dt, hooks); },
+  // after every physics substep: hits with the traffic (hooks.onTrafficHit)
+  collide(car, hooks){ collideWithTraffic(car, traffic, hooks); },
+  // what the crash screen shows
+  summary(){ return [
+    ['Дистанция', (Math.max(0, lastZ)/1000).toFixed(2).replace('.', ',') + ' км'],
+    ['Время', fmtT(G.lapT)],
+    ['Макс. скорость', Math.round(topSpeed*3.6) + ' км/ч'],
+  ]; },
 
   // Every frame, in any state: keep road, ground and sky around the car, run the traffic
   // (it keeps moving behind the menu too, but stops while the game is paused).
@@ -87,6 +95,7 @@ export const trafficMode = {
   },
 
   hud(car, dt, info){
+    if(G.state==='race'){ lastZ = car.z; topSpeed = Math.max(topSpeed, Math.hypot(car.vx, car.vz)); }
     setT('lapn', (Math.max(0, car.z)/1000).toFixed(2).replace('.', ',') + ' км');
     setT('lapt', fmtT(G.lapT));
     setT('best', '');

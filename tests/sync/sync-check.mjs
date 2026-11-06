@@ -103,17 +103,19 @@ async function runOnce(browser) {
   const errors = [];
   const url = `${URL_UNDER_TEST}${URL_UNDER_TEST.includes('?') ? '&' : '?'}debug&server=ws://localhost:${PROXY}`;
   const A = await openPlayer(browser, url, errors, 'A'), B = await openPlayer(browser, url, errors, 'B');
+  let step = 'create room';
   try {
     await A.click('#toOnline'); await A.fill('#nameIn', 'A'); await A.click('#createRoom');
     await A.waitForFunction(() => document.getElementById('roomCode').textContent !== '----');
     const code = (await A.innerText('#roomCode')).trim();
-    await B.click('#toOnline'); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
+    step = 'B joins'; await B.click('#toOnline'); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
-    await A.click('#startRace');
+    step = 'race start'; await A.click('#startRace');
     for (const p of [A, B]) await p.waitForFunction(() => window.__nd.NET.room.state.phase === 'race', null, { timeout: 20000 });
     await A.bringToFront(); await A.click('#c'); await sleep(600);
 
+    step = 'bump';
     // Bump: aim A at B and drive into it.
     await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z); });
     await A.keyboard.down('w');
@@ -121,6 +123,7 @@ async function runOnce(browser) {
     for (let i = 0; i < 30; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); }
     await A.keyboard.up('w'); await sleep(1000); await A.keyboard.press('r'); await sleep(500);
 
+    step = 'prediction drive';
     // Prediction: A drives, both record every frame.
     await A.evaluate(RECORD, 'self'); await B.evaluate(RECORD, 'ghost');
     await drive(A, 20);
@@ -148,7 +151,8 @@ async function runOnce(browser) {
       speedKmh: Math.round(ra.reduce((s, r) => s + r[3], 0) / ra.length * 3.6),
       mean: +mean.toFixed(2), p95: +errs[Math.floor(errs.length * 0.95)].toFixed(2), bump: +bump.toFixed(2), errors,
     };
-  } finally { await A.context().close(); await B.context().close(); }
+  } catch (e) { e.message = `[step: ${step}] ${e.message}`; throw e; }
+  finally { await A.context().close(); await B.context().close(); }
 }
 
 const server = await startServer();
