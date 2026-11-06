@@ -5,8 +5,10 @@
 //   stepCar(car, input, dt)            frozen physics, same for every mode (core/physics.js)
 //   mode.constrain(car, dt, hooks)     walls, off-track, laps: right after stepCar, every substep
 //   mode.camera(car, dt)               the race camera
-//   mode.hud(dt, info)                 mode-specific HUD: laps, minimap, warnings
+//   mode.hud(car, dt, info)            mode-specific HUD: laps, minimap, warnings
+//   mode.world(car, dt)                every frame in any state: keep the scenery around the car
 // and on events:
+//   mode.show() / mode.hide()          switch the mode's scenery and HUD on and off
 //   mode.enter(car, {slot})            put the car on the start grid for a new run
 //   mode.idle(car)                     where the car stands behind the menu
 //   mode.respawn(car)                  the R key: back onto the road
@@ -17,7 +19,7 @@ import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
 import { P, TG, START, placeAt, placeGrid, constrainToTrack } from './geometry.js';
-import './scene.js';
+import { group } from './scene.js';
 
 /* minimap */
 const map=$('map'), mg=map.getContext('2d');
@@ -39,6 +41,10 @@ function drawMap(car){
 
 export const trackMode = {
   id: 'track',
+
+  show(){ group.visible=true; $('map').hidden=false; },
+  hide(){ group.visible=false; },
+  world(){},
 
   enter(car, {slot=0}={}){ placeGrid(car, slot); },
   idle(car){ placeAt(car, START); },
