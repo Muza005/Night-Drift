@@ -65,7 +65,7 @@ export function createTraffic(seed = 1) {
   function laneObjects(L, players) {
     const out = [];
     for (const b of sim.bots) if (inLane(b, L)) out.push({ z: b.z, len: lenOf(b), v: b.v, a: b.a, bot: b });
-    for (const p of players) if (playerInLane(p, L)) out.push({ z: p.z, len: CFG.player.len, v: p.v, a: p.a, bot: null });
+    for (const p of players) if (!p.ghost && playerInLane(p, L)) out.push({ z: p.z, len: CFG.player.len, v: p.v, a: p.a, bot: null });
     return out;
   }
   // Nearest thing ahead of bot b in lane L: {gap, v, bot} or null.
@@ -128,7 +128,7 @@ export function createTraffic(seed = 1) {
     if (ahead && ahead.gap < Math.max(8, 0.6 * b.v + 2 * (b.v - ahead.v))) return false;
     if (behind && behind.gap < Math.max(8, 0.8 * behind.v + 2 * (behind.v - b.v))) return false;
     for (const p of players) {
-      if (!playerInLane(p, L)) continue;
+      if (p.ghost || !playerInLane(p, L)) continue;
       if (Math.abs(p.z - b.z) < CFG.playerGuard + lenOf(b) / 2) return false;
       if (p.z < b.z && p.v > b.v + 5 && b.z - p.z < 45) return false;     // a player closing in fast from behind
     }
@@ -280,7 +280,9 @@ export function createTraffic(seed = 1) {
   }
 
   /* ---------- public ---------- */
-  // players: [{x, z, v}] where v is the speed along the road (m/s).
+  // players: [{x, z, v, ghost?}] where v is the speed along the road (m/s). A ghost
+  // player (online, just crashed and blinking) still keeps traffic around itself but
+  // is not an obstacle: bots drive through it.
   sim.reset = (newSeed = seed, players = []) => {
     rnd = makeRng(newSeed); sim.seed = newSeed; sim.bots = []; prevPlayerV = []; sim.time = 0; sim.nextId = 1; acc = 0; sim.alpha = 0;
     fill(players, 0, CFG.spawnTo);      // first fill also covers the road in view (beyond the clear start zone)

@@ -7,7 +7,11 @@
 
    Moved here unchanged from the single-file version: same messages, same rates, same
    clock sync, same prediction and smoothing, same collision exchange. Only references
-   to shared variables changed (state → G.state and so on). */
+   to shared variables changed (state → G.state and so on).
+
+   Stage 6 adds the highway: the room's mode (picked by the host in the lobby), the
+   server's traffic snapshots ('tr', handed to the traffic mode), and crashed cars that
+   blink and pass through others for a moment (no bumps either way while ghosted). */
 import { $, G, NET, serverNow } from '../state.js';
 import { car } from '../player.js';
 import { canvas, cv, tex } from '../core/render.js';
@@ -49,17 +53,34 @@ async function connect(kind){
   netStatus('netStatus','Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName()}) : await NET.client.joinById(code,{name:myName()});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track'}) : await NET.client.joinById(code,{name:myName()});
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
   finally{ $('createRoom').disabled=$('joinRoom').disabled=false; }
 }
 
+// Clock samples from a worker thread that drawing never blocks (see clock-worker.js).
+// They feed the same shortest-round-trip choice as the WebSocket ping below.
+let clockWorker=null;
+function startClockWorker(){
+  try{
+    const ep=endpoint(); if(!ep) return;
+    if(!clockWorker){
+      clockWorker=new Worker(new URL('./clock-worker.js', import.meta.url));
+      clockWorker.onmessage=e=>{ const m=e.data; if(!NET.online||!m) return;
+        if(m.rtt<=NET.bestRtt){ NET.bestRtt=m.rtt; NET.offset=m.offset; } };
+    }
+    clockWorker.postMessage({url:ep.replace(/^ws/,'http').replace(/\/$/,'')+'/time'});
+  }catch(e){ clockWorker=null; }
+}
+function stopClockWorker(){ if(clockWorker) clockWorker.postMessage({url:null}); }
+
 function bindRoom(room){
   clearGhosts();
   clearInterval(NET.pingTimer);
   Object.assign(NET,{room,online:true,leaving:false,token:room.reconnectionToken,bestRtt:1e9});
+  startClockWorker();
   // Clock sync: keep the reply with the shortest round trip; it is the most accurate.
   const ping=()=>{ if(NET.room===room) room.send('ping',{t:Date.now()}); };
   room.onMessage('pong',m=>{ const rtt=Date.now()-m.t;
@@ -68,6 +89,8 @@ function bindRoom(room){
   for(let i=0;i<6;i++) setTimeout(ping,i*180);
   NET.pingTimer=setInterval(()=>{ NET.bestRtt+=10; ping(); },2000);
   room.onMessage('event',m=>info(m.text));
+  // highway: the server's traffic, 10 snapshots a second
+  room.onMessage('tr',m=>{ if(G.mode.id==='traffic' && G.mode.netTraffic) G.mode.netTraffic(m); });
   room.onMessage('bump',onBump);
   room.onMessage('lapTime',m=>{
     const last=m.lap>=room.state.laps;
@@ -84,6 +107,9 @@ function bindRoom(room){
   });
   room.state.players.onRemove((p,id)=>{ removeGhost(id); renderLobby(); });
   room.state.listen('hostId',()=>{ renderLobby(); renderResults(); });
+  // between runs the scene behind the lobby follows the mode the host picked
+  room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m); renderLobby(); });
+  room.state.listen('duration',()=>renderLobby());
   room.state.listen('phase',ph=>onPhase(ph));
   room.onLeave(code=>onRoomLeave(room,code));
 }
@@ -94,14 +120,20 @@ function onPhase(ph){
   if(ph==='lobby'){ G.state='lobby'; showPanel('pLobby'); renderLobby(); }
   else if(ph==='countdown'||ph==='race'){
     if(G.state==='race'||G.state==='count') return;   // already racing (e.g. after a reconnect)
-    $('menu').hidden=true; canvas.focus();
-    G.mode.enter(car,{slot:NET.me?NET.me.slot:0});
-    G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
-    NET.finished=false; NET.laps=s.laps; NET.sendT=0;
-    if(ph==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); }
-    else { G.state='count'; G.prevCount=99; }
+    const go=()=>{
+      if(!NET.room || G.state==='race'||G.state==='count') return;
+      $('menu').hidden=true; canvas.focus();
+      G.mode.enter(car,{slot:NET.me?NET.me.slot:0, online:true});
+      G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
+      NET.finished=false; NET.laps=s.laps; NET.sendT=0;
+      const p=NET.room.state.phase;
+      if(p==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); }
+      else { G.state='count'; G.prevCount=99; }
+    };
+    // the room's mode decides the scene (the highway module may still need to load)
+    if(G.mode.id!==s.mode && G.setMode) G.setMode(s.mode).then(go); else go();
   }
-  else if(ph==='results'){ G.state='results'; clearInput(); bank(); showPanel('pResults'); renderResults(); }
+  else if(ph==='results'){ G.state='results'; clearInput(); bank(); car.root.visible=true; $('count').textContent=''; showPanel('pResults'); renderResults(); }
 }
 
 function onRoomLeave(room){
@@ -118,7 +150,7 @@ function onRoomLeave(room){
 export async function leaveOnline(msg){
   const r=NET.room;
   Object.assign(NET,{leaving:true,room:null,online:false,me:null,finished:false});
-  clearInterval(NET.pingTimer); clearGhosts();
+  clearInterval(NET.pingTimer); clearGhosts(); stopClockWorker();
   car.paint.color.setHex(0xff3b6b); $('standings').hidden=true;
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
   showPanel('pOnline'); netStatus('netStatus',msg||'',!!msg);
@@ -178,9 +210,11 @@ function carCircles(x,z,h){ const fx=Math.sin(h), fz=Math.cos(h); return [[x+fx*
 const clampN=(v,a)=>Math.max(-a,Math.min(a,v));
 export function collideGhosts(){
   if(!NET.online || !NET.room || G.state!=='race' || NET.finished) return;
-  const now=performance.now();
+  if(G.mode.isGhost && G.mode.isGhost()) return;          // our car crashed and is blinking: nothing touches it
+  const now=performance.now(), nowS=serverNow();
   for(const g of NET.ghosts.values()){
     if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
+    if(nowS < g.p.ghostUntil) continue;                     // their car crashed and is blinking
     if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
     let best=null;
     for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
@@ -210,6 +244,7 @@ export function collideGhosts(){
 }
 function onBump(m){
   if(G.state!=='race' || NET.finished || !m) return;
+  if(G.mode.isGhost && G.mode.isGhost()) return;
   const now=performance.now();
   if(now-(NET.hitAt[m.from]||0)<300) return;        // we already handled this contact ourselves
   NET.hitAt[m.from]=now;
@@ -224,6 +259,12 @@ export function updateGhosts(dt){
     const b=g.buf, m=g.m;
     m.root.visible=show && b.length>0 && g.p.connected;
     if(!m.root.visible) continue;
+    // a crashed car blinks (its parts, not the car: the car still counts as on the road):
+    // fast while stopped, slower while it can't be hit yet
+    const blink = nowS < g.p.ghostUntil;
+    if(blink || g.blinked){ const on = !blink || Math.floor(nowS / (nowS < g.p.wreckUntil ? 62 : 125)) % 2 === 0;
+      m.root.traverse(o=>{ if(o!==m.root && (o.isMesh||o.isSprite)) o.visible=on; }); }
+    g.blinked = blink;
     // Predict where the car is right now: last known position moved forward by its
     // velocity for as long as the update was travelling, turning at its last turn rate.
     const s1=b[b.length-1], s0=b.length>1?b[0]:null;
@@ -266,7 +307,8 @@ export function sendState(dt,slide){
   if(NET.online && NET.room && (G.state==='race'||G.state==='count')){
     NET.sendT+=dt;
     if(NET.sendT>=.033){ NET.sendT=0;
-      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow()}); }
+      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow(),
+        ...(G.mode.stats ? { misses: G.mode.stats().misses } : {})}); }
   }
 }
 
@@ -286,12 +328,23 @@ function renderLobby(){
   for(let i=s.players.size;i<6;i++) ul.append(el('li','empty','Свободное место'));
   $('startRace').hidden=!isHost;
   $('startRace').textContent='Старт · '+s.players.size+' из 6';
+  if(G.setMode && G.mode.id!==s.mode) G.setMode(s.mode);   // the scene behind the lobby shows the room's mode
+  // mode and run length: the host picks, everyone sees
+  for(const b of $('cfgMode').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.mode===s.mode)); b.disabled=!isHost; }
+  $('cfgDur').hidden = s.mode!=='traffic';
+  for(const b of $('cfgDur').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(Number(b.dataset.dur)===s.duration)); b.disabled=!isHost; }
+  $('cfgNote').textContent = (s.mode==='traffic' ? 'Шоссе на время: больше очков — выше место. Авария — 3 секунды простоя.' : 'Трасса: 3 круга, кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
   netStatus('lobbyStatus', isHost ? (s.players.size<2?'Можно стартовать и одному, чтобы обкатать трассу.':'') : 'Ждём, когда хост нажмёт «Старт».');
 }
 export function renderStandings(){
   const box=$('standings');
   if(!NET.online || !NET.room || !(G.state==='race'||G.state==='count')){ box.hidden=true; return; }
   const me=NET.room.sessionId, rows=[];
+  if(NET.room.state.mode==='traffic'){
+    // highway: by score (ours live, others' as last reported)
+    NET.room.state.players.forEach((p,id)=>{ const mine=id===me, sc=mine?G.score:p.score;
+      rows.push({name:p.name,color:p.color,mine,key:sc,tag:fmtN(sc)}); });
+  } else
   NET.room.state.players.forEach((p,id)=>{
     const mine=id===me, laps=mine?Math.min(G.lap-1,NET.laps):p.lap, prog=mine?car.prog:p.prog;
     rows.push({name:p.name,color:p.color,mine,fin:p.finished,
@@ -308,11 +361,18 @@ export function renderStandings(){
 function renderResults(){
   if(!NET.room) return;
   const s=NET.room.state, me=NET.room.sessionId, tb=$('resBody'); tb.replaceChildren();
+  const hw = s.mode==='traffic';
+  $('resHead').replaceChildren(...(hw ? ['#','Гонщик','Очки','Дистанция','Обгоны','Аварии'] : ['#','Гонщик','Время','Лучший круг','Дрифт']).map(t=>el('th',null,t)));
   [...s.players.entries()].sort((a,b)=>(a[1].place||99)-(b[1].place||99)).forEach(([id,p])=>{
     const tr=el('tr',id===me?'me':null);
     const nm=el('td'); const d=el('span','dot'); d.style.color=hex(p.color); d.style.background=hex(p.color); d.style.display='inline-block'; d.style.marginRight='8px';
     nm.append(d, document.createTextNode(p.name));
-    tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
+    if(hw) tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
+      el('td',null,fmtN(p.score)),
+      el('td',null,(Math.max(0,p.z)/1000).toFixed(2).replace('.',',')+' км'),
+      el('td',null,String(p.misses)),
+      el('td',null,String(p.wrecks)));
+    else tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
       el('td',null,p.finished?fmtT(p.finishTime/1000):'не доехал'),
       el('td',null,p.bestLap?fmtT(p.bestLap/1000):'—'),
       el('td',null,fmtN(p.score)));
@@ -329,6 +389,8 @@ $('createRoom').addEventListener('click',()=>connect('create'));
 $('joinRoom').addEventListener('click',()=>connect('join'));
 $('codeIn').addEventListener('keydown',e=>{ if(e.key==='Enter') connect('join'); });
 $('startRace').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
+$('cfgMode').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{mode:b.dataset.mode}); });
+$('cfgDur').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{duration:Number(b.dataset.dur)}); });
 $('again').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
 $('leaveLobby').addEventListener('click',()=>leaveOnline());
 $('leaveRes').addEventListener('click',()=>leaveOnline());
