@@ -323,8 +323,8 @@ function renderResults(){
   netStatus('resStatus', isHost?'':'Ждём, когда хост запустит следующий заезд.');
 }
 
-$('toOnline').addEventListener('click',()=>{ showPanel('pOnline'); netStatus('netStatus',''); $('nameIn').focus(); });
-$('backMain').addEventListener('click',()=>{ showPanel('pMain'); $('go').textContent='Поехали'; });
+// The menu (main.js) opens the online panel when "С друзьями" + "Трасса" is picked.
+$('backMain').addEventListener('click',()=>{ showPanel('pMain'); });
 $('createRoom').addEventListener('click',()=>connect('create'));
 $('joinRoom').addEventListener('click',()=>connect('join'));
 $('codeIn').addEventListener('keydown',e=>{ if(e.key==='Enter') connect('join'); });

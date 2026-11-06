@@ -10,5 +10,5 @@ export function setT(id,v){ if(cache[id]!==v){ cache[id]=v; $(id).textContent=v;
 export const hex=c=>'#'+(c>>>0).toString(16).padStart(6,'0');
 export const el=(tag,cls,text)=>{ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; };
 export function info(text){ const d=el('div','info',text); document.querySelector('.hud').appendChild(d); setTimeout(()=>d.remove(),3000); }
-export function showPanel(id){ for(const p of ['pMain','pOnline','pLobby','pResults','pOver']) $(p).hidden=p!==id; $('menu').hidden=false; }
+export function showPanel(id){ for(const p of ['pMain','pPause','pOnline','pLobby','pResults','pOver']) $(p).hidden=p!==id; $('menu').hidden=false; }
 export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s.classList.toggle('err',!!err); }

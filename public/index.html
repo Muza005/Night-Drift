@@ -106,7 +106,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #tG{right:var(--rgt);width:84px;height:84px}
 #tB{right:calc(var(--rgt) + 96px);width:64px;height:64px}
 #tH{right:var(--rgt);bottom:calc(var(--bot) + 96px);width:84px;height:56px;border-radius:14px;color:var(--rose)}
-.touch #speedo{right:auto;left:50%;transform:translateX(-50%);min-width:140px;padding:8px 12px}
+.touch #speedo{right:auto;left:50%;transform:translateX(-50%);min-width:140px;padding:8px 12px;bottom:calc(var(--bot) + 92px)}
 .touch #spd{font-size:32px}
 .touch #map{width:110px;height:110px}
 .touch .btns{top:calc(var(--top) + 112px)}
@@ -121,13 +121,41 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .tip{border-left:2px solid var(--amber);padding-left:12px;font-size:14px;color:var(--ink);line-height:1.5}
 .cta{justify-self:start;font:800 16px var(--f-display);color:var(--night);background:var(--cyan);border:0;border-radius:10px;padding:14px 28px;cursor:pointer;box-shadow:0 0 30px rgba(62,240,255,.45);pointer-events:auto}
 .cta:hover{background:#7ff5ff}
-#menuBest{font-size:13px;color:var(--amber)}
 @media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
 @media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
 /* online */
 .over-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
 .over-stats div{display:grid;gap:4px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px}
 .over-stats b{font-size:22px;font-weight:700}
+.seg{display:inline-flex;justify-self:start;padding:4px;border:1px solid var(--edge);border-radius:12px;background:rgba(14,16,30,.6);gap:4px}
+.seg button{font:700 14px var(--f-body);color:var(--dim);background:transparent;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;min-height:44px}
+.seg button[aria-pressed="true"]{background:var(--cyan);color:var(--night)}
+.seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mode-card{display:grid;gap:8px;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(14,16,30,.72);border:1px solid var(--edge);border-radius:14px;padding:18px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
+.mode-card:hover{border-color:var(--rose);box-shadow:0 0 26px rgba(255,59,107,.25);transform:translateY(-2px)}
+.mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 0 26px rgba(62,240,255,.25)}
+.mode-card:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+.mode-card.last{border-color:rgba(255,255,255,.35)}
+.mc-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--rose)}
+.mode-card.traffic .mc-kicker{color:var(--cyan)}
+.mc-title{font-family:var(--f-display);font-weight:800;font-size:clamp(22px,4vw,30px);line-height:1}
+.mc-desc{font-size:14px;line-height:1.5;color:var(--dim)}
+.mc-best{font-size:13px;color:var(--amber);min-height:1.2em}
+.mc-go{justify-self:start;margin-top:4px;font:800 14px var(--f-display);color:var(--night);background:var(--rose);border-radius:8px;padding:9px 14px}
+.mode-card.traffic .mc-go{background:var(--cyan)}
+.mode-card[aria-disabled="true"]{cursor:not-allowed;opacity:.55;transform:none;box-shadow:none;border-color:var(--edge)}
+.mode-card[aria-disabled="true"] .mc-go{background:transparent;color:var(--dim);border:1px solid var(--edge)}
+#menuNote:empty{display:none}
+.howto summary{cursor:pointer;color:var(--dim);font-size:14px;font-weight:700;padding:6px 0}
+.howto summary:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.howto[open] summary{margin-bottom:10px}
+.howto .keys{margin-bottom:12px}
+.over-score{display:grid;justify-items:start;gap:4px}
+.over-score b{font-family:var(--f-display);font-weight:800;font-size:clamp(40px,9vw,64px);line-height:1;color:var(--ink);text-shadow:0 0 22px rgba(62,240,255,.4)}
+.over-score .rec{font:800 13px var(--f-display);color:var(--night);background:var(--amber);border-radius:6px;padding:5px 10px}
+.over-score .best{font-size:13px;color:var(--dim)}
+@media (max-width:620px){.modes{grid-template-columns:1fr}.mode-card{padding:14px}.mc-desc{font-size:13px}}
 .row-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .ghost-btn{font:700 14px var(--f-body);color:var(--ink);background:transparent;border:1px solid var(--edge);border-radius:10px;padding:13px 20px;cursor:pointer}
 .ghost-btn:hover{border-color:var(--cyan)}
@@ -226,21 +254,49 @@ body{margin:0}
 <div id="menu">
   <div class="card" id="pMain">
     <h1>Night <span>Drift</span></h1>
-    <p>Ночная трасса на 13 поворотов. Входи в поворот боком и держи занос: чем больше угол и скорость, тем больше очков. Длинный занос поднимает множитель до ×5, удар о стену сжигает всё накопленное.</p>
-    <div class="keys">
-      <kbd>W / ↑</kbd><span>газ</span>
-      <kbd>S / ↓</kbd><span>тормоз и задний ход</span>
-      <kbd>A D / ← →</kbd><span>руль</span>
-      <kbd>Пробел</kbd><span>ручник, срыв в занос</span>
-      <kbd>R</kbd><span>вернуться на трассу</span>
-      <kbd>P · M</kbd><span>пауза · звук</span>
+    <div class="seg" role="group" aria-label="Как играть">
+      <button type="button" id="segSolo" aria-pressed="true">Одному</button>
+      <button type="button" id="segFriends" aria-pressed="false">С друзьями</button>
     </div>
-    <div class="tip">Перед поворотом дай руль, коротко дёрни ручник и сразу жми газ. Машину развернёт боком, а угол ловится контррулём.</div>
-    <div id="menuBest"></div>
+    <div class="modes">
+      <button type="button" class="mode-card" id="mTrack" data-mode="track">
+        <span class="mc-kicker">Дрифт</span>
+        <span class="mc-title">Трасса</span>
+        <span class="mc-desc">13 поворотов ночного города. Входи боком и держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
+        <span class="mc-best" id="bestTrack"></span>
+        <span class="mc-go" id="goTrack">Поехали</span>
+      </button>
+      <button type="button" class="mode-card traffic" id="mTraffic" data-mode="traffic">
+        <span class="mc-kicker">Трафик</span>
+        <span class="mc-title">Шоссе</span>
+        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч и копи комбо до ×5. Влетел в машину на скорости — авария.</span>
+        <span class="mc-best" id="bestTraffic"></span>
+        <span class="mc-go" id="goTraffic">Поехали</span>
+      </button>
+    </div>
+    <div class="status" id="menuNote" role="status"></div>
+    <details class="howto">
+      <summary>Управление</summary>
+      <div class="keys">
+        <kbd>W / ↑</kbd><span>газ</span>
+        <kbd>S / ↓</kbd><span>тормоз и задний ход</span>
+        <kbd>A D / ← →</kbd><span>руль</span>
+        <kbd>Пробел</kbd><span>ручник, срыв в занос</span>
+        <kbd>R</kbd><span>вернуться на дорогу</span>
+        <kbd>P · M</kbd><span>пауза · звук</span>
+      </div>
+      <div class="tip">Занос: дай руль, коротко дёрни ручник и сразу жми газ, угол лови контррулём. На телефоне — кнопки на экране.</div>
+    </details>
+  </div>
+
+  <div class="card" id="pPause" hidden>
+    <h1>Пауза</h1>
     <div class="row-btns">
-      <button class="cta" id="go" type="button">Поехали</button>
-      <button class="ghost-btn" id="toOnline" type="button">Онлайн с друзьями</button>
+      <button class="cta" id="resume" type="button">Продолжить</button>
+      <button class="ghost-btn" id="restart" type="button">Заново</button>
+      <button class="ghost-btn" id="pauseMenu" type="button">В меню</button>
     </div>
+    <div class="tip">P или Esc — продолжить.</div>
   </div>
 
   <div class="card" id="pOnline" hidden>
@@ -280,12 +336,18 @@ body{margin:0}
 
   <div class="card" id="pOver" hidden>
     <h1>Авария <span>на шоссе</span></h1>
+    <div class="over-score">
+      <span class="lbl">Очки</span>
+      <b class="num" id="overScore">0</b>
+      <span class="rec" id="overRecord" hidden>Новый рекорд</span>
+      <span class="best" id="overBest"></span>
+    </div>
     <div class="over-stats" id="overStats"></div>
     <div class="row-btns">
       <button class="cta" id="retry" type="button">Ещё раз</button>
       <button class="ghost-btn" id="overMenu" type="button">В меню</button>
     </div>
-    <div class="tip">Пробел или Enter — сразу ещё раз. Влететь в бота сзади на скорости — авария, задеть бортом — только касание.</div>
+    <div class="tip">Пробел или Enter — сразу ещё раз, Esc — в меню.</div>
   </div>
 </div>
 
