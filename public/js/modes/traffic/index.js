@@ -2,12 +2,12 @@
 // collisions with it (stage 3) and scoring (stage 4: near misses, combo, distance).
 // Same interface as the track mode (see modes/track/index.js), so the car drives
 // through the same frozen stepCar().
-import { $, G, drift } from '../../state.js';
+import { $, G, drift, isTouch } from '../../state.js';
 import { scene, camera, moon, sky, stars } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, fmtN, flash } from '../../ui/hud.js';
 import { whoosh } from '../../core/audio.js';
-import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView } from './geometry.js';
+import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView, CAM } from './geometry.js';
 import { group, updateChunks, followGround } from './scene.js';
 import { createTraffic } from './sim.js';
 import { drawTraffic } from './view.js';
@@ -19,6 +19,28 @@ const newSeed = () => (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
 export const traffic = createTraffic(1);
 const asPlayer = car => ({ x: car.x, z: car.z, v: car.vz });
 export const score = createScoring();
+
+// Phones: the bottom of the screen belongs to the touch buttons and the speedometer.
+// The car is drawn above them. How high they reach is measured on the page itself,
+// so it holds for any phone, either orientation, and with the home-bar inset.
+let carAtKey = '', carAtTouch = CAM.carAt;
+function carAtOnScreen(fovV){
+  if(!isTouch) return CAM.carAt;
+  const W = innerWidth, H = innerHeight, key = W + 'x' + H;
+  if(key !== carAtKey){
+    let top = H;
+    for(const el of document.querySelectorAll('#touch .tb, #speedo')){
+      const r = el.getBoundingClientRect(); if(r.height > 0) top = Math.min(top, r.top);
+    }
+    if(top === H) return carAtTouch;                       // HUD not laid out yet: measure next frame
+    const reserve = H - top + 44;                           // half the car on screen plus a gap
+    const d = Math.max(0, H / 2 - reserve) / (H / 2);       // car's distance below the centre, 0..1
+    const a = Math.atan(d * Math.tan(fovV * Math.PI / 360)) * 180 / Math.PI;
+    carAtTouch = Math.max(0.1, Math.min(CAM.carAt, a / fovV));
+    carAtKey = key;
+  }
+  return carAtTouch;
+}
 
 // Best score, kept in this browser.
 const BEST_KEY = 'nightdrift.trafficBest';
@@ -134,7 +156,9 @@ export const trafficMode = {
     const along = Math.max(0, car.vz);
     if(!rig.init){ camSpeed = along; }
     camSpeed += (along - camSpeed) * (1 - Math.exp(-1.6*dt));
+    if(camera.view && camera.view.enabled) camera.clearViewOffset();   // the track's phone framing
     view = topDownView(camSpeed, camera.aspect);
+    if(isTouch) view = topDownView(camSpeed, camera.aspect, carAtOnScreen(view.fovV));
     const p = view.pitch * Math.PI / 180;
     const tx = car.x * 0.55, ty = view.height, tz = car.z - view.back;
     const k = rig.init ? 1 - Math.exp(-6*dt) : 1; rig.init = true;
