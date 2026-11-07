@@ -106,8 +106,18 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #tG{right:var(--rgt);width:84px;height:84px}
 #tB{right:calc(var(--rgt) + 96px);width:64px;height:64px}
 #tH{right:var(--rgt);bottom:calc(var(--bot) + 96px);width:84px;height:56px;border-radius:14px;color:var(--rose)}
-.touch #speedo{right:auto;left:50%;transform:translateX(-50%);min-width:140px;padding:8px 12px;bottom:calc(var(--bot) + 92px)}
-.touch #spd{font-size:32px}
+/* phones: the speedometer sits in the left corner above the steering buttons, mirroring
+   the drift button on the right, so the middle of the screen stays free for the car */
+.touch #speedo{right:auto;left:var(--lft);min-width:0;width:164px;padding:8px 12px;gap:3px;bottom:calc(var(--bot) + 96px)}
+.touch #spd{font-size:30px}
+.touch #gear{font-size:19px}
+/* phones held sideways: the car is mid-screen, so the speedometer goes to the bottom centre
+   between the steering and pedal buttons; score, map and combo line up in one row so the
+   drift button below them stays clear */
+@media (orientation:landscape) and (max-height:500px){
+  .touch #speedo{left:50%;transform:translateX(-50%);bottom:var(--bot)}
+  .touch #scorebox{grid-auto-flow:column;align-items:start}
+}
 .touch #map{width:110px;height:110px}
 .touch .btns{top:calc(var(--top) + 112px)}
 

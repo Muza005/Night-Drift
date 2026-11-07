@@ -212,7 +212,7 @@ function frame(now){
   if(G.state==='menu'||G.state==='lobby'||G.state==='results'){
     menuA+=dt*.22; rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
     camera.position.copy(rig.pos); rig.look.set(car.x,.9,car.z); camera.lookAt(rig.look); rig.init=false;
-    camera.fov=58;
+    camera.fov=58; if(camera.view && camera.view.enabled) camera.clearViewOffset();
   } else {
     G.mode.camera(car,dt);
   }

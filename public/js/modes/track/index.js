@@ -13,7 +13,7 @@
 //   mode.idle(car)                     where the car stands behind the menu
 //   mode.respawn(car)                  the R key: back onto the road
 // The traffic mode will implement the same methods.
-import { $, G, NET } from '../../state.js';
+import { $, G, NET, isTouch } from '../../state.js';
 import { camera } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
@@ -64,6 +64,9 @@ export const trackMode = {
     camPos.x+=(tx-camPos.x)*k; camPos.y+=(up-camPos.y)*k; camPos.z+=(tz-camPos.z)*k;
     camLook.x+=(car.x+fx*4-camLook.x)*k; camLook.y=1.1; camLook.z+=(car.z+fz*4-camLook.z)*k;
     camera.position.copy(camPos);
+    // phone held upright: shift the picture up (the view is unchanged, only framed higher)
+    // so the car sits above the speedometer and the touch buttons
+    if(isTouch && innerWidth<innerHeight) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight*0.1, innerWidth, innerHeight); else if(camera.view && camera.view.enabled) camera.clearViewOffset();
     if(G.shake>0){ camera.position.x+=(Math.random()-.5)*G.shake*.8; camera.position.y+=(Math.random()-.5)*G.shake*.5; G.shake=Math.max(0,G.shake-dt*2.5); }
     camera.lookAt(camLook);
     camera.fov=62+Math.min(20,sp*.38);
