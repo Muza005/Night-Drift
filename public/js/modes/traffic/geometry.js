@@ -54,16 +54,17 @@ export function constrainToHighway(car, dt, hooks) {
 //  1. the road ahead of the car stays visible for at least 3 s of closing in on the
 //     slowest traffic (and never less than 55 m);
 //  2. on narrow (phone) screens the whole highway, rails included, fits across.
-// The car sits about a third of the field of view below the centre of the screen.
+// The car sits about a third of the field of view below the centre of the screen;
+// on phones it sits higher, above the touch buttons (carAt is then passed in).
 const rad = d => d * Math.PI / 180, cot = a => 1 / Math.tan(a);
 export const CAM = { hfov: 68, pitchSlow: 58, pitchFast: 42, carAt: 0.34, minAhead: 55, aheadSeconds: 3, fitWidth: 2 * RAIL + 4 };
-export function topDownView(speed, aspect) {
+export function topDownView(speed, aspect, carAt = CAM.carAt) {
   const fovV = Math.max(38, Math.min(78, 2 * Math.atan(Math.tan(rad(CAM.hfov / 2)) / aspect) * 180 / Math.PI));
   const s = Math.min(1, Math.max(0, speed / 50));
   // tall screens have a tall field of view: keep its top edge at least 12° below the horizon
   const pitch = Math.max(CAM.pitchSlow + (CAM.pitchFast - CAM.pitchSlow) * s, fovV / 2 + 12);
   const ahead = Math.max(CAM.minAhead, CAM.aheadSeconds * (speed - TRAFFIC_MIN_SPEED) + 6);
-  const topRay = rad(pitch - fovV / 2), carRay = rad(pitch + fovV * CAM.carAt);
+  const topRay = rad(pitch - fovV / 2), carRay = rad(pitch + fovV * carAt);
   const hAhead = ahead / (cot(topRay) - cot(carRay));
   // width seen at the car's distance must hold the road: 2·dist·tan(hfov/2) ≥ fitWidth
   const hfovReal = 2 * Math.atan(Math.tan(rad(fovV / 2)) * aspect);
