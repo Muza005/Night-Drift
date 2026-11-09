@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stepCar } from '../public/js/core/physics.js';
 import { constrainToHighway, laneCenter } from '../public/js/modes/traffic/geometry.js';
-import { createTraffic, TYPES } from '../public/js/modes/traffic/sim.js';
-import { collideWithTraffic, HARD_HIT, HARD_SIDE, threat, WARN_TTC } from '../public/js/modes/traffic/collide.js';
+import { createTraffic, TYPES, HIT } from '../public/js/modes/traffic/sim.js';
+import { collideWithTraffic, HARD_HIT, HARD_SIDE } from '../public/js/modes/traffic/collide.js';
 
 const TYPE = Object.fromEntries(TYPES.map((t, i) => [t.name, i]));
 function bot(sim, type, lane, z, v) {
@@ -47,8 +47,12 @@ test('catching up with a sedan at ~20 km/h faster is a soft hit: bounce, bot slo
   assert.ok(c.vz < b.v + 0.5, 'the car should drop back behind the bot');
   assert.ok(b.z - c.z > (4.4 + 4.3) / 2 - 0.01, 'the car must not stay inside the bot');
   assert.ok(b.hazard > 0);
-  drive(c, sim, { ...NONE, down: 1 }, 2);
-  assert.ok(b.v < 22 * 0.75, `bot should slow toward 60 % (now ${(b.v * 3.6).toFixed(0)} km/h)`);
+  // it brakes steadily (never harder than HIT.BRAKE) down to 60 % of its speed
+  // (the simulation moves in 1/20 s steps, so a 1 s window holds 20 or 21 of them)
+  let prev = b.v, hardest = 0, slowest = b.v;
+  for (let i = 0; i < 3; i++) { drive(c, sim, { ...NONE, down: 1 }, 1); hardest = Math.max(hardest, prev - b.v); prev = b.v; slowest = Math.min(slowest, b.v); }
+  assert.ok(hardest <= HIT.BRAKE * 21 / 20 + 1e-6, `braked at ${hardest.toFixed(2)} m/s²`);
+  assert.ok(Math.abs(slowest - 22 * HIT.SLOW) < 1, `bot should brake to 60 % (lowest ${(slowest * 3.6).toFixed(0)} km/h)`);
 });
 
 test('scraping the side of a bot is soft, and the bot drifts back into its lane by itself', () => {
@@ -105,22 +109,37 @@ test('after many hits, soft and hard, the traffic still never overlaps itself', 
   assert.ok(hits > 30, `only ${hits} hits: the test did not exercise collisions`);
 });
 
-test('the crash warning: only for a hit that would be a crash, and only when it is close', () => {
-  const sim = empty();
-  const b = bot(sim, 'sedan', 1, 100, 25);
-  const rear = 100 - TYPES[b.t].len / 2;
-  // 25 m/s faster, 20 m to its tail: a crash in 0.8 s → warn
-  let T = threat(car(1, rear - 2.15 - 20, 50), sim);
-  assert.ok(T && T.bot === b && Math.abs(T.ttc - 0.8) < 1e-9);
-  // just under the crash line (it would be a bump): no warning
-  assert.equal(threat(car(1, rear - 2.15 - 5, 25 + HARD_HIT - 0.1), sim), null);
-  // far enough to brake: no warning yet
-  assert.equal(threat(car(1, rear - 2.15 - 25 * (WARN_TTC + 0.1), 50), sim), null);
-  // the next lane over: no warning
-  assert.equal(threat(car(2, rear - 2.15 - 20, 50), sim), null);
-  // already past it: no warning
-  assert.equal(threat(car(1, 120, 50), sim), null);
-  // steering out of its way: the car will be a lane over when it gets there
-  const dodge = car(1, rear - 2.15 - 20, 50); dodge.vx = -6;
-  assert.equal(threat(dodge, sim), null);
+
+test('after a hit the bot slides away from the blow, smoothly, and brakes; a straight blow from behind only brakes it', async () => {
+  const { slide } = await import('../public/js/modes/traffic/sim.js');
+  // the closed-form slide equals stepping it
+  let s = { off: 0.2, sv: 2.5 };
+  for (let i = 0; i < 6; i++) s = slide(s.off, s.sv, 0.05);
+  const once = slide(0.2, 2.5, 0.3);
+  assert.ok(Math.abs(s.off - once.off) < 1e-9 && Math.abs(s.sv - once.sv) < 1e-9);
+  assert.equal(slide(1.4, 3, 1).off, HIT.OFF_MAX, 'stops at its lane edge');
+
+  const track = (sim, b, c, input, seconds) => {      // largest sideways move of the bot in one simulation step
+    let jump = 0, lastX = b.x, lastT = sim.time;
+    for (let t = 0; t < seconds; t += 1 / 60) {
+      drive(c, sim, input, 1 / 60);
+      if (sim.time !== lastT) { jump = Math.max(jump, Math.abs(b.x - lastX)); lastX = b.x; lastT = sim.time; }
+    }
+    return jump;
+  };
+  // side: the car comes in from lane 1 (−x side of lane 0): the bot slides to +x, away from it
+  { const sim = empty(), b = bot(sim, 'sedan', 0, 4, 25), c = car(1, 0, 25);
+    const jump = track(sim, b, c, { ...GAS, left: 1 }, 0.3) ;
+    track(sim, b, c, GAS, 1.2);
+    assert.ok(b.off > 0.3, `pushed away from the car (off ${b.off.toFixed(2)})`);
+    assert.ok(jump <= HIT.SV_MAX * 0.05 + 1e-9, `moved ${jump.toFixed(3)} m sideways in one step: a jump`);
+    assert.ok(b.hazard > 0); }
+  // from behind, dead centre: no slide, just braking
+  { const sim = empty(), b = bot(sim, 'sedan', 1, (4.4 + 4.3) / 2 + 2, 22), c = car(1, 0, 30);
+    drive(c, sim, NONE, 1.5);
+    assert.ok(b.hazard > 0 && Math.abs(b.off) < 1e-6 && !b.sv, 'a straight blow does not push it sideways'); }
+  // from behind, off-centre (the car 0.8 m to its −x side): it turns away to +x
+  { const sim = empty(), b = bot(sim, 'sedan', 1, (4.4 + 4.3) / 2 + 2, 22), c = car(1, 0, 30); c.x -= 0.8;
+    drive(c, sim, NONE, 1.5);
+    assert.ok(b.hazard > 0 && b.off > 0.2, `an off-centre blow turns it away (off ${b.off.toFixed(2)})`); }
 });

@@ -18,7 +18,7 @@ import { camera } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
-import { P, TG, START, placeAt, placeGrid, constrainToTrack } from './geometry.js';
+import { P, TG, START, placeAt, placeGrid, constrainToTrack, keepInWalls } from './geometry.js';
 import { group } from './scene.js';
 
 /* minimap */
@@ -40,6 +40,7 @@ function drawMap(car){
 }
 
 export const trackMode = {
+  ghostBounds(s, g){ keepInWalls(s, g.walls || (g.walls = {})); },   // another player's predicted car stays inside the walls
   id: 'track',
 
   show(){ group.visible=true; $('map').hidden=false; },
