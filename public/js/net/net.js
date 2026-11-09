@@ -14,7 +14,9 @@
    blink and pass through others for a moment (no bumps either way while ghosted). */
 import { $, G, NET, serverNow } from '../state.js';
 import { car } from '../player.js';
-import { canvas, cv, tex } from '../core/render.js';
+import { canvas, cv, tex, scene } from '../core/render.js';
+import { wake, stepDraft } from '../core/draft.js';
+import { createWake, updateWake, disposeWake } from '../core/draftfx.js';
 import { makeCar, disposeCar } from '../core/carModel.js';
 import { addMark, emitSmoke, clearMarks } from '../core/fx.js';
 import { clearInput } from '../core/input.js';
@@ -171,9 +173,10 @@ function makeLabel(name,color){
 function addGhost(id,p){
   if(NET.ghosts.has(id)) return;
   const m=makeCar(p.color,false); m.root.add(makeLabel(p.name,p.color)); m.root.visible=false;
-  NET.ghosts.set(id,{id,p,m,buf:[],x:0,z:0});
+  const fx=createWake(); scene.add(fx.root);              // its slipstream lines (core/draftfx.js)
+  NET.ghosts.set(id,{id,p,m,fx,buf:[],x:0,z:0});
 }
-function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); NET.ghosts.delete(id); }
+function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
 function pushSnap(g,p){
   if(NET.room && NET.room.state.phase==='lobby'){ g.buf.length=0; g.last=g.lastPrev=null; g.off=null; return; }
@@ -255,10 +258,13 @@ function onBump(m){
 export function updateGhosts(dt){
   const show=NET.online && (G.state==='count'||G.state==='race'||G.state==='results');
   const nowS=serverNow();
+  // Slipstream: only racing, and not while either car is a blinking ghost after a crash.
+  const drafting=NET.online && G.state==='race' && !NET.finished && !(G.mode.isGhost && G.mode.isGhost());
+  let inPocket=false;
   for(const g of NET.ghosts.values()){
     const b=g.buf, m=g.m;
     m.root.visible=show && b.length>0 && g.p.connected;
-    if(!m.root.visible) continue;
+    if(!m.root.visible){ updateWake(g.fx,null,g.x,g.z,dt); continue; }
     // a crashed car blinks (its parts, not the car: the car still counts as on the road):
     // fast while stopped, slower while it can't be hit yet
     const blink = nowS < g.p.ghostUntil;
@@ -289,6 +295,10 @@ export function updateGhosts(dt){
     const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
     g.x=s.x; g.z=s.z; g.h=s.h;
     m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
+    // its pocket, seen from our car: the white lines show when we are close behind it
+    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished) ? wake(car,g) : null;
+    if(wk && wk.inside) inPocket=true;
+    updateWake(g.fx,wk,s.x,s.z,dt);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
     m.roll+=((-s.steer*s.slide*.1)-m.roll)*Math.min(1,dt*6); m.body.rotation.z=m.roll;
@@ -300,6 +310,8 @@ export function updateGhosts(dt){
       else m.lastMark[k]=null;
     }
   }
+  // how much slipstream push our car gets (main.js passes it to stepCar as input.draft)
+  stepDraft(NET.draft, inPocket, dt);
 }
 
 // Sends our car ~30 times a second while racing. Called once per frame from the loop.

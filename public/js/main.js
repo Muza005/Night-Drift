@@ -176,6 +176,7 @@ function frame(now){
   // bots exactly where they are drawn this frame.
   G.mode.world(car,gdt);
 
+  input.draft=NET.draft.level;                               // slipstream behind another player
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
     const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
@@ -229,6 +230,7 @@ function frame(now){
 
   // HUD
   const kmh=Math.round(Math.hypot(car.vx,car.vz)*3.6);
+  { const on=NET.draft.level>.05; $('speedo').classList.toggle('draft',on); $('hwbar').classList.toggle('draft',on); }
   setT('spd',String(kmh)); setT('gear',car.vF<-.5?'R':kmh<2?'N':String(gear));
   $('sbar').firstChild.style.width=Math.min(100,kmh/180*100)+'%';
   setT('bPause',NET.online?'Выйти':'Пауза');
