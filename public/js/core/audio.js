@@ -14,7 +14,11 @@ export function audioInit(){
     const ns=ctx.createBufferSource(); ns.buffer=buf; ns.loop=true;
     const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1500; bp.Q.value=3.5;
     const sg=ctx.createGain(); sg.gain.value=0; ns.connect(bp); bp.connect(sg); sg.connect(master); ns.start();
-    A={ctx,master,o1,o2,lp,eg,sg,bp,buf};
+    // slipstream wind: the same noise, high-passed, loud only while in a pocket (audioDraft)
+    const ws=ctx.createBufferSource(); ws.buffer=buf; ws.loop=true; ws.playbackRate.value=.7;
+    const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
+    const wg=ctx.createGain(); wg.gain.value=0; ws.connect(hp); hp.connect(wg); wg.connect(master); ws.start();
+    A={ctx,master,o1,o2,lp,eg,sg,bp,buf,wg,hp,hornAt:0,draftWas:0};
   }catch(e){ A=null; }
 }
 export function audioUpdate(rpm,thr,slide){
@@ -42,6 +46,25 @@ export function whoosh(pan,strength){
   s.connect(f); f.connect(g);
   if(c.createStereoPanner){ const p=c.createStereoPanner(); p.pan.value=pan; g.connect(p); p.connect(A.master); } else g.connect(A.master);
   s.start(t, Math.random()*1.5); s.stop(t+.5);
+}
+// A bot's horn: two notes a third apart, a short angry blast (pan -1 left … 1 right).
+// Never more than one every 0.6 s.
+export function horn(pan, vol=1){
+  if(!A||muted) return; const c=A.ctx, t=c.currentTime;
+  if(t-A.hornAt<.6) return; A.hornAt=t;
+  const g=c.createGain(); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.12*vol,t+.02);
+  g.gain.setValueAtTime(.12*vol,t+.26); g.gain.exponentialRampToValueAtTime(.0005,t+.42);
+  const lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1700;
+  for(const f of [392,494]){ const o=c.createOscillator(); o.type='square'; o.frequency.setValueAtTime(f,t); o.frequency.linearRampToValueAtTime(f*.96,t+.42); o.connect(lp); o.start(t); o.stop(t+.45); }
+  lp.connect(g);
+  if(c.createStereoPanner){ const p=c.createStereoPanner(); p.pan.value=pan; g.connect(p); p.connect(A.master); } else g.connect(A.master);
+}
+// Slipstream: wind rises with the push (0..1); stepping into a pocket gives a rush of air.
+export function audioDraft(level){
+  if(!A) return; const t=A.ctx.currentTime;
+  A.wg.gain.setTargetAtTime(level*.09,t,.12); A.hp.frequency.setTargetAtTime(900+level*900,t,.2);
+  if(level>.05 && A.draftWas<=.05) whoosh(0,.9);
+  A.draftWas=level;
 }
 export function toggleSound(){ muted=!muted; $('bSound').textContent='Звук: '+(muted?'выкл':'вкл'); if(A) A.master.gain.setTargetAtTime(muted?0:.5,A.ctx.currentTime,.05); }
 export function audioSuspend(){ if(A) A.ctx.suspend(); }

@@ -87,3 +87,25 @@ export function collideWithTraffic(car, sim, hooks) {
   }
   return hits;
 }
+
+// The bot the car is about to crash into, for the warning on the road (or null): ahead of
+// the car and in its path where they would meet, closing in along the road at a crash
+// speed (HARD_HIT, 32 km/h, or more) and less than WARN_TTC seconds away.
+export const WARN_TTC = 1.4;
+export function threat(car, sim) {
+  let best = null;
+  const nose = car.z + 2.15;
+  for (const b of sim.bots) {
+    const T = TYPES[b.t], P = botPose(b, sim.alpha);
+    const gap = P.z - T.len / 2 - nose;
+    if (gap < -0.5 || gap > 140) continue;
+    const closing = car.vz - P.vz;
+    if (closing < HARD_HIT) continue;
+    const ttc = Math.max(0, gap) / closing;
+    if (ttc > WARN_TTC) continue;
+    const meetX = car.x + car.vx * ttc, botX = P.x + P.vx * ttc;
+    if (Math.abs(meetX - botX) > T.wid / 2 + 1.1) continue;     // the car is 2 m wide
+    if (!best || ttc < best.ttc) best = { bot: b, ttc, closing, x: P.x, rear: P.z - T.len / 2, wid: T.wid };
+  }
+  return best;
+}

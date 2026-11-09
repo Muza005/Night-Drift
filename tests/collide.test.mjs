@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { stepCar } from '../public/js/core/physics.js';
 import { constrainToHighway, laneCenter } from '../public/js/modes/traffic/geometry.js';
 import { createTraffic, TYPES } from '../public/js/modes/traffic/sim.js';
-import { collideWithTraffic, HARD_HIT, HARD_SIDE } from '../public/js/modes/traffic/collide.js';
+import { collideWithTraffic, HARD_HIT, HARD_SIDE, threat, WARN_TTC } from '../public/js/modes/traffic/collide.js';
 
 const TYPE = Object.fromEntries(TYPES.map((t, i) => [t.name, i]));
 function bot(sim, type, lane, z, v) {
@@ -103,4 +103,24 @@ test('after many hits, soft and hard, the traffic still never overlaps itself', 
     }
   }
   assert.ok(hits > 30, `only ${hits} hits: the test did not exercise collisions`);
+});
+
+test('the crash warning: only for a hit that would be a crash, and only when it is close', () => {
+  const sim = empty();
+  const b = bot(sim, 'sedan', 1, 100, 25);
+  const rear = 100 - TYPES[b.t].len / 2;
+  // 25 m/s faster, 20 m to its tail: a crash in 0.8 s → warn
+  let T = threat(car(1, rear - 2.15 - 20, 50), sim);
+  assert.ok(T && T.bot === b && Math.abs(T.ttc - 0.8) < 1e-9);
+  // just under the crash line (it would be a bump): no warning
+  assert.equal(threat(car(1, rear - 2.15 - 5, 25 + HARD_HIT - 0.1), sim), null);
+  // far enough to brake: no warning yet
+  assert.equal(threat(car(1, rear - 2.15 - 25 * (WARN_TTC + 0.1), 50), sim), null);
+  // the next lane over: no warning
+  assert.equal(threat(car(2, rear - 2.15 - 20, 50), sim), null);
+  // already past it: no warning
+  assert.equal(threat(car(1, 120, 50), sim), null);
+  // steering out of its way: the car will be a lane over when it gets there
+  const dodge = car(1, rear - 2.15 - 20, 50); dodge.vx = -6;
+  assert.equal(threat(dodge, sim), null);
 });

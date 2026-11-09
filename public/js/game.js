@@ -49,6 +49,7 @@ export function finishLap(){
 // burns). Hard: the run ends — the main loop plays the crash and shows the result.
 function onTrafficHit(hit){
   if(G.state!=='race') return;
+  if(G.mode.onHit) G.mode.onHit(car, hit);                    // traffic mode: shows how hard it was
   if(!hit.hard){ crash(Math.max(4, hit.impact)); return; }
   if(NET.online){ dropDrift(); G.mode.wreck(car); return; }   // online the run goes on: stop, blink, come back
   G.state='crash'; G.crashT=0; G.shake=1; thud(30); dropDrift();

@@ -54,3 +54,37 @@ moon.castShadow = true; moon.shadow.mapSize.set(2048,2048);
 Object.assign(moon.shadow.camera,{left:-40,right:40,top:40,bottom:-40,near:1,far:220});
 moon.shadow.bias = -0.0006;
 scene.add(moon, moon.target);
+
+/* ---------- automatic quality ----------
+   While racing, the frame rate is averaged over 3 s. Below 45 fps the picture steps
+   down one level, at most every 3 s: first fewer pixels, then coarser moon shadows,
+   then fewer pixels again. (Shadows are made cheaper, not switched off: switching them
+   off recompiles every material, a second-long freeze on a slow phone.) It never steps
+   back up during a session, so it cannot flicker between levels; a reload starts
+   from the top again. A fast device never leaves level 0 and looks as before. */
+const TOP_RATIO = Math.min(devicePixelRatio, isTouch ? 1.5 : 2);
+export const QUALITY = [
+  { ratio: TOP_RATIO, shadow: 2048 },
+  { ratio: Math.min(TOP_RATIO, 1.25), shadow: 2048 },
+  { ratio: Math.min(TOP_RATIO, 1), shadow: 2048 },
+  { ratio: Math.min(TOP_RATIO, 1), shadow: 1024 },
+  { ratio: Math.min(TOP_RATIO, .8), shadow: 512 },
+];
+const Q = { level: 0, t: 0, frames: 0 };
+export const quality = () => Q.level;
+function applyQuality(){
+  const L = QUALITY[Q.level];
+  if(renderer.getPixelRatio() !== L.ratio){ renderer.setPixelRatio(L.ratio); resize(); }
+  if(moon.shadow.mapSize.x !== L.shadow){
+    moon.shadow.mapSize.set(L.shadow, L.shadow);
+    if(moon.shadow.map){ moon.shadow.map.dispose(); moon.shadow.map = null; }   // rebuilt at the new size next frame
+  }
+}
+// realDt: seconds since the last frame; racing: whether the clock should run.
+export function qualityTick(realDt, racing){
+  if(!racing || realDt > .25){ Q.t = Q.frames = 0; return; }   // a hitch (tab switch, loading) is not slowness
+  Q.t += realDt; Q.frames++;
+  if(Q.t < 3) return;
+  const fps = Q.frames / Q.t; Q.t = Q.frames = 0;
+  if(fps < 45 && Q.level < QUALITY.length - 1){ Q.level++; applyQuality(); }
+}

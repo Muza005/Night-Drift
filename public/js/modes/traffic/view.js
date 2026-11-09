@@ -6,10 +6,10 @@
 // lights that flare when the bot brakes, and blinkers for 1 s before a lane change.
 import { isTouch } from '../../state.js';
 import { glowTex } from '../../core/render.js';
-import { TYPES, CFG } from './sim.js';
+import { TYPES, CFG, DENSITY } from './sim.js';
 import { group } from './scene.js';
 
-const MAX = CFG.maxBots;
+const MAX = CFG.maxBots * DENSITY.high;          // room for the densest traffic
 
 // Merge box parts (non-indexed) into one BufferGeometry.
 function boxes(list) {

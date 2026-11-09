@@ -4,13 +4,13 @@
 // G.mode.constrain() (the mode's walls and rules). Everything else here is the
 // single-file version's loop, split across modules.
 import { $, G, NET, drift, isTouch, serverNow } from './state.js';
-import { canvas, renderer, scene, camera, moon } from './core/render.js';
+import { canvas, renderer, scene, camera, moon, qualityTick } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
-import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume } from './core/audio.js';
+import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft } from './core/audio.js';
 import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
@@ -101,6 +101,14 @@ $('pauseMenu').addEventListener('click',()=>{ if(G.state==='pause') toMenu(); })
 
 /* main menu: "Одному / С друзьями" and the two mode cards */
 let together = LS.get('nightdrift.play')==='friends';
+// highway traffic density: low | mid | high (modes/traffic/sim.js DENSITY), remembered;
+// online the host's choice in the lobby wins
+G.density = ['low','mid','high'].includes(LS.get('nightdrift.density')) ? LS.get('nightdrift.density') : 'mid';
+$('densPick').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b || G.state!=='menu') return;
+  G.density=b.dataset.dens; LS.set('nightdrift.density',G.density); renderMenu();
+  if(G.mode.id==='traffic') G.mode.idle(car);           // the road behind the menu shows the new density
+});
 function renderMenu(){
   $('segSolo').setAttribute('aria-pressed', String(!together));
   $('segFriends').setAttribute('aria-pressed', String(together));
@@ -110,6 +118,7 @@ function renderMenu(){
   $('goTrack').textContent = $('goTraffic').textContent = together ? 'Комната с друзьями' : 'Поехали';
   $('mTrack').classList.toggle('last', G.mode.id==='track');
   $('mTraffic').classList.toggle('last', G.mode.id==='traffic');
+  for(const b of $('densPick').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.dens===G.density));
   $('menuNote').textContent = together ? 'Создай комнату и отправь код друзьям. Режим можно сменить и в комнате.' : '';
 }
 function setTogether(v){ together=v; LS.set('nightdrift.play', v?'friends':'solo'); renderMenu(); }
@@ -157,6 +166,7 @@ function frame(now){
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
   // Below 20 fps the game runs in slow motion; others must predict this car at its real pace.
   NET.pace=(NET.pace||1)*.9+(dt/realDt)*.1;
+  qualityTick(realDt, G.state==='race');                      // slow device: fewer pixels, then no shadows
   let info={drifting:false,ang:0,speed:Math.hypot(car.vF,car.vR)};
 
   if(G.state==='count'){
@@ -177,6 +187,7 @@ function frame(now){
   G.mode.world(car,gdt);
 
   input.draft=NET.draft.level;                               // slipstream behind another player
+  audioDraft(G.state==='race' ? NET.draft.level : 0);
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
     const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();

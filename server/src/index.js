@@ -29,6 +29,7 @@ const COLORS = [0xff3b6b, 0x3ef0ff, 0xffc23d, 0x9b7bff, 0x4dff9a, 0xff8a3d];
 const MODES = ['track', 'traffic'];
 // Traffic run lengths (s) the host can pick. EXTRA_DURATION adds one (tests use a short run).
 const DURATIONS = [120, 180, 300].concat(Number(process.env.EXTRA_DURATION) > 0 ? [Number(process.env.EXTRA_DURATION)] : []);
+const DENSITIES = ['low', 'mid', 'high'];   // traffic density (public/js/modes/traffic/sim.js DENSITY)
 const WRECK_MS = 3000, GHOST_MS = 1500;     // online crash: stopped and blinking, then can't be hit
 const SNAPSHOT_EVERY = 2;                    // traffic steps (1/20 s) per snapshot: 10 a second
 
@@ -89,6 +90,7 @@ class RaceState extends Schema {
     this.startAt = 0;        // server clock (ms) of the green light
     this.mode = 'track';     // track | traffic, picked by the host in the lobby
     this.duration = 180;     // traffic: run length, s
+    this.density = 'mid';    // traffic: low | mid | high
     this.endAt = 0;          // traffic: server clock (ms) when the run ends
     this.seed = 0;           // traffic: seed of this run's traffic
     this.players = new MapSchema();
@@ -96,7 +98,7 @@ class RaceState extends Schema {
 }
 defineTypes(RaceState, {
   phase: 'string', hostId: 'string', laps: 'uint8', startAt: 'number',
-  mode: 'string', duration: 'uint16', endAt: 'float64', seed: 'uint32',
+  mode: 'string', duration: 'uint16', density: 'string', endAt: 'float64', seed: 'uint32',
   players: { map: Player },
 });
 
@@ -122,6 +124,7 @@ class RaceRoom extends Room {
     this.roomId = await freeCode();
     this.setState(new RaceState());
     if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
+    if (options && DENSITIES.includes(options.density)) this.state.density = options.density;
     this.traffic = null;         // traffic mode: the simulation of the current run
     this.trafficTimer = null;
     this.botHitAt = new Map();   // bot id -> server ms of the last accepted hit
@@ -146,6 +149,7 @@ class RaceRoom extends Room {
       if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
       if (MODES.includes(m.mode)) this.state.mode = m.mode;
       if (DURATIONS.includes(m.duration)) this.state.duration = m.duration;
+      if (DENSITIES.includes(m.density)) this.state.density = m.density;
     });
 
     this.onMessage('state', (client, m) => {
@@ -304,7 +308,7 @@ class RaceRoom extends Room {
     s.seed = (Math.random() * 0xffffffff) >>> 0;
     this.traffic = lib.createTraffic(s.seed);
     const grid = [...s.players.values()].sort((a, b) => a.slot - b.slot).map(p => ({ ...lib.startPose(p.slot), v: 0 }));
-    this.traffic.reset(s.seed, grid);
+    this.traffic.reset(s.seed, grid, s.density);
     this.botHitAt.clear();
     let last = Date.now(), steps = 0;
     this.trafficTimer = setInterval(() => {
