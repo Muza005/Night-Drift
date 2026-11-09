@@ -50,6 +50,7 @@ export function finishLap(){
 function onTrafficHit(hit){
   if(G.state!=='race') return;
   if(!hit.hard){ crash(Math.max(4, hit.impact)); return; }
+  if(NET.online){ dropDrift(); G.mode.wreck(car); return; }   // online the run goes on: stop, blink, come back
   G.state='crash'; G.crashT=0; G.shake=1; thud(30); dropDrift();
   if(G.mode.breakCombo) G.mode.breakCombo();
 }
