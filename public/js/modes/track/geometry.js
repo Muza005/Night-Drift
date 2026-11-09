@@ -43,7 +43,7 @@ export function constrainToTrack(car,dt,hooks){
     if(vn>0){ car.vx-=n.x*s*vn*1.45; car.vz-=n.z*s*vn*1.45; car.vx*=.9; car.vz*=.9; if(vn>2.5) hooks.onWall(vn); }
   }
   car.off=Math.abs(lat)>HALF+CURB;
-  if(car.off){ const k=Math.exp(-.9*dt); car.vx*=k; car.vz*=k; }
+  if(car.off){ const k=Math.exp(-.45*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: half the drag it had before
 
   // laps
   if(car.prog>=N){ car.prog-=N; hooks.onLap(); }

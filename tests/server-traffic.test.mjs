@@ -78,15 +78,20 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   const bot = snap.bots.sort((a, b) => a.z - b.z)[0];
   A.send('hitBot', { id: bot.id, dv: -5, dx: 0.5 }); await sleep(400);
   assert.equal(decodeSnapshot(pb.snaps.at(-1)).bots.find(b => b.id === bot.id).hazard, 0, 'a hit from 200 m away must be refused');
-  // drive up behind it at 216 km/h, then sit 5 m behind it at its speed
+  // drive up behind it at 216 km/h; within 30 m, slot in 6 m behind it at its speed
+  // (snapshots come 10 times a second, so at 216 km/h a check against the last one can
+  // be 4 m out: placing the car right after a fresh snapshot keeps the gap exact)
   let near = null;
   pa.me.vz = 60;
   for (let i = 0; i < 100; i++) {
     near = decodeSnapshot(pa.snaps.at(-1)).bots.find(b => b.id === bot.id);
-    if (near.z - pa.me.z < 12) break;
+    if (near.z - pa.me.z < 30) break;
     await sleep(100);
   }
-  pa.me.x = [6, 2, -2, -6][near.lane]; pa.me.vz = near.v;
+  pa.me.vz = near.v;
+  const n0 = pa.snaps.length; while (pa.snaps.length === n0) await sleep(5);
+  near = decodeSnapshot(pa.snaps.at(-1)).bots.find(b => b.id === bot.id);
+  pa.me.x = [6, 2, -2, -6][near.lane]; pa.me.z = near.z - 6; pa.me.vz = near.v;
   await sleep(200);
   A.send('hitBot', { id: bot.id, dv: -5, dx: 0.5 }); await sleep(400);
   const after = decodeSnapshot(pb.snaps.at(-1)).bots.find(b => b.id === bot.id);

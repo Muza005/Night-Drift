@@ -60,6 +60,12 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .cbar i{display:block;height:100%;width:0;background:var(--amber)}
 #ctag{font-size:12px;font-weight:700;color:var(--cyan);visibility:hidden}
 #ctag.on{visibility:visible}
+/* slipstream: the speed glows white and a «карман» tag appears */
+#speedo.draft{box-shadow:0 0 0 1px rgba(255,255,255,.7),0 0 26px rgba(255,255,255,.35)}
+#speedo.draft #spd,#hwbar.draft .hs b{color:#fff;text-shadow:0 0 14px rgba(255,255,255,.85)}
+#speedo.draft::before{content:'карман';position:absolute;top:-26px;left:50%;transform:translateX(-50%);font:800 11px var(--f-display);letter-spacing:.14em;text-transform:uppercase;color:#0b0820;background:#fff;border-radius:999px;padding:3px 10px;box-shadow:0 0 16px rgba(255,255,255,.6);white-space:nowrap}
+#hwbar.draft .hs .lbl{font-size:0}
+#hwbar.draft .hs .lbl::after{content:'карман';font-size:9px;color:#fff;letter-spacing:.1em}
 #speedo.hot{box-shadow:0 0 0 1px rgba(62,240,255,.55),0 0 22px rgba(62,240,255,.35)}
 .nmpop{position:absolute;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;white-space:nowrap;pointer-events:none;animation:nmrise 1.1s ease-out forwards;text-align:center;line-height:1.05}
 .nmpop small{display:block;font-size:.62em;opacity:.9}
