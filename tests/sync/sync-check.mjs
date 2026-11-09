@@ -165,6 +165,7 @@ async function runOnce(browser) {
       if (j + 1 >= ra.length || ra[j][0] > t) continue;
       const a0 = ra[j], a1 = ra[j + 1], u = (t - a0[0]) / Math.max(1e-9, a1[0] - a0[0]);
       errs.push(Math.hypot(gx - (a0[1] + (a1[1] - a0[1]) * u), gz - (a0[2] + (a1[2] - a0[2]) * u)));
+      if (process.env.SYNC_DEBUG && errs.at(-1) > 6) console.log('BIG', (t - ra[0][0]).toFixed(0), 'err', errs.at(-1).toFixed(1), 'ghost', gx.toFixed(1), gz.toFixed(1), 'A', a0[1].toFixed(1), a0[2].toFixed(1), 'v', (a0[3]*3.6).toFixed(0), 'ghostflag', a0[4], 'dtA', (a1[0]-a0[0]).toFixed(0));
     }
     errs.sort((a, b) => a - b);
     const mean = errs.reduce((s, e) => s + e, 0) / errs.length;

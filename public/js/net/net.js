@@ -294,6 +294,7 @@ export function updateGhosts(dt){
     if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
     const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
     const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
+    if(G.mode.ghostBounds) G.mode.ghostBounds(s,g);        // never through a wall or a rail (the prediction does not know them)
     g.x=s.x; g.z=s.z; g.h=s.h;
     m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
     // its pocket, seen from our car: the white lines show when we are close behind it

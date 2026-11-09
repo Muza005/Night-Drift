@@ -10,7 +10,7 @@ import { encodeSnapshot } from '../public/js/modes/traffic/netcodec.js';
 import { createRemoteTraffic } from '../public/js/modes/traffic/remote.js';
 import { laneCenter } from '../public/js/modes/traffic/geometry.js';
 
-function run({ seconds = 60, seed = 3 } = {}) {
+function run({ seconds = 60, seed = 3, hits = false } = {}) {
   // 1. the server: the simulation, a player driving through traffic, a snapshot every 2 steps
   const sim = createTraffic(seed);
   const pl = { x: laneCenter(1), z: 0, v: 0 };
@@ -19,6 +19,8 @@ function run({ seconds = 60, seed = 3 } = {}) {
   for (let k = 1; k <= seconds / STEP; k++) {
     pl.v = Math.min(36, pl.v + 4 * STEP); pl.z += pl.v * STEP;
     sim.stepOnce([pl]);
+    // every 2 s a bot near the player is hit: it slides and brakes (sim.js HIT)
+    if (hits && k % 40 === 0) { const b = sim.bots.find(o => o.z > pl.z && o.z < pl.z + 60); if (b) sim.hit(b.id, { dv: 2, sv: (k % 80 ? 1 : -1) * 2.5, hard: k % 120 === 0 }); }
     truth.push(new Map(sim.bots.map(b => [b.id, { x: b.x, z: b.z }])));
     if (k % 2 === 0) snaps.push({ t: k * STEP * 1000, data: encodeSnapshot(sim, k * STEP * 1000) });
   }
@@ -66,4 +68,11 @@ test('players see every bot within centimetres of the truth and of each other', 
     assert.ok(err.mean < 0.15 && err.p95 < 0.5, `prediction error too large: mean ${err.mean}, p95 ${err.p95}`);
     assert.ok(diff.mean < 0.15 && diff.p95 < 0.5, `two players disagree too much: mean ${diff.mean}, p95 ${diff.p95}`);
   }
+});
+
+test('bots that were hit (sliding, braking) are predicted just as closely', () => {
+  const { err, diff } = run({ seed: 5, hits: true });
+  console.log(`    with hits: player vs truth mean ${err.mean.toFixed(3)} m, p95 ${err.p95.toFixed(3)} m · A vs B mean ${diff.mean.toFixed(3)} m`);
+  assert.ok(err.mean < 0.15 && err.p95 < 0.5, `prediction error too large: mean ${err.mean}, p95 ${err.p95}`);
+  assert.ok(diff.mean < 0.15 && diff.p95 < 0.5, `two players disagree too much: mean ${diff.mean}, p95 ${diff.p95}`);
 });

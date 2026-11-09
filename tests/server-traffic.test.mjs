@@ -84,7 +84,7 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   // 2. a hit far from the bot is refused; a hit next to it slows it down for everyone
   let snap = decodeSnapshot(pa.snaps.at(-1));
   const bot = snap.bots.sort((a, b) => a.z - b.z)[0];
-  A.send('hitBot', { id: bot.id, dv: -5, dx: 0.5 }); await sleep(400);
+  A.send('hitBot', { id: bot.id, dv: -5, sv: 1.5 }); await sleep(400);
   assert.equal(decodeSnapshot(pb.snaps.at(-1)).bots.find(b => b.id === bot.id).hazard, 0, 'a hit from 200 m away must be refused');
   // drive up behind it at 216 km/h; within 30 m, slot in 6 m behind it at its speed
   // (snapshots come 10 times a second, so at 216 km/h a check against the last one can
@@ -101,7 +101,7 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   near = decodeSnapshot(pa.snaps.at(-1)).bots.find(b => b.id === bot.id);
   pa.me.x = [6, 2, -2, -6][near.lane]; pa.me.z = near.z - 6; pa.me.vz = near.v;
   await sleep(200);
-  A.send('hitBot', { id: bot.id, dv: -5, dx: 0.5 }); await sleep(400);
+  A.send('hitBot', { id: bot.id, dv: -5, sv: 1.5 }); await sleep(400);
   const after = decodeSnapshot(pb.snaps.at(-1)).bots.find(b => b.id === bot.id);
   assert.ok(after.hazard > 0, 'player B must see the hazard lights of the bot A hit');
   assert.ok(after.v < near.v - 3, `bot should have slowed (from ${near.v} to ${after.v})`);

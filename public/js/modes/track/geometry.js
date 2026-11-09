@@ -30,6 +30,16 @@ export function nearest(car,full){
   return bi;
 }
 
+// Another player's predicted car must not be drawn through the walls (see keepOnRoad in
+// modes/traffic/geometry.js): a prediction past a wall is bounced back off it. `memo`
+// keeps the last track point found for this car, so the search stays local.
+export function keepInWalls(p, memo){
+  const i=nearest({x:p.x,z:p.z,idx:memo.idx||0}, memo.idx===undefined); memo.idx=i;
+  const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
+  if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
+  return p;
+}
+
 // Runs right after stepCar() in the same substep. hooks.onWall(power) is the old
 // crash(power) call, hooks.onLap() the old finishLap() call.
 export function constrainToTrack(car,dt,hooks){

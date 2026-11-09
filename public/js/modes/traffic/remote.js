@@ -14,7 +14,7 @@
 // reacting at once; the server applies the same hit and its next snapshots carry it.
 // Snapshots sent before the server could have seen the hit are not applied to that bot.
 import { decodeSnapshot, predictBot } from './netcodec.js';
-import { STEP } from './sim.js';
+import { STEP, applyHit, slide } from './sim.js';
 
 export function createRemoteTraffic({ now, send, rtt }) {
   const R = { bots: [], alpha: 1, time: 0, online: true };
@@ -68,13 +68,15 @@ export function createRemoteTraffic({ now, send, rtt }) {
   };
 
   // The local player hit bot `id`: show its reaction now, tell the server.
-  R.hit = (id, { dv = 0, dx = 0 } = {}) => {
+  R.hit = (id, { dv = 0, sv = 0, hard = false } = {}) => {
     const e = base.get(id); if (!e) return null;
-    const t = now(), P = pose(e.b, (t - e.t) / 1000);
-    base.set(id, { t, b: { ...e.b, lane: P.lane, from: P.from, to: P.to, p: P.p, z: P.z,
-      v: Math.max(0, P.v + dv), a: 0, off: Math.max(-1.2, Math.min(1.2, P.off + dx)), hazard: 3, dir: 0 } });
+    const t = now(), age = (t - e.t) / 1000, P = pose(e.b, age);
+    const b = { ...e.b, lane: P.lane, from: P.from, to: P.to, p: P.p, z: P.z, v: P.v, off: P.off,
+      sv: slide(e.b.off, e.b.sv || 0, age).sv, hazard: P.hazard };
+    applyHit(b, { dv, sv, hard });                  // the same reaction the server will compute
+    base.set(id, { t, b });
     hold.set(id, t + (rtt() || 200) / 2 + 120);
-    send('hitBot', { id, dv, dx });
+    send('hitBot', { id, dv, sv, hard: !!hard, t });
     return disp.get(id) || null;
   };
   return R;

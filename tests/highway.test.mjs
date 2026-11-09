@@ -75,3 +75,21 @@ test('lanes: 0 is the leftmost as the driver sees it (+X is to the left facing +
   for (let i = 0; i < 60; i++) stepCar(car, {up:1,down:0,left:0,right:1,hb:0}, 1/60);
   assert.ok(car.x < 0);
 });
+
+test("another player's predicted car is never drawn through a rail or a wall", async () => {
+  const { createRequire } = await import('node:module');
+  globalThis.THREE ??= createRequire(import.meta.url)('three');
+  const lim = H.RAIL - 1.25;
+  assert.equal(H.keepOnRoad({ x: 3, z: 0 }).x, 3, 'inside: untouched');
+  const p = H.keepOnRoad({ x: lim + 4, z: 50 });
+  assert.ok(Math.abs(p.x - (lim - 1.5)) < 1e-9 && p.z === 50, 'past the rail: bounced back inside');
+  assert.ok(Math.abs(H.keepOnRoad({ x: -(lim + 1), z: 0 }).x + (lim - 0.45)) < 1e-9);
+  const T = await import('../public/js/modes/track/geometry.js');
+  const i = 100, q = T.P[i], n = T.NM[i], memo = {};
+  const out = T.keepInWalls({ x: q.x + n.x * (T.WALL + 3), z: q.z + n.z * (T.WALL + 3) }, memo);
+  const lat = (out.x - q.x) * n.x + (out.z - q.z) * n.z;
+  assert.ok(lat < T.WALL - 1.25 && lat > 0, `bounced back inside the wall (lateral ${lat.toFixed(2)} m)`);
+  assert.ok(memo.idx !== undefined);
+  const inside = T.keepInWalls({ x: q.x, z: q.z }, memo);
+  assert.ok(inside.x === q.x && inside.z === q.z);
+});

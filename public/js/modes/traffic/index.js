@@ -9,13 +9,12 @@ import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, fmtN, flash } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
 import { whoosh, thud, horn } from '../../core/audio.js';
-import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView, CAM } from './geometry.js';
+import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView, CAM, keepOnRoad } from './geometry.js';
 import { group, updateChunks, followGround } from './scene.js';
 import { createTraffic, TYPES } from './sim.js';
 import { createRemoteTraffic } from './remote.js';
 import { drawTraffic } from './view.js';
 import { collideWithTraffic, HARD_HIT, HARD_SIDE } from './collide.js';
-import { updateWarning } from './warn.js';
 import { createScoring, COMBO_WINDOW, COMBO_MAX } from './score.js';
 
 // Solo: the simulation runs here, a new seed every run. Online: the server runs it and
@@ -199,6 +198,7 @@ export const trafficMode = {
   inputBlocked(){ return wrecked(); },
   isGhost(){ return ghosted(); },
   // Online: a hard hit does not end the run. Stop, blink 3 s, come back.
+  ghostBounds(s){ keepOnRoad(s); },                     // another player's predicted car stays inside the rails
   onHit(car, hit){ lastHit = hit; hitPopup(car, hit); if(!hit.hard) horn(Math.max(-1, Math.min(1, (hit.bot.x - car.x) / 4)), .9); },
   wreck(car){
     const t = serverNow();
@@ -248,8 +248,6 @@ export const trafficMode = {
     if(src === remote) remote.advance(dt);
     else if(G.state!=='pause') traffic.advance(dt, [asPlayer(car)]);
     drawTraffic(src);
-    // red chevrons behind the bot we are about to crash into (warn.js)
-    updateWarning(car, src, dt, G.state==='race' && !wrecked() && !ghosted());
     // online crash: blink while wrecked (fast) and ghosted (slow); then back on the road
     if(wreckUntil){
       const t = serverNow();

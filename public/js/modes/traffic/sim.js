@@ -39,6 +39,41 @@ const LANE_BIAS = [2, 1, 0, -1];
 export const DENSITY = { low: 0.5, mid: 1, high: 2.2 };
 export const densityOf = d => DENSITY[d] || 1;
 
+// What a hit does to a bot (sim.hit). Its hazard lights go on for 3 s. It slides away
+// from the blow: a sideways speed (sv) that fades smoothly (e^-2t), so it drifts at most
+// ~1.5 m off its lane line and leans the way it moves; after the 3 s it eases back to
+// the lane line at 0.8 m/s. It brakes steadily at 4 m/s² to 60 % of its cruising speed
+// (to a stop after a crash, at 6 m/s²), still keeping its distance to the car ahead,
+// then speeds up again as usual. Nothing jumps: position and speed only change through
+// these rates, and the same closed-form slide is used by the network prediction.
+export const HIT = { HAZARD: 3, SLIDE_K: 2, OFF_MAX: 1.5, SV_MAX: 3.5, RECOVER: 0.8, BRAKE: 4, BRAKE_HARD: 6, SLOW: 0.6 };
+// Sideways position and speed `age` seconds into a slide (exact for any step size).
+export function slide(off, sv, age) {
+  if (!sv) return { off, sv: 0 };
+  const e = Math.exp(-HIT.SLIDE_K * age);
+  let o = off + sv * (1 - e) / HIT.SLIDE_K, s = sv * e;
+  if (Math.abs(o) >= HIT.OFF_MAX) { o = Math.sign(o) * HIT.OFF_MAX; s = 0; }   // its lane edge: stops sliding
+  if (Math.abs(s) < 0.01) s = 0;
+  return { off: o, sv: s };
+}
+
+// The reaction to a hit on a bot record b ({v, z, off, sv, hazard, hard, a, dir, ...}).
+// Shared by the simulation and the online prediction (remote.js), so both agree.
+export function applyHit(b, { dv = 0, sv = 0, hard = false, age = 0 } = {}) {
+  const clampN = (v, m) => Math.max(-m, Math.min(m, v));
+  b.v = Math.max(0, b.v + clampN(dv, 12));
+  b.sv = clampN((b.sv || 0) + sv, HIT.SV_MAX);
+  b.hazard = HIT.HAZARD; b.hard = !!(hard || b.hard);
+  b.a = -(b.hard ? HIT.BRAKE_HARD : HIT.BRAKE);
+  if (b.p === 0) { b.dir = 0; b.blink = 0; b.wait = 0; }
+  if (age > 0) {
+    const s = slide(b.off, b.sv, age); b.off = s.off; b.sv = s.sv;
+    const v1 = Math.max(0, b.v + b.a * age);
+    b.z += (b.v + v1) / 2 * age; b.v = v1; b.hazard -= age;
+  }
+  return b;
+}
+
 export const CFG = {
   gapStart: 64, gapEnd: 44, rampDist: 3000,   // average distance between bots in one lane, start → after 3 km
   startClear: 200,                            // nothing on the first 200 m of road
@@ -226,13 +261,22 @@ export function createTraffic(seed = 1) {
       b.ease = Math.max(0, (b.ease || 0) - dt);
       const v0 = b.v0;
       if (b.ease > 0) b.v0 = v0 * 0.85;
-      if (b.hazard > 0) b.v0 = v0 * 0.6;               // just hit: hazard lights on, slows to 60 %
-      b.a = idmAccel(b, lead); b.lead = lead;
+      if (b.hazard > 0) {
+        // just hit (see HIT): a steady brake down to its target speed, never harder
+        // than needed to keep its distance; IDM alone would stamp on the brakes
+        const vT = b.hard ? 0 : v0 * HIT.SLOW;
+        if (b.v > vT + 0.05) { b.v0 = Math.max(b.v, 0.1); b.a = Math.min(idmAccel(b, lead), -(b.hard ? HIT.BRAKE_HARD : HIT.BRAKE)); }
+        else { b.v0 = Math.max(vT, 0.1); b.a = idmAccel(b, lead); }
+        b.vT = vT;
+      } else b.a = idmAccel(b, lead);
+      b.lead = lead;
       b.v0 = v0;
     }
     // 3. move
     for (const b of sim.bots) {
+      const was = b.v;
       b.v = Math.max(0, b.v + b.a * dt);
+      if (b.hazard > 0 && was > b.vT && b.v < b.vT) b.v = b.vT;   // braked down to its target speed
       b.z += b.v * dt;
     }
     // 4. never overlap another bot (a last guard; IDM keeps gaps well before this)
@@ -245,6 +289,7 @@ export function createTraffic(seed = 1) {
     for (const b of sim.bots) {
       b.cool = Math.max(0, b.cool - dt);
       b.hazard = Math.max(0, b.hazard - dt);
+      if (b.hazard === 0) b.hard = false;
       if (b.p > 0) {                                     // moving over
         b.p += dt / CFG.change;
         if (b.p >= 1) { b.lane = b.to; b.from = b.to; b.p = 0; b.dir = 0; b.cool = CFG.cooldown; }
@@ -275,7 +320,8 @@ export function createTraffic(seed = 1) {
     // 6. lateral position
     for (const b of sim.bots) {
       // a knock from a hit fades back toward the lane centre at 0.8 m/s
-      b.off = b.off > 0 ? Math.max(0, b.off - 0.8 * dt) : Math.min(0, b.off + 0.8 * dt);
+      if (b.sv) { const s = slide(b.off, b.sv, dt); b.off = s.off; b.sv = s.sv; }                 // sliding away from a hit
+      else if (b.hazard === 0) b.off = b.off > 0 ? Math.max(0, b.off - HIT.RECOVER * dt) : Math.min(0, b.off + HIT.RECOVER * dt);
       b.x = (b.p > 0 ? laneCenter(b.from) + (laneCenter(b.to) - laneCenter(b.from)) * smooth(Math.min(1, b.p)) : laneCenter(b.lane)) + b.off;
     }
     // 7. remove bots far behind every player or far ahead of all of them, then refill
@@ -303,16 +349,14 @@ export function createTraffic(seed = 1) {
     sim.alpha = acc / STEP;
   };
   sim.stepOnce = players => step(players);
-  // A player hit bot `id`. dv: change of its speed along the road (m/s), dx: sideways
-  // knock (m). The bot turns its hazard lights on for 3 s, slows to 60 % and drops any
-  // lane change it was signalling; the knock fades back into its lane. Deterministic,
-  // so online the server can apply the same event and every player sees the same bot.
-  sim.hit = (id, { dv = 0, dx = 0 } = {}) => {
+  // A player hit bot `id`. dv: change of its speed along the road from the blow (m/s);
+  // sv: the sideways speed the blow gave it (m/s, + = towards +x); hard: it was a crash
+  // (the bot brakes to a stop). age: how long ago the hit happened (online the message
+  // takes a moment to arrive): the bot is moved on as if hit that long ago. Deterministic,
+  // so the server and the hitting player compute the same reaction.
+  sim.hit = (id, opts = {}) => {
     const b = sim.bots.find(o => o.id === id); if (!b) return null;
-    b.v = Math.max(0, b.v + dv);
-    b.off = Math.max(-1.2, Math.min(1.2, b.off + dx));
-    b.hazard = 3;
-    if (b.p === 0) { b.dir = 0; b.blink = 0; b.wait = 0; }
+    applyHit(b, opts);
     return b;
   };
   // Plain copy of everything that defines the traffic (for tests and, later, the network).

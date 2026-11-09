@@ -51,6 +51,17 @@ export function constrainToHighway(car, dt, hooks) {
   car.off = false;
 }
 
+// Another player's predicted car must not be drawn through the rails. The prediction
+// carries the car on at its last known speed for up to a few tenths of a second; when the
+// car hits a rail in that time, the real one bounces off while the prediction would sail
+// through it (up to 8 m beyond, measured at 200 km/h). So a prediction past the rail is
+// bounced back the way the rail bounces the car (keeping 45 % of the overshoot).
+export function keepOnRoad(p) {
+  const lim = RAIL - 1.25, over = Math.abs(p.x) - lim;
+  if (over > 0) p.x = Math.sign(p.x) * (lim - Math.min(1.5, 0.45 * over));
+  return p;
+}
+
 // Top-down camera. Given the car's speed and the screen's aspect ratio, returns the
 // camera pitch (degrees below the horizon), vertical field of view, height above the
 // road and how far behind the car its foot point is. Two rules decide the height:

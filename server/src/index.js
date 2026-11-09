@@ -158,7 +158,7 @@ class RaceRoom extends Room {
       const now = Date.now();
       // the track fits in ±2000 m; the highway runs on for as long as anyone can drive
       const hw = this.state.mode === 'traffic';
-      const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, p.x), z = finite(m.z, hw ? -200 : -2000, hw ? 1e7 : 2000, p.z);
+      const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, p.x), z = finite(m.z, hw ? -1e7 : -2000, hw ? 1e7 : 2000, p.z);
       const last = this.lastState.get(client.sessionId);
       if (last) {
         // A car tops out around 70 m/s (250 km/h in a slipstream). Allow generous slack for lag spikes and the
@@ -196,7 +196,10 @@ class RaceRoom extends Room {
       const key = client.sessionId + ':' + id, now = Date.now();
       if (now - (this.botHitAt.get(key) || 0) < 300) return;
       this.botHitAt.set(key, now);
-      this.traffic.hit(id, { dv: finite(m.dv, -12, 6), dx: finite(m.dx, -1.2, 1.2) });
+      // the hit happened when the player's game saw it (m.t, server clock): the bot is
+      // moved on by that much, so its reaction lines up with what that player already shows
+      const ht = finite(m.t, 0, 1e15, 0), age = ht ? Math.min(0.3, Math.max(0, (now - ht) / 1000)) : 0;
+      this.traffic.hit(id, { dv: finite(m.dv, -12, 6), sv: finite(m.sv, -3.5, 3.5, 0), hard: m.hard === true, age });
     });
 
     // Traffic: a player crashed hard into a bot. The car stops and blinks for 3 s for
