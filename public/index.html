@@ -73,6 +73,10 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .nmpop.t2{font-size:24px;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.7)}
 .nmpop.t3{font-size:30px;color:var(--rose);text-shadow:0 0 18px rgba(255,59,107,.8)}
 /* a near miss: the text fades in where it is, holds, and fades out; nothing moves */
+/* a hit with a bot: its speed against the crash line; amber = a bump, red = a crash */
+.hitpop{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%);font:800 22px var(--f-display);white-space:nowrap;pointer-events:none;text-align:center;line-height:1.15;color:var(--amber);background:rgba(8,8,22,.62);border:1px solid rgba(255,194,61,.35);border-radius:12px;padding:8px 16px;animation:nmfade 1.5s ease-in-out forwards}
+.hitpop small{display:block;font:700 12px var(--f-body);letter-spacing:.04em;color:#fff;opacity:.85}
+.hitpop.hard{color:var(--rose);font-size:26px;border-color:rgba(255,59,107,.5)}
 @keyframes nmfade{0%{opacity:0}22%{opacity:1}65%{opacity:1}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.nmpop,#cmult.bump,#cmult.max{animation:none}}
 #drift{position:absolute;top:calc(var(--top) + 8px);left:50%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .2s}
@@ -170,6 +174,13 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .seg button[aria-pressed="true"]{background:var(--cyan);color:var(--night)}
 .seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* the highway card carries its traffic density picker as a footer */
+.mode-col{display:grid;align-content:start}
+.mode-col .mode-card{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mode-col .mode-card:hover{transform:none}
+.dens{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--edge);border-top:0;border-radius:0 0 14px 14px;background:rgba(14,16,30,.72)}
+.dens .seg{padding:3px}
+.dens .seg button{padding:7px 11px;min-height:36px;font-size:12px}
 .mode-card{display:grid;gap:8px;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(14,16,30,.72);border:1px solid var(--edge);border-radius:14px;padding:18px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
 .mode-card:hover{border-color:var(--rose);box-shadow:0 0 26px rgba(255,59,107,.25);transform:translateY(-2px)}
 .mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 0 26px rgba(62,240,255,.25)}
@@ -318,13 +329,23 @@ body{margin:0}
         <span class="mc-best" id="bestTrack"></span>
         <span class="mc-go" id="goTrack">Поехали</span>
       </button>
+      <div class="mode-col">
       <button type="button" class="mode-card traffic" id="mTraffic" data-mode="traffic">
         <span class="mc-kicker">Трафик</span>
         <span class="mc-title">Шоссе</span>
-        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч и копи комбо до ×5. Влетел в машину на скорости — авария.</span>
+        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч, копи комбо до ×5. Догнал машину быстрее неё на 32+ км/ч — авария: красные стрелки на дороге предупреждают.</span>
         <span class="mc-best" id="bestTraffic"></span>
         <span class="mc-go" id="goTraffic">Поехали</span>
       </button>
+      <div class="dens">
+        <span class="lbl" id="densLbl">Плотность</span>
+        <div class="seg" id="densPick" role="group" aria-labelledby="densLbl">
+          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
+          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
+          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
+        </div>
+      </div>
+      </div>
     </div>
     <div class="status" id="menuNote" role="status"></div>
     <details class="howto">
@@ -377,6 +398,11 @@ body{margin:0}
         <button type="button" data-dur="120" aria-pressed="false">2 мин</button>
         <button type="button" data-dur="180" aria-pressed="true">3 мин</button>
         <button type="button" data-dur="300" aria-pressed="false">5 мин</button>
+      </div>
+      <div class="seg" id="cfgDens" role="group" aria-label="Плотность трафика" hidden>
+        <button type="button" data-dens="low" aria-pressed="false">Трафик низкий</button>
+        <button type="button" data-dens="mid" aria-pressed="true">средний</button>
+        <button type="button" data-dens="high" aria-pressed="false">высокий</button>
       </div>
       <div class="cfg-note" id="cfgNote"></div>
     </div>

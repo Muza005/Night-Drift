@@ -8,13 +8,14 @@ import { scene, camera, moon, sky, stars } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, fmtN, flash } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
-import { whoosh, thud } from '../../core/audio.js';
+import { whoosh, thud, horn } from '../../core/audio.js';
 import { laneCenter, nearestLane, startPose, constrainToHighway, topDownView, CAM } from './geometry.js';
 import { group, updateChunks, followGround } from './scene.js';
 import { createTraffic, TYPES } from './sim.js';
 import { createRemoteTraffic } from './remote.js';
 import { drawTraffic } from './view.js';
-import { collideWithTraffic } from './collide.js';
+import { collideWithTraffic, HARD_HIT, HARD_SIDE } from './collide.js';
+import { updateWarning } from './warn.js';
 import { createScoring, COMBO_WINDOW, COMBO_MAX } from './score.js';
 
 // Solo: the simulation runs here, a new seed every run. Online: the server runs it and
@@ -61,8 +62,24 @@ const BEST_KEY = 'nightdrift.trafficBest';
 let best = 0; try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) {}
 let banked = 0, record = false, summarised = false;
 
-// "ВПРИТЫК +250" next to the car, on the side of the bot it just slipped past.
 const _v = new THREE.Vector3();
+// A hit with a bot: how hard it was against the crash line, next to the car, so the
+// player learns where a bump ends and a crash begins. Speeds in km/h, rounded.
+const kmh = v => Math.round(v * 3.6);
+let lastHit = null;
+function hitPopup(car, hit){
+  for(const old of document.querySelectorAll('.hitpop')) old.remove();   // one at a time
+  const d = document.createElement('div');
+  d.className = 'hitpop' + (hit.hard ? ' hard' : '');
+  d.textContent = (hit.hard ? 'Авария · ' : 'Удар · ') + kmh(hit.impact) + ' км/ч';
+  const sm = document.createElement('small');
+  sm.textContent = 'авария — от ' + kmh(hit.side ? HARD_SIDE : HARD_HIT) + ' км/ч' + (hit.side ? ' в борт' : '');
+  d.appendChild(sm);
+  document.querySelector('.hud').appendChild(d);
+  setTimeout(() => d.remove(), 1500);
+}
+
+// "ВПРИТЫК +250" next to the car, on the side of the bot it just slipped past.
 function nearMissPopup(car, ev){
   _v.set(car.x, 1.5, car.z).project(camera);
   const x = (_v.x * .5 + .5) * innerWidth + (ev.side === 'left' ? -1 : 1) * Math.min(130, innerWidth * .2);
@@ -164,11 +181,11 @@ export const trafficMode = {
 
   enter(car, {slot=0, seed=newSeed(), online=false}={}){
     const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; topSpeed=0;
-    if(online){ src = remote; remote.reset(); } else { src = traffic; traffic.reset(seed, [asPlayer(car)]); }
-    score.reset(); banked=0; record=false; summarised=false;
+    if(online){ src = remote; remote.reset(); } else { src = traffic; traffic.reset(seed, [asPlayer(car)], G.density); }
+    score.reset(); banked=0; record=false; summarised=false; lastHit=null;
     wreckUntil = ghostUntil = 0; respawned = true; wrecks = 0; car.root.visible = true;
   },
-  idle(car){ const p=startPose(0); pose(car, p.x, p.z); src = traffic; traffic.reset(newSeed(), [asPlayer(car)]);
+  idle(car){ const p=startPose(0); pose(car, p.x, p.z); src = traffic; traffic.reset(newSeed(), [asPlayer(car)], G.density);
     wreckUntil = ghostUntil = 0; respawned = true; car.root.visible = true; },
   respawn(car){ if(wrecked()) return; pose(car, laneCenter(nearestLane(car.x)), car.z); },
   constrain(car, dt, hooks){
@@ -182,12 +199,13 @@ export const trafficMode = {
   inputBlocked(){ return wrecked(); },
   isGhost(){ return ghosted(); },
   // Online: a hard hit does not end the run. Stop, blink 3 s, come back.
+  onHit(car, hit){ lastHit = hit; hitPopup(car, hit); if(!hit.hard) horn(Math.max(-1, Math.min(1, (hit.bot.x - car.x) / 4)), .9); },
   wreck(car){
     const t = serverNow();
     wreckUntil = t + WRECK_MS; ghostUntil = t + WRECK_MS + GHOST_MS; respawned = false; wrecks++;
     score.breakCombo(); G.shake = 1; thud(30);
     if(NET.room) NET.room.send('wreck');
-    flash('Авария', 'возврат через 3 секунды', 1.2);
+    flash('Авария', (lastHit ? 'удар ' + kmh(lastHit.impact) + ' км/ч · ' : '') + 'возврат через 3 секунды', 1.2);
   },
   netTraffic(arr){ remote.push(arr); },
   stats(){ return { misses: score.misses, wrecks }; },
@@ -199,6 +217,8 @@ export const trafficMode = {
     for(const ev of events){
       nearMissPopup(car, ev);
       whoosh(ev.side === 'left' ? -0.8 : 0.8, ev.level.tier / 3);
+      // a pass within 30 cm always gets a horn, a close one now and then
+      if(ev.level.tier === 3 || (ev.level.tier === 2 && Math.random() < .3)) horn(ev.side === 'left' ? -0.6 : 0.6, ev.level.tier / 3);
       const cm = $('cmult'); cm.classList.remove('bump'); void cm.offsetWidth; cm.classList.add('bump');
     }
   },
@@ -215,6 +235,7 @@ export const trafficMode = {
         ['Обгонов впритык', String(score.misses)],
         ['Макс. комбо', '×' + String(score.maxMult).replace('.', ',')],
         ['Макс. скорость', Math.round(topSpeed*3.6) + ' км/ч'],
+        ...(lastHit && lastHit.hard ? [['Удар', kmh(lastHit.impact) + ' км/ч (авария от ' + kmh(lastHit.side ? HARD_SIDE : HARD_HIT) + ')']] : []),
         ['Время', fmtT(G.lapT)],
       ],
     };
@@ -227,6 +248,8 @@ export const trafficMode = {
     if(src === remote) remote.advance(dt);
     else if(G.state!=='pause') traffic.advance(dt, [asPlayer(car)]);
     drawTraffic(src);
+    // red chevrons behind the bot we are about to crash into (warn.js)
+    updateWarning(car, src, dt, G.state==='race' && !wrecked() && !ghosted());
     // online crash: blink while wrecked (fast) and ghosted (slow); then back on the road
     if(wreckUntil){
       const t = serverNow();

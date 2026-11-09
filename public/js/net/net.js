@@ -55,7 +55,7 @@ async function connect(kind){
   netStatus('netStatus','Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track'}) : await NET.client.joinById(code,{name:myName()});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track',density:G.density||'mid'}) : await NET.client.joinById(code,{name:myName()});
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
@@ -112,6 +112,7 @@ function bindRoom(room){
   // between runs the scene behind the lobby follows the mode the host picked
   room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m); renderLobby(); });
   room.state.listen('duration',()=>renderLobby());
+  room.state.listen('density',()=>renderLobby());
   room.state.listen('phase',ph=>onPhase(ph));
   room.onLeave(code=>onRoomLeave(room,code));
 }
@@ -345,7 +346,9 @@ function renderLobby(){
   for(const b of $('cfgMode').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.mode===s.mode)); b.disabled=!isHost; }
   $('cfgDur').hidden = s.mode!=='traffic';
   for(const b of $('cfgDur').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(Number(b.dataset.dur)===s.duration)); b.disabled=!isHost; }
-  $('cfgNote').textContent = (s.mode==='traffic' ? 'Шоссе на время: больше очков — выше место. Авария — 3 секунды простоя.' : 'Трасса: 3 круга, кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
+  $('cfgDens').hidden = s.mode!=='traffic';
+  for(const b of $('cfgDens').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.dens===(s.density||'mid'))); b.disabled=!isHost; }
+  $('cfgNote').textContent = (s.mode==='traffic' ? 'Шоссе на время: больше очков — выше место. Авария (догнал машину на 32+ км/ч быстрее неё) — 3 секунды простоя.' : 'Трасса: 3 круга, кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
   netStatus('lobbyStatus', isHost ? (s.players.size<2?'Можно стартовать и одному, чтобы обкатать трассу.':'') : 'Ждём, когда хост нажмёт «Старт».');
 }
 export function renderStandings(){
@@ -403,6 +406,7 @@ $('codeIn').addEventListener('keydown',e=>{ if(e.key==='Enter') connect('join');
 $('startRace').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
 $('cfgMode').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{mode:b.dataset.mode}); });
 $('cfgDur').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{duration:Number(b.dataset.dur)}); });
+$('cfgDens').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{density:b.dataset.dens}); });
 $('again').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
 $('leaveLobby').addEventListener('click',()=>leaveOnline());
 $('leaveRes').addEventListener('click',()=>leaveOnline());

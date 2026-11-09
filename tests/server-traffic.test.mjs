@@ -52,6 +52,14 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   assert.equal(A.state.duration, 180);
   A.send('config', { duration: RUN_S }); await sleep(200);
   assert.equal(A.state.duration, RUN_S);
+  // traffic density: host only, known values only
+  assert.equal(A.state.density, 'mid');
+  B.send('config', { density: 'high' }); await sleep(200);
+  assert.equal(A.state.density, 'mid', 'a guest cannot change the density');
+  A.send('config', { density: 'crazy' }); await sleep(200);
+  assert.equal(A.state.density, 'mid', 'unknown density refused');
+  A.send('config', { density: 'high' }); await sleep(200);
+  assert.equal(B.state.density, 'high', 'everyone sees the host\'s choice');
 
   A.send('start');
   await sleep(1500);
