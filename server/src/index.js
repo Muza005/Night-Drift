@@ -157,10 +157,10 @@ class RaceRoom extends Room {
       const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, p.x), z = finite(m.z, hw ? -200 : -2000, hw ? 1e7 : 2000, p.z);
       const last = this.lastState.get(client.sessionId);
       if (last) {
-        // A car tops out around 50 m/s. Allow generous slack for lag spikes and the
+        // A car tops out around 70 m/s (250 km/h in a slipstream). Allow generous slack for lag spikes and the
         // "back to track" reset, but reject obvious teleports.
         const dt = Math.max(0.05, (now - last.t) / 1000);
-        if (Math.hypot(x - last.x, z - last.z) > 70 * dt + 25) return;
+        if (Math.hypot(x - last.x, z - last.z) > 90 * dt + 25) return;
       }
       this.lastState.set(client.sessionId, { t: now, x, z });
       p.x = x; p.z = z;

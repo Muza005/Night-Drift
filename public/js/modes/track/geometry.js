@@ -2,6 +2,7 @@
 // No rendering and no DOM here, so the physics test can run this file in Node.
 // Everything below is the single-file version's code, unchanged except that the car
 // is passed in instead of read from a global.
+import { wallKeep, wallAlign } from '../../core/physics.js';
 
 const RAW=[[0,0],[80,-20],[150,10],[170,80],[120,130],[60,110],[20,160],[-60,170],[-130,120],[-120,50],[-60,40],[-90,-30],[-50,-80]];
 export const SC=1.45;
@@ -40,7 +41,8 @@ export function constrainToTrack(car,dt,hooks){
   if(Math.abs(lat)>lim){
     const s=Math.sign(lat), push=Math.abs(lat)-lim; car.x-=n.x*s*push; car.z-=n.z*s*push;
     const vn=(car.vx*n.x+car.vz*n.z)*s;
-    if(vn>0){ car.vx-=n.x*s*vn*1.45; car.vz-=n.z*s*vn*1.45; car.vx*=.9; car.vz*=.9; if(vn>2.5) hooks.onWall(vn); }
+    wallAlign(car, n.x*s, n.z*s, dt);
+    if(vn>0){ const k=wallKeep(vn); car.vx-=n.x*s*vn*1.45; car.vz-=n.z*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
   }
   car.off=Math.abs(lat)>HALF+CURB;
   if(car.off){ const k=Math.exp(-.45*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: half the drag it had before

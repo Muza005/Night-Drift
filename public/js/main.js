@@ -224,7 +224,7 @@ function frame(now){
 
   // audio
   const spd=Math.abs(car.vF);
-  const bands=[0,12,22,32,42,60]; let gear=1; while(gear<5 && spd>bands[gear]) gear++;
+  const bands=[0,12,22,33,45,58,72]; let gear=1; while(gear<6 && spd>bands[gear]) gear++;   // six gears up to 250 km/h
   const lo=bands[gear-1], hi=bands[gear]; const rpm=.25+.75*Math.min(1,(spd-lo)/(hi-lo));
   audioUpdate(G.state==='race'?rpm:.2, G.state==='race'?input.up:0, slide);
 
@@ -232,7 +232,7 @@ function frame(now){
   const kmh=Math.round(Math.hypot(car.vx,car.vz)*3.6);
   { const on=NET.draft.level>.05; $('speedo').classList.toggle('draft',on); $('hwbar').classList.toggle('draft',on); }
   setT('spd',String(kmh)); setT('gear',car.vF<-.5?'R':kmh<2?'N':String(gear));
-  $('sbar').firstChild.style.width=Math.min(100,kmh/180*100)+'%';
+  $('sbar').firstChild.style.width=Math.min(100,kmh/250*100)+'%';
   setT('bPause',NET.online?'Выйти':'Пауза');
   setT('score',fmtN(G.score));
   const dEl=$('drift');

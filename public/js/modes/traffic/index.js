@@ -59,7 +59,7 @@ function carAtOnScreen(fovV){
 // Best score, kept in this browser.
 const BEST_KEY = 'nightdrift.trafficBest';
 let best = 0; try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) {}
-let banked = 0, record = false, summarised = false, camKick = 0;
+let banked = 0, record = false, summarised = false;
 
 // "ВПРИТЫК +250" next to the car, on the side of the bot it just slipped past.
 const _v = new THREE.Vector3();
@@ -199,7 +199,6 @@ export const trafficMode = {
     for(const ev of events){
       nearMissPopup(car, ev);
       whoosh(ev.side === 'left' ? -0.8 : 0.8, ev.level.tier / 3);
-      camKick += (ev.side === 'left' ? 1 : -1) * 0.25 * ev.level.tier;   // a nudge away from the bot
       const cm = $('cmult'); cm.classList.remove('bump'); void cm.offsetWidth; cm.classList.add('bump');
     }
   },
@@ -276,9 +275,9 @@ export const trafficMode = {
     } else {
       camera.position.copy(camGoal.pos); rig.look.copy(camGoal.look); camera.fov = camGoal.fov;
     }
-    // a near-miss nudge and the crash shake move the camera sideways without turning it
-    camKick *= Math.exp(-6*dt);
-    let ox = camKick, oz = 0;
+    // the crash shake moves the camera sideways without turning it (a near miss moves
+    // nothing: only its text fades in and out)
+    let ox = 0, oz = 0;
     if(G.shake>0){ ox+=(Math.random()-.5)*G.shake*.8; oz+=(Math.random()-.5)*G.shake*.8; G.shake=Math.max(0,G.shake-dt*2.5); }
     camera.position.x += ox; camera.position.z += oz; rig.look.x += ox; rig.look.z += oz;
     camera.lookAt(rig.look);
