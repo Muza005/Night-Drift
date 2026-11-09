@@ -6,6 +6,7 @@
 // at any distance, every online player shares the same coordinates, and the renderer
 // keeps each road chunk in its own local coordinates (see scene.js), so the picture
 // does not shake far from the start either.
+import { wallKeep, wallAlign } from '../../core/physics.js';
 
 export const LANES = 4, LANE_W = 4;
 export const HALF = LANES * LANE_W / 2;        // 8 m: edge of the asphalt
@@ -35,7 +36,8 @@ export function startPose(slot) {
 }
 
 // Runs right after stepCar() in every substep. Same wall response as the drift track
-// (push back, bounce at 1.45, keep 90 %, report hits above 2.5 m/s); the rail is a
+// (push back, bounce at 1.45, rub off speed by how hard it hit — see wallKeep — and
+// report hits above 2.5 m/s); the rail is a
 // straight line, so its normal is simply the x axis. No off-road here: the shoulder is
 // paved and the rails stop the car before the grass.
 export function constrainToHighway(car, dt, hooks) {
@@ -43,7 +45,8 @@ export function constrainToHighway(car, dt, hooks) {
   if (Math.abs(lat) > lim) {
     const s = Math.sign(lat), push = Math.abs(lat) - lim; car.x -= s * push;
     const vn = car.vx * s;
-    if (vn > 0) { car.vx -= s * vn * 1.45; car.vx *= .9; car.vz *= .9; if (vn > 2.5) hooks.onWall(vn); }
+    wallAlign(car, s, 0, dt);
+    if (vn > 0) { const k = wallKeep(vn); car.vx -= s * vn * 1.45; car.vx *= k; car.vz *= k; if (vn > 2.5) hooks.onWall(vn); }
   }
   car.off = false;
 }

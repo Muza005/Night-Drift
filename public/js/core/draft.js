@@ -4,15 +4,14 @@
 //
 // The pocket trails behind the other car in the direction it is moving:
 //   - only behind a car doing at least 60 km/h;
-//   - from 1.5 m behind its rear bumper to 10 m + 0.55 s of its speed (31 m at 140 km/h,
-//     at most 40 m);
+//   - from 1.5 m behind its rear bumper to 50 m behind it;
 //   - 1.4 m to each side of its centre line right behind it, widening by 3 cm per metre;
 //   - you must be going the same way (within ~37°).
 // Inside, the push builds up over 0.8 s and adds up to DRAFT_ACC (core/physics.js) while
-// you are on the throttle; outside it fades over 0.5 s. Its white lines start to show
-// once you are within 45 m behind it, and glow brighter while you are in the pocket.
-export const DRAFT = { MIN_SPEED: 60 / 3.6, NEAR: 1.5, SHOW: 45, CHARGE: .8, FADE: .5, REAR: 2.15 };
-export const pocketLen = v => Math.min(40, 10 + .55 * v);
+// you are on the throttle; outside it fades over 0.5 s. Its white lines show while you
+// are within 50 m behind it, and glow brighter while you are in the pocket.
+export const DRAFT = { MIN_SPEED: 60 / 3.6, NEAR: 1.5, SHOW: 50, CHARGE: .8, FADE: .5, REAR: 2.15 };
+export const pocketLen = () => 50;
 export const pocketHalf = behind => 1.4 + .03 * Math.max(0, behind);
 
 // me, lead: {x, z, vx, vz}. Returns null when the lead car is too slow to leave a pocket.

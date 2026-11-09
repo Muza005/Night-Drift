@@ -67,12 +67,13 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #hwbar.draft .hs .lbl{font-size:0}
 #hwbar.draft .hs .lbl::after{content:'карман';font-size:9px;color:#fff;letter-spacing:.1em}
 #speedo.hot{box-shadow:0 0 0 1px rgba(62,240,255,.55),0 0 22px rgba(62,240,255,.35)}
-.nmpop{position:absolute;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;white-space:nowrap;pointer-events:none;animation:nmrise 1.1s ease-out forwards;text-align:center;line-height:1.05}
+.nmpop{position:absolute;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;white-space:nowrap;pointer-events:none;animation:nmfade 1.15s ease-in-out forwards;text-align:center;line-height:1.05}
 .nmpop small{display:block;font-size:.62em;opacity:.9}
 .nmpop.t1{font-size:20px;color:var(--cyan);text-shadow:0 0 14px rgba(62,240,255,.7)}
 .nmpop.t2{font-size:24px;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.7)}
 .nmpop.t3{font-size:30px;color:var(--rose);text-shadow:0 0 18px rgba(255,59,107,.8)}
-@keyframes nmrise{0%{opacity:0;margin-top:8px}12%{opacity:1}70%{opacity:1}100%{opacity:0;margin-top:-46px}}
+/* a near miss: the text fades in where it is, holds, and fades out; nothing moves */
+@keyframes nmfade{0%{opacity:0}22%{opacity:1}65%{opacity:1}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.nmpop,#cmult.bump,#cmult.max{animation:none}}
 #drift{position:absolute;top:calc(var(--top) + 8px);left:50%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .2s}
 #drift.on{opacity:1}
