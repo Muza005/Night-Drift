@@ -118,6 +118,27 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
   .touch #speedo{left:50%;transform:translateX(-50%);bottom:var(--bot)}
   .touch #scorebox{grid-auto-flow:column;align-items:start}
 }
+/* phones, highway: speed, distance, time, score and combo in one strip at the top */
+#hwbar{display:none}
+.touch .hud.hw #lapbox,.touch .hud.hw #scorebox,.touch .hud.hw #speedo{display:none}
+.touch .hud.hw #hwbar{position:absolute;top:var(--top);left:var(--lft);right:var(--rgt);max-width:520px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:6px 12px 8px;overflow:hidden}
+#hwbar .hc{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:5px}
+#hwbar .hc b{font-size:21px;font-weight:700;line-height:1.1;white-space:nowrap}
+#hwbar .hc i{font-style:normal;font-family:var(--f-display);font-weight:800;font-size:14px;color:var(--amber)}
+#hwbar .hc .lbl{grid-column:1/-1;font-size:9px;letter-spacing:.1em;white-space:nowrap}
+#hwbar .hd{grid-template-columns:auto;justify-items:center}
+#hwbar .hd b{font-size:17px}
+#hwbar .hp{justify-items:end}
+#hwbar .hp b{color:var(--cyan)}
+#hwbar.hot .hs b{color:var(--cyan);text-shadow:0 0 12px rgba(62,240,255,.6)}
+#hwMult.max{color:var(--rose)}
+#hwMult.drift{color:var(--rose);text-shadow:0 0 10px rgba(255,79,163,.6)}
+#hwbar .hwcbar{position:absolute;left:0;right:0;bottom:0;height:3px}
+#hwbar .hwcbar i{display:block;height:100%;width:0;background:var(--amber);box-shadow:0 0 8px rgba(255,190,60,.7)}
+.touch .hud.hw .btns{top:calc(var(--top) + 60px)}
+.touch .hud.hw .btns button{padding:5px 9px;font-size:11px}
+.touch .hud.hw #standings{top:calc(var(--top) + 98px)}
+.touch .hud.hw #drift{top:calc(var(--top) + 100px)}
 .touch #map{width:110px;height:110px}
 .touch .btns{top:calc(var(--top) + 112px)}
 
@@ -227,6 +248,7 @@ body{margin:0}
   <div class="btns">
     <button id="bPause" type="button">Пауза</button>
     <button id="bSound" type="button">Звук: вкл</button>
+    <button id="bCam" type="button" hidden>Камера: сверху</button>
   </div>
   <div id="standings" class="panel" hidden></div>
 
@@ -239,6 +261,14 @@ body{margin:0}
       <div class="cbar"><i></i></div>
       <div id="ctag">×2 дрифт</div>
     </div>
+  </div>
+
+  <!-- phones, highway: one compact strip instead of four panels -->
+  <div id="hwbar" class="panel">
+    <div class="hc hs"><b id="hwSpd" class="num">0</b><i id="hwGear">N</i><span class="lbl">км/ч</span></div>
+    <div class="hc hd"><b id="hwDist" class="num">0,00 км</b><span id="hwTime" class="lbl num">0:00.00</span></div>
+    <div class="hc hp"><b id="hwScore" class="num">0</b><i id="hwMult">×1</i><span id="hwBest" class="lbl">рекорд —</span></div>
+    <div class="hwcbar"><i></i></div>
   </div>
 
   <div id="drift">

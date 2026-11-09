@@ -63,6 +63,7 @@ addEventListener('keydown',e=>{
     else if((e.code==='KeyP'||e.code==='Escape') && G.state==='pause'){ e.preventDefault(); resume(); }
   }
   if(e.code==='KeyM') toggleSound();
+  if(e.code==='KeyC' && G.mode && G.mode.toggleCamera) G.mode.toggleCamera();
   if(G.state==='over'){
     if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); startRace(true); }
     else if(e.code==='Escape') toMenu();
@@ -71,6 +72,7 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>{ const k=KEYMAP[e.code]; if(k) input[k]=0; });
 addEventListener('blur',()=>{ clearInput(); });
 $('bSound').addEventListener('click',()=>{ toggleSound(); canvas.focus(); });
+$('bCam').addEventListener('click',()=>{ if(G.mode && G.mode.toggleCamera) G.mode.toggleCamera(); canvas.focus(); });
 $('bPause').addEventListener('click',()=>{ if(NET.online) leaveOnline(); else if(G.state==='race'||G.state==='count') pause(); });
 
 /* ---------- flow ---------- */
