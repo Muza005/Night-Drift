@@ -273,6 +273,6 @@ function frame(now){
   G.mode.drawMap(car);
   renderer.render(scene,camera);
 }
-if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
+if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,scene,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
 requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

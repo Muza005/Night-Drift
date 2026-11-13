@@ -1,11 +1,12 @@
-// Draws the traffic. Every vehicle type is a handful of boxes merged into one geometry
-// per material, and each (type, material) pair is one InstancedMesh, so 48 bots cost
-// about 25 draw calls instead of a thousand.
+// Draws the traffic. Every vehicle type is one geometry per material (a rounded body,
+// glass, lights: see core/carShapes.js), and each (type, material) pair is one
+// InstancedMesh, so 48 bots cost about 25 draw calls instead of a thousand.
 //
 // Lights matter at night: headlights with a pool of light on the road ahead, tail
 // lights that flare when the bot brakes, and blinkers for 1 s before a lane change.
 import { isTouch } from '../../state.js';
-import { glowTex } from '../../core/render.js';
+import { glowTex, carEnv } from '../../core/render.js';
+import { trafficShape } from '../../core/carShapes.js';
 import { TYPES, CFG, DENSITY } from './sim.js';
 import { group } from './scene.js';
 
@@ -15,47 +16,9 @@ import { group } from './scene.js';
 // drawTraffic() never draws more than fit.
 const MAX = 2 * Math.ceil(CFG.maxBots * DENSITY.high);
 
-// Merge box parts (non-indexed) into one BufferGeometry.
-function boxes(list) {
-  const pos = [], nor = [];
-  for (const [w, h, d, x, y, z] of list) {
-    const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z).toNonIndexed();
-    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array); g.dispose();
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  return g;
-}
-const wheels = (W, L, r = .35, wx = .2) => [-1, 1].flatMap(s => [-1, 1].map(f => [wx, 2 * r, 2 * r, s * (W / 2 - wx / 2 + .02), r, f * (L / 2 - .9)]));
-
-// Parts per type. Box: [width, height, length, x, y, z]; the vehicle faces +Z.
-function shapes(T) {
-  const L = T.len, W = T.wid, F = L / 2, R = -L / 2;
-  const heads = [[.42, .12, .05, .6 * W / 1.9, .62, F + .02], [.42, .12, .05, -.6 * W / 1.9, .62, F + .02]];
-  const tails = [[.46, .13, .05, .58 * W / 1.9, .68, R - .02], [.46, .13, .05, -.58 * W / 1.9, .68, R - .02]];
-  switch (T.name) {
-    case 'sedan': return {
-      paint: [[W, .55, L, 0, .525, 0], [1.5, .06, 1.9, 0, 1.28, -.25]],
-      dark: [[1.62, .46, 2.2, 0, 1.03, -.2], ...wheels(W, L)], heads, tails };
-    case 'hatch': return {
-      paint: [[W, .55, L, 0, .525, 0], [1.45, .06, 1.8, 0, 1.33, -.45]],
-      dark: [[1.56, .5, 2.0, 0, 1.05, -.4], ...wheels(W, L, .33)], heads, tails };
-    case 'van': return {
-      paint: [[W, 1.55, L, 0, 1.075, 0]],
-      dark: [[W + .03, .42, 3.4, 0, 1.52, -.4], [1.84, .55, .05, 0, 1.5, F + .02], ...wheels(W, L, .36)],
-      heads: heads.map(h => [h[0], h[1], h[2], h[3], .55, h[5]]), tails: tails.map(t => [t[0], .3, t[2], t[3], 1.0, t[5]]) };
-    case 'truck': return {
-      paint: [[2.3, 2.2, 2.3, 0, 1.55, F - 1.15]],
-      trailer: [[W, 2.9, 7.6, 0, 1.95, R + 3.8]],
-      dark: [[2.12, .7, .05, 0, 2.1, F + .02], [1.4, .9, .6, 0, 1.2, F - 2.6], ...wheels(W, L, .5, .3)],
-      heads: heads.map(h => [h[0], h[1], h[2], h[3] * 1.15, .7, h[5]]), tails: tails.map(t => [t[0], .3, t[2], t[3] * 1.15, .9, t[5]]) };
-    case 'bus': return {
-      paint: [[W, 2.6, L, 0, 1.65, 0]],
-      dark: [[W + .03, .8, L - 1.6, 0, 2.15, -.3], [2.3, 1.0, .05, 0, 2.05, F + .02], ...wheels(W, L, .5, .3)],
-      heads: heads.map(h => [h[0], h[1], h[2], h[3] * 1.2, .7, h[5]]), tails: tails.map(t => [t[0], .3, t[2], t[3] * 1.2, 1.0, t[5]]) };
-  }
-}
+// The vehicles' shapes come from core/carShapes.js: rounded bodies, one geometry per
+// material. Phones get the same shapes with fewer triangles.
+const shapes = T => trafficShape(T, isTouch ? 'low' : 'high');
 
 // No reds or pinks: the player's car is the only rose-coloured car on the road.
 const PALETTE = {
@@ -67,9 +30,9 @@ const PALETTE = {
 };
 
 const mats = {
-  paint: new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .35, roughness: .45 }),
+  paint: new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: .4, roughness: .34, envMap: carEnv, envMapIntensity: .8 }),
   trailer: new THREE.MeshStandardMaterial({ color: 0xd8dde8, metalness: .2, roughness: .6 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x12141c, metalness: .5, roughness: .35 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x12141c, metalness: .6, roughness: .22, envMap: carEnv, envMapIntensity: 1.2 }),
   heads: new THREE.MeshBasicMaterial({ color: 0xf4f8ff, toneMapped: false }),
   tails: new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
 };
@@ -79,7 +42,7 @@ const TAIL_DIM = new THREE.Color(0.55, 0.02, 0.06), TAIL_BRAKE = new THREE.Color
 const parts = TYPES.map(T => {
   const sh = shapes(T), out = [];
   for (const key of Object.keys(sh)) {
-    const m = new THREE.InstancedMesh(boxes(sh[key]), mats[key], MAX);
+    const m = new THREE.InstancedMesh(sh[key], mats[key], MAX);
     // setColorAt creates the per-instance colour buffer sized by `count`, so call it
     // while count is still MAX, before zeroing it
     if (key === 'paint' || key === 'tails') m.setColorAt(0, new THREE.Color(1, 1, 1));

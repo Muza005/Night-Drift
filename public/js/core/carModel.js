@@ -1,35 +1,40 @@
-// Car 3D model: body, glass, light strips, wheels with steering pivots.
-import { scene, glowTex } from './render.js';
+// Car 3D model: a low coupe with a rounded body, a glass cabin, light strips and wheels
+// with steering pivots. The shapes come from carShapes.js and are built once: every car
+// of this kind (the player's and the other players') shares them.
+import { scene, glowTex, carEnv } from './render.js';
+import { coupeShape, wheelShape } from './carShapes.js';
+
+let SHAPE = null;
+function shapes(){
+  if(!SHAPE){
+    SHAPE = { body: coupeShape('high'), wheel: wheelShape() };
+    for(const part of [SHAPE.body, SHAPE.wheel]) for(const g of Object.values(part)) for(const one of [].concat(g)) if(one && one.isBufferGeometry) one.userData.shared = true;
+  }
+  return SHAPE;
+}
 
 export function makeCar(color, local){
+  const { body: B, wheel: Wh } = shapes();
   const root=new THREE.Group(), body=new THREE.Group(); root.add(body);
-  const paint=new THREE.MeshStandardMaterial({color,metalness:.45,roughness:.32});
+  const paint=new THREE.MeshStandardMaterial({color,metalness:.55,roughness:.26,envMap:carEnv,envMapIntensity:1.1});
   const dark=new THREE.MeshStandardMaterial({color:0x12141c,roughness:.6});
-  const glass=new THREE.MeshStandardMaterial({color:0x14223a,metalness:.85,roughness:.12});
-  const add=(geo,mat,x,y,z,par=body)=>{ const o=new THREE.Mesh(geo,mat); o.position.set(x,y,z); o.castShadow=true; par.add(o); return o; };
-  add(new THREE.BoxGeometry(2.0,.5,4.3),paint,0,.6,0);
-  add(new THREE.BoxGeometry(2.04,.18,4.34),dark,0,.38,0);
-  add(new THREE.BoxGeometry(1.62,.5,2.0),glass,0,1.1,-.3);
-  add(new THREE.BoxGeometry(1.5,.08,1.6),paint,0,1.38,-.35);
-  add(new THREE.BoxGeometry(1.95,.07,.42),dark,0,1.18,-2.0);
-  for(const s of [1,-1]) add(new THREE.BoxGeometry(.08,.32,.2),dark,s*.7,1.0,-2.0);
-  add(new THREE.BoxGeometry(.32,.02,4.32),new THREE.MeshBasicMaterial({color:0x3ef0ff,toneMapped:false}),.35,.86,0);
-  add(new THREE.BoxGeometry(.32,.02,4.32),new THREE.MeshBasicMaterial({color:0x3ef0ff,toneMapped:false}),-.35,.86,0);
-  const headMat=new THREE.MeshBasicMaterial({color:0xf4f8ff,toneMapped:false});
-  for(const s of [1,-1]) add(new THREE.BoxGeometry(.5,.14,.05),headMat,s*.65,.66,2.16);
+  const glass=new THREE.MeshStandardMaterial({color:0x101c30,metalness:.9,roughness:.08,envMap:carEnv,envMapIntensity:1.5});
+  const add=(geo,mat,par=body)=>{ const o=new THREE.Mesh(geo,mat); o.castShadow=true; par.add(o); return o; };
+  add(B.paint,paint); add(B.glass,glass); add(B.dark,dark);
+  for(const g of B.flares) add(g,dark);
+  add(B.stripes,new THREE.MeshBasicMaterial({color:0x3ef0ff,toneMapped:false})).castShadow=false;
+  add(B.heads,new THREE.MeshBasicMaterial({color:0xf4f8ff,toneMapped:false})).castShadow=false;
   const tailMat=new THREE.MeshStandardMaterial({color:0x330008,emissive:0xff1a3c,emissiveIntensity:1.4});
-  for(const s of [1,-1]) add(new THREE.BoxGeometry(.6,.14,.05),tailMat,s*.6,.7,-2.16);
+  add(B.tails,tailMat).castShadow=false;
   const under=new THREE.Mesh(new THREE.PlaneGeometry(3.4,6).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({map:glowTex,color:local?0x3ef0ff:color,transparent:true,opacity:.55,blending:THREE.AdditiveBlending,depthWrite:false}));
   under.position.y=.06; root.add(under);
-  const wheelG=new THREE.CylinderGeometry(.38,.38,.32,18).rotateZ(Math.PI/2);
   const tire=new THREE.MeshStandardMaterial({color:0x0b0b0f,roughness:.9});
-  const rimG=new THREE.CylinderGeometry(.24,.24,.34,10).rotateZ(Math.PI/2);
-  const rim=new THREE.MeshStandardMaterial({color:0xb8bccc,metalness:.9,roughness:.3});
+  const rim=new THREE.MeshStandardMaterial({color:0xb8bccc,metalness:.9,roughness:.3,envMap:carEnv});
   const wheels=[], pivots=[];
-  for(const [x,z,front] of [[.95,1.35,1],[-.95,1.35,1],[.95,-1.35,0],[-.95,-1.35,0]]){
+  for(const [x,z,front] of [[B.wheelX,B.wheelZ[0],1],[-B.wheelX,B.wheelZ[0],1],[B.wheelX,B.wheelZ[1],0],[-B.wheelX,B.wheelZ[1],0]]){
     const pivot=new THREE.Group(); pivot.position.set(x,.38,z); root.add(pivot);
     const spin=new THREE.Group(); pivot.add(spin);
-    const t=new THREE.Mesh(wheelG,tire); t.castShadow=true; spin.add(t); spin.add(new THREE.Mesh(rimG,rim));
+    add(Wh.tyre,tire,spin); spin.add(new THREE.Mesh(Wh.rim,rim));
     wheels.push(spin); if(front) pivots.push(pivot);
   }
   if(local){
@@ -41,5 +46,6 @@ export function makeCar(color, local){
 }
 export function disposeCar(m){
   scene.remove(m.root);
-  m.root.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material){ if(o.material.map&&o.material.map!==glowTex) o.material.map.dispose(); o.material.dispose(); } });
+  // the body and wheel shapes are shared by every car: only this car's own things go
+  m.root.traverse(o=>{ if(o.geometry && !o.geometry.userData.shared) o.geometry.dispose(); if(o.material){ if(o.material.map&&o.material.map!==glowTex) o.material.map.dispose(); o.material.dispose(); } });
 }
