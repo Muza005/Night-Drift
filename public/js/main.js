@@ -33,9 +33,13 @@ async function loadMode(id){
   if(id==='traffic' && !modes.traffic){ trafficMod = await import('./modes/traffic/index.js'); modes.traffic = trafficMod.trafficMode; }
   return modes[id] || trackMode;
 }
+let modeWanted = 'track';
 async function setMode(id){
+  modeWanted = id;
   const m = await loadMode(id);
-  if(G.mode===m) return;
+  // the highway module loads the first time it is asked for: if another mode was asked
+  // for meanwhile (the host flips the mode in the lobby), that later request wins
+  if(modeWanted!==id || G.mode===m) return;
   G.mode.hide(); m.show(); G.mode=m;
   m.idle(car); clearMarks(); rig.init=false;
   LS.set('nightdrift.mode', m.id);
@@ -56,15 +60,21 @@ function physics(dt){
 /* ---------- keys ---------- */
 addEventListener('keydown',e=>{
   if(e.target && e.target.tagName==='INPUT') return;
+  // A key held since before a screen opened (the handbrake through a crash or a pause)
+  // must not press that screen's button. Its auto-repeat lands on the button the screen
+  // focused, and letting the key go then clicked it: the pause ended by itself.
+  if(e.repeat && e.target && e.target.tagName==='BUTTON') e.preventDefault();
   const k=KEYMAP[e.code]; if(k){ input[k]=1; if(G.state==='race'||G.state==='count') e.preventDefault(); }
   if(e.code==='KeyR' && G.state==='race' && !NET.finished) resetToTrack();
-  if(!NET.online){
+  // one press, one switch: held a moment too long, these keys used to flick the pause, the
+  // sound and the camera on and off 30 times a second (the keyboard's auto-repeat)
+  if(!NET.online && !e.repeat){
     if((e.code==='KeyP'||e.code==='Escape') && (G.state==='race'||G.state==='count')) pause();
     else if((e.code==='KeyP'||e.code==='Escape') && G.state==='pause'){ e.preventDefault(); resume(); }
   }
-  if(e.code==='KeyM') toggleSound();
-  if(e.code==='KeyC' && G.mode && G.mode.toggleCamera) G.mode.toggleCamera();
-  if(G.state==='over'){
+  if(e.code==='KeyM' && !e.repeat) toggleSound();
+  if(e.code==='KeyC' && !e.repeat && G.mode && G.mode.toggleCamera) G.mode.toggleCamera();
+  if(G.state==='over' && !e.repeat){                           // a fresh press only: a held handbrake skipped the crash screen
     if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); startRace(true); }
     else if(e.code==='Escape') toMenu();
   }
@@ -91,7 +101,7 @@ function pause(){ G.state='pause'; clearInput(); audioSuspend(); showPanel('pPau
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
 function toMenu(){
   if(G.state==='pause') audioResume();
-  G.state='menu'; G.mode.idle(car); clearMarks(); $('count').textContent=''; showPanel('pMain'); renderMenu();
+  G.state='menu'; G.mode.idle(car); clearMarks(); dropDrift(); $('count').textContent=''; showPanel('pMain'); renderMenu();
   (G.mode.id==='traffic' ? $('mTraffic') : $('mTrack')).focus();
 }
 // a key press on a focused button also fires its click: act only in the right state
@@ -141,6 +151,10 @@ $('mTraffic').addEventListener('click',()=>pick('traffic'));
 // Crash screen (traffic mode, solo): the score big, a record badge, the run's numbers.
 function showOver(){
   G.state='over'; clearInput();
+  // The car stands still from here on (no physics on this screen): without this the
+  // speedometer kept the last speed, the wheels kept turning, and the traffic took the
+  // wreck for a car still doing that speed and drove through it.
+  car.vx=car.vz=car.vF=car.vR=0; car.spinV=0; dropDrift();
   const R = G.mode.summary();
   $('overScore').textContent = fmtN(R.score);
   $('overRecord').hidden = !R.record;
@@ -191,8 +205,12 @@ function frame(now){
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
     const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
-    info=scoring(dt);
-    if(G.mode.score) G.mode.score(car,dt,info);              // traffic mode: near misses, combo, distance
+    // a crash in one of the two steps ends the run right there: no drift or near miss is
+    // scored for the frame of the crash (the drift meter used to come back on and stay)
+    if(G.state==='race'){
+      info=scoring(dt);
+      if(G.mode.score) G.mode.score(car,dt,info);            // traffic mode: near misses, combo, distance
+    }
   } else if(G.state==='crash'){
     const h=gdt/2; physics(h); physics(h);
     if(G.crashT>=1.2) showOver();
@@ -205,7 +223,7 @@ function frame(now){
   car.body.rotation.z=car.roll;
   car.pitch+=(((input.down&&car.vF>1)?.035:input.up?-.02:0)-car.pitch)*Math.min(1,dt*5);
   car.body.rotation.x=car.pitch;
-  car.spin+=car.vF*dt/.38;
+  if(G.state!=='pause') car.spin+=car.vF*dt/.38;             // paused: the wheels stand still like everything else
   car.wheels.forEach((w,i)=>{ w.rotation.x=(i>1&&input.hb&&G.state==='race')?w.rotation.x:car.spin; });
   car.pivots.forEach(p=>p.rotation.y=-car.steer*.5);
   car.tailMat.emissiveIntensity=input.down&&G.state==='race'?4.5:1.4;

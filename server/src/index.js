@@ -169,7 +169,7 @@ class RaceRoom extends Room {
       this.lastState.set(client.sessionId, { t: now, x, z });
       p.x = x; p.z = z;
       p.h = finite(m.h, -1e4, 1e4, p.h);
-      p.vf = finite(m.vf, -20, 60);
+      p.vf = finite(m.vf, -20, 80);          // forward speed: 72.3 m/s flat out, a little more in a slipstream
       p.steer = finite(m.steer, -1, 1);
       p.slide = finite(m.slide, 0, 1);
       p.vx = finite(m.vx, -70, 70); p.vz = finite(m.vz, -70, 70);
@@ -312,6 +312,13 @@ class RaceRoom extends Room {
     this.traffic = lib.createTraffic(s.seed);
     const grid = [...s.players.values()].sort((a, b) => a.slot - b.slot).map(p => ({ ...lib.startPose(p.slot), v: 0 }));
     this.traffic.reset(s.seed, grid, s.density);
+    // Every car is on the start grid now, whatever it last reported. Without this the
+    // simulation's first steps saw the cars where the previous run ended (kilometres down
+    // the road) until their first new reports came in, dropped the traffic it had just
+    // put around the start as "far behind every player", and the second run in a room
+    // began with an empty road up to 380 m instead of 200 m. t = 0: not a report, so the
+    // games do not draw it (net.js pushSnap).
+    s.players.forEach(p => { const g = lib.startPose(p.slot); p.x = g.x; p.z = g.z; p.vx = 0; p.vz = 0; p.vf = 0; p.t = 0; });
     this.botHitAt.clear();
     let last = Date.now(), steps = 0;
     this.trafficTimer = setInterval(() => {

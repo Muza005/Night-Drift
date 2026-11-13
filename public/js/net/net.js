@@ -44,13 +44,18 @@ function errText(e){
 function myName(){ const n=$('nameIn').value.trim().slice(0,16)||'Гонщик'; try{localStorage.setItem('nightdrift.name',n);}catch(e){} return n; }
 try{ $('nameIn').value=localStorage.getItem('nightdrift.name')||''; }catch(e){}
 
+let connecting=false;
 async function connect(kind){
+  // One attempt at a time. The two buttons are disabled while it runs, but Enter in the
+  // code field is not: a second Enter joined the room a second time, as a second player.
+  if(connecting || NET.online) return;
   const ep=endpoint();
   if(!ep){ netStatus('netStatus','Онлайн-сервер не настроен. Укажите его адрес в файле config.js.',true); return; }
   if(typeof Colyseus==='undefined'){ netStatus('netStatus','Не загрузилась библиотека мультиплеера. Проверьте интернет и обновите страницу.',true); return; }
   const code=$('codeIn').value.trim().toUpperCase();
   if(kind==='join' && code.length!==4){ netStatus('netStatus','Введите код из 4 символов.',true); return; }
   audioInit();
+  connecting=true;
   $('createRoom').disabled=$('joinRoom').disabled=true;
   netStatus('netStatus','Подключаюсь…');
   try{
@@ -59,7 +64,7 @@ async function connect(kind){
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
-  finally{ $('createRoom').disabled=$('joinRoom').disabled=false; }
+  finally{ connecting=false; $('createRoom').disabled=$('joinRoom').disabled=false; }
 }
 
 // Clock samples from a worker thread that drawing never blocks (see clock-worker.js).
@@ -142,12 +147,21 @@ function onPhase(ph){
 function onRoomLeave(room){
   if(NET.room!==room||NET.leaving) return;
   flash('Связь потеряна','переподключаюсь…',4);
+  // The player may press «Выйти» while this is trying (and then start a solo run or join
+  // another room): from that moment the attempts must stop. They used to carry on, and
+  // either pulled the player back into the room or, failing, threw them out of whatever
+  // they were doing by then.
+  const client=NET.client, token=NET.token, mine=()=>NET.room===room && !NET.leaving;
   (async()=>{
     for(let i=0;i<4;i++){
-      try{ const r=await NET.client.reconnect(NET.token); bindRoom(r); flash('Связь восстановлена'); return; }
-      catch(e){ await new Promise(res=>setTimeout(res,1500)); }
+      if(!mine()) return;
+      let r=null;
+      try{ r=await client.reconnect(token); }
+      catch(e){ await new Promise(res=>setTimeout(res,1500)); continue; }
+      if(!mine()){ try{ r.leave(true); }catch(e){} return; }   // left while the attempt was on its way
+      bindRoom(r); flash('Связь восстановлена'); return;
     }
-    leaveOnline('Связь с комнатой потеряна.');
+    if(mine()) leaveOnline('Связь с комнатой потеряна.');
   })();
 }
 export async function leaveOnline(msg){
@@ -155,6 +169,8 @@ export async function leaveOnline(msg){
   Object.assign(NET,{leaving:true,room:null,online:false,me:null,finished:false});
   clearInterval(NET.pingTimer); clearGhosts(); stopClockWorker();
   car.paint.color.setHex(0xff3b6b); $('standings').hidden=true;
+  // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
+  $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
   showPanel('pOnline'); netStatus('netStatus',msg||'',!!msg);
   try{ if(r) await r.leave(true); }catch(e){}

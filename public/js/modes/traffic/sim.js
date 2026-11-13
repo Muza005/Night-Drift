@@ -79,7 +79,7 @@ export const CFG = {
   startClear: 200,                            // nothing on the first 200 m of road
   spawnFrom: 380, spawnTo: 460,               // new bots appear this far ahead of the leading player
   despawnBehind: 60, despawnAhead: 700,
-  maxBots: 48,                                // at 'mid'; × the density (125 at 'high')
+  maxBots: 48,                                // at 'mid'; × the density (106 at 'high')
   idm: { a: 1.4, b: 3.0, T: 1.1, s0: 4, maxBrake: 9 },
   blink: 1.0, change: 1.5, cooldown: 4, blinkWait: 2,
   playerGuard: 15,                            // no lane change into a lane where a player is closer than this

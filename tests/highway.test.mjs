@@ -92,4 +92,12 @@ test("another player's predicted car is never drawn through a rail or a wall", a
   assert.ok(memo.idx !== undefined);
   const inside = T.keepInWalls({ x: q.x, z: q.z }, memo);
   assert.ok(inside.x === q.x && inside.z === q.z);
+  // a new run puts the car back on the grid, far from where the last search ended: it
+  // must be found there, not "bounced" off the walls of the piece of track it left
+  for (const from of [100, 300, 450, 600, 800]) {
+    const m = { idx: from }, g = T.P[T.START - 6];
+    const back = T.keepInWalls({ x: g.x, z: g.z }, m);
+    assert.ok(back.x === g.x && back.z === g.z, `a car on the grid was moved ${Math.hypot(back.x - g.x, back.z - g.z).toFixed(1)} m (search started at point ${from})`);
+    assert.ok(Math.abs(m.idx - (T.START - 6)) <= 1, `found at point ${m.idx}`);
+  }
 });

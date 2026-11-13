@@ -14,7 +14,7 @@ export const TRACK_LEN = (() => { let L=0; for(let i=0;i<N;i++){ DIST.push(L); L
 export const START=12;
 
 export function placeAt(car,i){
-  const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.steer=0; car.spinV=0; car.idx=i;
+  const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.vF=car.vR=0; car.steer=0; car.spinV=0; car.idx=i;
   car.lastMark=[null,null];
 }
 // Starting grid: two columns behind the start line, 7 m between rows.
@@ -34,7 +34,13 @@ export function nearest(car,full){
 // modes/traffic/geometry.js): a prediction past a wall is bounced back off it. `memo`
 // keeps the last track point found for this car, so the search stays local.
 export function keepInWalls(p, memo){
-  const i=nearest({x:p.x,z:p.z,idx:memo.idx||0}, memo.idx===undefined); memo.idx=i;
+  let i=nearest({x:p.x,z:p.z,idx:memo.idx||0}, memo.idx===undefined);
+  // The local search looks 36 points each way from the last one. When the car jumped (a new
+  // run puts it back on the grid) the point it finds is on a far piece of track, and the
+  // car would be "bounced" off that piece's walls. A car is never this far from its own
+  // piece of track: search the whole track again.
+  { const dx=P[i].x-p.x, dz=P[i].z-p.z, far=WALL+12; if(dx*dx+dz*dz>far*far) i=nearest({x:p.x,z:p.z,idx:i}, true); }
+  memo.idx=i;
   const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
   if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
   return p;

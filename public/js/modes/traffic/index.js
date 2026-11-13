@@ -97,7 +97,7 @@ const HINT = '<b>W A S D</b> руль и газ · <b>Пробел</b> ручн�
 let lastZ = 0, fogDensity = 0, hintWas = '', shadowWas = null, view = null, camSpeed = 0, topSpeed = 0;
 
 function pose(car, x, z){
-  car.x=x; car.z=z; car.h=0; car.vx=car.vz=0; car.steer=0; car.spinV=0; car.idx=0; car.prog=0; car.off=false;
+  car.x=x; car.z=z; car.h=0; car.vx=car.vz=0; car.vF=car.vR=0; car.steer=0; car.spinV=0; car.idx=0; car.prog=0; car.off=false;
   car.lastMark=[null,null];
 }
 
@@ -114,7 +114,9 @@ let camBlend = 1, chaseX = 0;
 function setCamLabel(){ const b = $('bCam'); if (b) b.textContent = CAM_LABEL[camMode]; }
 function toggleCamera(){
   camWas.pos.copy(camera.position); camWas.look.copy(camGoal.look); camWas.fov = camera.fov;
-  camBlend = 0;                                              // glide to the new view over 0.45 s
+  // glide to the new view over 0.45 s; behind the menu (the orbit camera is showing, the
+  // race camera will snap into place anyway) there is nothing to glide from
+  camBlend = rig.init ? 0 : 1;
   camMode = camMode === 'top' ? 'chase' : 'top';
   try { localStorage.setItem(CAM_KEY, camMode); } catch (e) {}
   setCamLabel(); flash(CAM_LABEL[camMode], null, .9);
@@ -180,11 +182,13 @@ export const trafficMode = {
 
   enter(car, {slot=0, seed=newSeed(), online=false}={}){
     const p=startPose(slot); pose(car, p.x, p.z); camSpeed=0; topSpeed=0;
+    camBlend=1;      // a camera switch on the crash screen must not fly in from where that run ended
     if(online){ src = remote; remote.reset(); } else { src = traffic; traffic.reset(seed, [asPlayer(car)], G.density); }
     score.reset(); banked=0; record=false; summarised=false; lastHit=null;
     wreckUntil = ghostUntil = 0; respawned = true; wrecks = 0; car.root.visible = true;
   },
   idle(car){ const p=startPose(0); pose(car, p.x, p.z); src = traffic; traffic.reset(newSeed(), [asPlayer(car)], G.density);
+    score.breakCombo();                                   // no combo left over from a run that was quit
     wreckUntil = ghostUntil = 0; respawned = true; car.root.visible = true; },
   respawn(car){ if(wrecked()) return; pose(car, laneCenter(nearestLane(car.x)), car.z); },
   constrain(car, dt, hooks){
@@ -249,6 +253,8 @@ export const trafficMode = {
     else if(G.state!=='pause') traffic.advance(dt, [asPlayer(car)]);
     drawTraffic(src);
     // online crash: blink while wrecked (fast) and ghosted (slow); then back on the road
+    // (the run ended meanwhile: the car just stays where it stopped, fully visible)
+    if(wreckUntil && G.state!=='race'){ wreckUntil = ghostUntil = 0; respawned = true; car.root.visible = true; }
     if(wreckUntil){
       const t = serverNow();
       if(!respawned && t >= wreckUntil){ respawned = true; comeBack(car); $('count').textContent = ''; }

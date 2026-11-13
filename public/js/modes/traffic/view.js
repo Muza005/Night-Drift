@@ -9,7 +9,11 @@ import { glowTex } from '../../core/render.js';
 import { TYPES, CFG, DENSITY } from './sim.js';
 import { group } from './scene.js';
 
-const MAX = CFG.maxBots * DENSITY.high;          // room for the densest traffic
+// Room for the densest traffic. A whole number: the simulation spawns while there are
+// fewer than 48 × 2.2 = 105.6 bots, so there can be 106, and a buffer sized 105.6 holds
+// 105: the 106th bot's headlight pool was drawn from memory past the end of the buffer
+// (what that gives depends on the graphics driver: garbage, or the whole draw call dropped).
+const MAX = Math.ceil(CFG.maxBots * DENSITY.high);
 
 // Merge box parts (non-indexed) into one BufferGeometry.
 function boxes(list) {
