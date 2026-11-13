@@ -9,11 +9,11 @@ import { glowTex } from '../../core/render.js';
 import { TYPES, CFG, DENSITY } from './sim.js';
 import { group } from './scene.js';
 
-// Room for the densest traffic. A whole number: the simulation spawns while there are
-// fewer than 48 × 2.2 = 105.6 bots, so there can be 106, and a buffer sized 105.6 holds
-// 105: the 106th bot's headlight pool was drawn from memory past the end of the buffer
-// (what that gives depends on the graphics driver: garbage, or the whole draw call dropped).
-const MAX = Math.ceil(CFG.maxBots * DENSITY.high);
+// Room for the densest traffic: 106 bots on one player's stretch of road (48 × 2.2,
+// rounded up: there can be 106, and a buffer sized 105.6 holds 105). Online the server
+// also sends the bots of a player just ahead or behind, so there is room for twice that;
+// drawTraffic() never draws more than fit.
+const MAX = 2 * Math.ceil(CFG.maxBots * DENSITY.high);
 
 // Merge box parts (non-indexed) into one BufferGeometry.
 function boxes(list) {
@@ -109,6 +109,7 @@ export function drawTraffic(sim) {
   let nb = 0, np = 0;
   const a = sim.alpha, blinkOn = Math.floor(sim.time * 2.5) % 2 === 0;
   for (const b of sim.bots) {
+    if (np >= MAX) break;                                   // never past the end of the buffers
     const T = TYPES[b.t], x = b.px + (b.x - b.px) * a, z = b.pz + (b.z - b.pz) * a;
     const dz = b.z - b.pz, yaw = dz > 0.01 ? Math.atan2(b.x - b.px, dz) : 0;
     e.set(0, yaw, 0); q.setFromEuler(e); v.set(x, 0, z); m4.compose(v, q, one);

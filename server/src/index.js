@@ -9,7 +9,8 @@
 // timed run ranked by score. In traffic mode this server also runs the traffic itself
 // (the same simulation file the game uses solo, public/js/modes/traffic/sim.js), so
 // every player sees the same bots: 20 steps a second, a snapshot to everyone 10 times
-// a second, players' hits on bots applied here and passed on in the next snapshot.
+// a second (each player gets the bots near its own car), players' hits on bots applied
+// here and passed on in the next snapshot.
 
 const http = require('http');
 const path = require('path');
@@ -32,6 +33,7 @@ const DURATIONS = [120, 180, 300].concat(Number(process.env.EXTRA_DURATION) > 0 
 const DENSITIES = ['low', 'mid', 'high'];   // traffic density (public/js/modes/traffic/sim.js DENSITY)
 const WRECK_MS = 3000, GHOST_MS = 1500;     // online crash: stopped and blinking, then can't be hit
 const SNAPSHOT_EVERY = 2;                    // traffic steps (1/20 s) per snapshot: 10 a second
+const SNAP_BEHIND = 120, SNAP_AHEAD = 780;   // a player is sent the bots this far behind and ahead of its car (m)
 
 // The traffic simulation is an ES module shared with the game; load it once.
 let T = null;
@@ -302,7 +304,7 @@ class RaceRoom extends Room {
   }
   trafficPlayers(now) {
     return [...this.state.players.values()].filter(p => p.connected).sort((a, b) => a.slot - b.slot)
-      .map(p => ({ ...this.playerNow(p, now), ghost: now < p.ghostUntil }));
+      .map(p => ({ ...this.playerNow(p, now), id: p.slot, ghost: now < p.ghostUntil }));
   }
   async startTraffic() {
     this.stopTraffic();
@@ -329,7 +331,19 @@ class RaceRoom extends Room {
       steps += Math.round(sim.time / lib.STEP) - before;
       // stamp the snapshot with the moment its positions are true: the simulation keeps a
       // remainder of less than one step that it has not simulated yet
-      if (steps >= SNAPSHOT_EVERY) { steps = 0; this.broadcast('tr', lib.encodeSnapshot(sim, now - sim.alpha * lib.STEP * 1000)); }
+      if (steps >= SNAPSHOT_EVERY) {
+        steps = 0;
+        // Each player gets the bots near its own car: everything from 120 m behind it to
+        // 780 m ahead (its traffic lives from 60 m behind to 700 m ahead). Players who
+        // drive apart each have their own traffic, so the whole road can hold several times
+        // what one player sees. Cars level with each other get the very same bots.
+        const at = now - sim.alpha * lib.STEP * 1000;
+        for (const c of this.clients) {
+          const p = s.players.get(c.sessionId); if (!p) continue;
+          const z = this.playerNow(p, now).z;
+          c.send('tr', lib.encodeSnapshot(sim, at, b => b.z >= z - SNAP_BEHIND && b.z <= z + SNAP_AHEAD));
+        }
+      }
     }, 25);
   }
   stopTraffic() { if (this.trafficTimer) clearInterval(this.trafficTimer); this.trafficTimer = null; this.traffic = null; }

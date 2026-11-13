@@ -13,9 +13,10 @@ const PER_BOT = 14;
 const smooth = p => p * p * (3 - 2 * p);
 const r = Math.round;
 
-export function encodeSnapshot(sim, serverMs) {
+// keep (optional): which bots to put in, e.g. only those near the player it is sent to.
+export function encodeSnapshot(sim, serverMs, keep) {
   const out = [r(serverMs), r(sim.time * 1000)];
-  for (const b of sim.bots) out.push(b.id, b.t, b.lane, b.from, b.to, r(b.p * 1000), r(b.off * 100),
+  for (const b of sim.bots) if (!keep || keep(b)) out.push(b.id, b.t, b.lane, b.from, b.to, r(b.p * 1000), r(b.off * 100),
     r(b.z * 100), r(b.v * 100), r(b.a * 100), b.dir, r(b.hazard * 10), b.color % 840, r((b.sv || 0) * 100));
   return out;
 }

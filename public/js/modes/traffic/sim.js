@@ -79,7 +79,7 @@ export const CFG = {
   startClear: 200,                            // nothing on the first 200 m of road
   spawnFrom: 380, spawnTo: 460,               // new bots appear this far ahead of the leading player
   despawnBehind: 60, despawnAhead: 700,
-  maxBots: 48,                                // at 'mid'; × the density (106 at 'high')
+  maxBots: 48,                                // for one player's stretch of road at 'mid'; × the density (106 at 'high')
   idm: { a: 1.4, b: 3.0, T: 1.1, s0: 4, maxBrake: 9 },
   blink: 1.0, change: 1.5, cooldown: 4, blinkWait: 2,
   playerGuard: 15,                            // no lane change into a lane where a player is closer than this
@@ -201,34 +201,60 @@ export function createTraffic(seed = 1) {
     const k = Math.min(1, Math.max(0, front) / CFG.rampDist);
     return (CFG.gapStart + (CFG.gapEnd - CFG.gapStart) * k) / sim.density;
   }
-  // Fill each lane up to `to` ahead of the leading player; never inside `from`.
+  // Every player keeps the traffic of the chosen density on its own stretch of road: from
+  // 60 m behind its car to where the next player's stretch begins (or 700 m ahead). New
+  // bots appear at the far end of each player's own view (380-460 m ahead), never in the
+  // stretch of the player in front, and each stretch has its own share of bots: 48 ×
+  // density for a full one, less for one cut short by the player ahead. A player with
+  // nobody ahead (or alone) is filled exactly as before; a car close behind another shares
+  // that car's traffic.
+  //
+  // It used to be one stretch for everybody: new bots only ahead of the leading player,
+  // and one limit (48 × density) for the whole road from the last car to the first. When
+  // one player ran away, that limit was spent on the kilometres between the cars: the
+  // leader drove on an empty road and the others through what was left, whatever the
+  // density setting said.
   function fill(players, from, to) {
     if (!players.length) return;
-    const front = Math.max(...players.map(p => p.z));
-    const gap = meanGap(front);
-    for (let L = 0; L < LANES; L++) {
-      for (let guard = 0; guard < 40 && sim.bots.length < CFG.maxBots * sim.density; guard++) {
-        let far = -Infinity;
-        for (const b of sim.bots) if (inLane(b, L) && b.z > far) far = b.z;
-        // the first bot of a lane starts somewhere within one gap, so lanes don't start level
-        let z = (far === -Infinity ? Math.max(front + from, CFG.startClear) + gap * rnd() : far + Math.max(14, gap * (0.6 + 0.8 * rnd())));   // never closer than 14 m (dense traffic)
-        z = Math.max(z, front + from, CFG.startClear);
-        if (z > front + to) break;
-        for (let k = 0; k < 4 && lanesBlocked(z, 11, L, null) >= LANES; k++) z += 15;   // keep a way through
-        if (z > front + to) break;
-        spawn(L, z);
+    const P = players.slice().sort((a, b) => a.z - b.z), reach = CFG.despawnBehind + CFG.despawnAhead;
+    P.forEach((p, i) => {
+      const next = i + 1 < P.length ? P[i + 1] : null;
+      // this player's own road ends where the next player's begins; a new bot stays 30 m
+      // short of that, so it never lands on one of the next player's bots
+      const lo = p.z - CFG.despawnBehind, hi = next ? next.z - CFG.despawnBehind : Infinity;
+      const top = Math.min(p.z + to, hi - 30);
+      if (top < Math.max(p.z + from, CFG.startClear)) return;      // the player ahead is too close: its traffic is ours
+      const gap = meanGap(p.z);
+      const cap = CFG.maxBots * sim.density * (Math.min(CFG.despawnAhead, hi - p.z) + CFG.despawnBehind) / reach;
+      let n = 0;
+      for (const b of sim.bots) if (b.z >= lo && b.z <= p.z + CFG.despawnAhead && b.z < hi) n++;
+      for (let L = 0; L < LANES; L++) {
+        for (let guard = 0; guard < 40 && n < cap; guard++) {
+          let far = -Infinity;
+          for (const b of sim.bots) if (inLane(b, L) && b.z >= lo && b.z < hi && b.z > far) far = b.z;
+          // the first bot of a lane starts somewhere within one gap, so lanes don't start level
+          let z = (far === -Infinity ? Math.max(p.z + from, CFG.startClear) + gap * rnd() : far + Math.max(14, gap * (0.6 + 0.8 * rnd())));   // never closer than 14 m (dense traffic)
+          z = Math.max(z, p.z + from, CFG.startClear);
+          if (z > top) break;
+          for (let k = 0; k < 4 && lanesBlocked(z, 11, L, null) >= LANES; k++) z += 15;   // keep a way through
+          if (z > top) break;
+          spawn(L, z); n++;
+        }
       }
-    }
+    });
   }
 
   /* ---------- one fixed step ---------- */
-  let prevPlayerV = [];
+  let prevPlayerV = new Map();
   function step(players) {
     const dt = STEP;
     sim.time += dt;
-    // players' acceleration from their speed one step ago (players are given in the same order every step)
-    players = players.map((p, i) => ({ ...p, a: prevPlayerV[i] === undefined ? 0 : (p.v - prevPlayerV[i]) / dt }));
-    prevPlayerV = players.map(p => p.v);
+    // players' acceleration from their speed one step ago. Each player is known by its
+    // `id` when it has one (online: its start slot), else by its place in the list: a
+    // player who drops out must not hand its speed to the next one in the list.
+    const key = (p, i) => p.id === undefined ? i : 'id' + p.id;
+    players = players.map((p, i) => { const was = prevPlayerV.get(key(p, i)); return { ...p, a: was === undefined ? 0 : (p.v - was) / dt }; });
+    prevPlayerV = new Map(players.map((p, i) => [key(p, i), p.v]));
     const lanes = []; for (let L = 0; L < LANES; L++) lanes.push(laneObjects(L, players));
 
     // 1. keep a way through. For every bot: which lanes are taken by the cars level
@@ -324,11 +350,10 @@ export function createTraffic(seed = 1) {
       else if (b.hazard === 0) b.off = b.off > 0 ? Math.max(0, b.off - HIT.RECOVER * dt) : Math.min(0, b.off + HIT.RECOVER * dt);
       b.x = (b.p > 0 ? laneCenter(b.from) + (laneCenter(b.to) - laneCenter(b.from)) * smooth(Math.min(1, b.p)) : laneCenter(b.lane)) + b.off;
     }
-    // 7. remove bots far behind every player or far ahead of all of them, then refill
+    // 7. remove bots that are near no player (more than 60 m behind or 700 m ahead of
+    //    every one of them), then refill
     if (players.length) {
-      const back = Math.min(...players.map(p => p.z)) - CFG.despawnBehind;
-      const front = Math.max(...players.map(p => p.z)) + CFG.despawnAhead;
-      sim.bots = sim.bots.filter(b => b.z >= back && b.z <= front);
+      sim.bots = sim.bots.filter(b => players.some(p => b.z >= p.z - CFG.despawnBehind && b.z <= p.z + CFG.despawnAhead));
       fill(players, CFG.spawnFrom, CFG.spawnTo);
     }
   }
@@ -340,7 +365,7 @@ export function createTraffic(seed = 1) {
   // density: 'low' | 'mid' | 'high' (see DENSITY); left out, the run keeps the last one.
   sim.reset = (newSeed = seed, players = [], density) => {
     if (density !== undefined) sim.density = densityOf(density);
-    rnd = makeRng(newSeed); sim.seed = newSeed; sim.bots = []; prevPlayerV = []; sim.time = 0; sim.nextId = 1; acc = 0; sim.alpha = 0;
+    rnd = makeRng(newSeed); sim.seed = newSeed; sim.bots = []; prevPlayerV = new Map(); sim.time = 0; sim.nextId = 1; acc = 0; sim.alpha = 0;
     fill(players, 0, CFG.spawnTo);      // first fill also covers the road in view (beyond the clear start zone)
   };
   sim.advance = (dt, players) => {
