@@ -349,8 +349,9 @@ function renderLobby(){
   $('roomCode').textContent=NET.room.roomId;
   const ul=$('plist'); ul.replaceChildren();
   s.players.forEach((p,id)=>{
-    const li=el('li'); const d=el('span','dot'); d.style.color=hex(p.color); d.style.background=hex(p.color);
-    li.append(d, el('span',null,p.name+(id===me?' (вы)':'')));
+    const li=el('li'); const d=el('span','ava'); d.style.color=hex(p.color); d.style.background=hex(p.color);
+    d.append(el('i',null,(p.name.trim()[0]||'?').toUpperCase()));
+    li.append(d, el('span','pn',p.name+(id===me?' (вы)':'')));
     if(id===s.hostId) li.append(el('span','badge host','хост'));
     else if(!p.connected) li.append(el('span','badge','нет связи'));
     ul.append(li);
@@ -361,6 +362,7 @@ function renderLobby(){
   if(G.setMode && G.mode.id!==s.mode) G.setMode(s.mode);   // the scene behind the lobby shows the room's mode
   // mode and run length: the host picks, everyone sees
   for(const b of $('cfgMode').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.mode===s.mode)); b.disabled=!isHost; }
+  $('rowDur').hidden = $('rowDens').hidden = s.mode!=='traffic';     // the rows with their labels
   $('cfgDur').hidden = s.mode!=='traffic';
   for(const b of $('cfgDur').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(Number(b.dataset.dur)===s.duration)); b.disabled=!isHost; }
   $('cfgDens').hidden = s.mode!=='traffic';
