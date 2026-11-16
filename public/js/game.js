@@ -21,7 +21,9 @@ export function bank(){
 export function scoring(dt){
   const speed=Math.hypot(car.vF,car.vR);
   const ang=Math.atan2(Math.abs(car.vR),Math.max(.01,Math.abs(car.vF)))*180/Math.PI;
-  const drifting=speed>9 && car.vF>3 && ang>10 && !car.off;
+  // online, after the finish the car rolls on by itself: that slide scores nothing (it used
+  // to be added to the score on screen after the server had already taken the final one)
+  const drifting=speed>9 && car.vF>3 && ang>10 && !car.off && !(NET.online && NET.finished);
   drift.ang=ang;
   if(drifting){
     drift.active=true; drift.grace=.75; drift.time+=dt;

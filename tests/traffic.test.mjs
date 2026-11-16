@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTraffic, TYPES, STEP, CFG, DENSITY } from '../public/js/modes/traffic/sim.js';
 import { LANES, LANE_W, laneCenter } from '../public/js/modes/traffic/geometry.js';
+import { encodeSnapshot, decodeSnapshot } from '../public/js/modes/traffic/netcodec.js';
 
 // A scripted player (not the real physics: we only need a moving obstacle). It speeds
 // up, changes lanes, slows down, and sometimes stops dead in a lane for a while.
@@ -137,4 +138,52 @@ test('density: on high a player meets ~1.7 times the cars of mid, on low half', 
   assert.ok(low / mid > 0.38 && low / mid < 0.62, `low/mid = ${(low / mid).toFixed(2)}`);
   const sim = createTraffic(1); sim.reset(1, [{ x: 0, z: 0, v: 0 }], 'high'); sim.reset(2, [{ x: 0, z: 0, v: 0 }]);
   assert.equal(sim.density, DENSITY.high, 'a reset without a density keeps the last one');
+});
+
+// Online: one player runs away from the others. Everybody must keep the traffic of the
+// chosen density. (It used to be one limit of bots for the whole road between the last
+// car and the first, with new bots only ahead of the leader: on "high" the leader had 3
+// bots ahead instead of 71, the next player 13 instead of 56.)
+const botsAhead = (sim, p) => sim.bots.filter(b => b.z > p.z && b.z < p.z + CFG.spawnTo).length;
+function drive(speeds, dens, seconds, each) {
+  const sim = createTraffic(11), ps = speeds.map((v, i) => ({ id: i, x: laneCenter(i % LANES), z: 0, v: typeof v === 'function' ? v(0) : v }));
+  sim.reset(11, ps, dens);
+  for (let i = 0; i < seconds / STEP; i++) {
+    const t = i * STEP;
+    ps.forEach((p, k) => { if (typeof speeds[k] === 'function') p.v = speeds[k](t); p.z += p.v * STEP; });
+    sim.stepOnce(ps);
+    each(sim, ps, t);
+  }
+}
+for (const DENS of ['mid', 'high']) test(`players who drive apart each keep the ${DENS} traffic they would have alone`, () => {
+  const SPEEDS = [28, 34, 60];                              // 100, 122 and 216 km/h
+  const mean = speeds => { const sum = speeds.map(() => 0); let n = 0;
+    drive(speeds, DENS, 240, (sim, ps, t) => { if (t > 120) { ps.forEach((p, k) => sum[k] += botsAhead(sim, p)); n++; } });
+    return sum.map(s => s / n); };
+  const alone = SPEEDS.map(v => mean([v])[0]), together = mean(SPEEDS);
+  console.log(`    ${DENS}: bots on the 460 m ahead at 100/122/216 km/h — alone ${alone.map(v => v.toFixed(0)).join('/')}, three players kilometres apart ${together.map(v => v.toFixed(0)).join('/')}`);
+  SPEEDS.forEach((v, k) => assert.ok(together[k] > alone[k] * 0.85, `the player at ${Math.round(v * 3.6)} km/h has ${together[k].toFixed(1)} bots ahead, alone it would have ${alone[k].toFixed(1)}`));
+});
+
+test('catching up and passing another player: no bot lands on a bot, nobody loses the traffic', () => {
+  // A leads at 200 km/h for a minute, then eases to 108; B at 162 km/h catches and passes it; C trails at 120
+  const low = [Infinity, Infinity, Infinity]; let most = 0;
+  drive([t => (t < 60 ? 55 : 30), 45, 33], 'high', 160, (sim, ps, t) => {
+    const B = sim.bots; most = Math.max(most, B.length);
+    for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+      const a = B[i], b = B[j], dz = Math.abs(a.z - b.z), dx = Math.abs(a.x - b.x);
+      if (dz < (TYPES[a.t].len + TYPES[b.t].len) / 2 && dx < (TYPES[a.t].wid + TYPES[b.t].wid) / 2)
+        assert.fail(`t=${t.toFixed(2)}: bots ${a.id} and ${b.id} overlap (dz ${dz.toFixed(2)}, dx ${dx.toFixed(2)})`);
+    }
+    if (t > 30) ps.forEach((p, k) => { low[k] = Math.min(low[k], botsAhead(sim, p)); });
+  });
+  console.log(`    fewest bots ahead of A/B/C at any moment: ${low.join('/')}, most bots on the whole road ${most}`);
+  low.forEach((n, k) => assert.ok(n >= 20, `player ${'ABC'[k]} had only ${n} bots ahead at one moment`));
+});
+
+test('a snapshot can carry only the bots near one player', () => {
+  const sim = createTraffic(3); sim.reset(3, [{ x: 0, z: 0, v: 0 }], 'high');
+  const near = decodeSnapshot(encodeSnapshot(sim, 1000, b => b.z < 300)), all = decodeSnapshot(encodeSnapshot(sim, 1000));
+  assert.equal(all.bots.length, sim.bots.length);
+  assert.ok(near.bots.length > 0 && near.bots.length < all.bots.length && near.bots.every(b => b.z < 300));
 });

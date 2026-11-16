@@ -38,6 +38,23 @@ const skyTex = (() => {
   g.fillStyle=gr; g.fillRect(0,0,4,256); return tex(c,false);
 })();
 
+// What glossy car paint and glass reflect: a tiny picture of the night around the road
+// (dark sky, the rose glow on the horizon, street lamps, the two neon rails). Six 64 px
+// faces drawn once; only the cars use it, so the road and the buildings look as before.
+export const carEnv = (() => {
+  const side = k => { const [c,g]=cv(64,64);
+    const gr=g.createLinearGradient(0,0,0,64);
+    gr.addColorStop(0,'#04050d'); gr.addColorStop(.36,'#141033'); gr.addColorStop(.47,'#5a1c58'); gr.addColorStop(.5,'#ff5a9a'); gr.addColorStop(.53,'#2a1038'); gr.addColorStop(.62,'#0b0b16'); gr.addColorStop(1,'#07070c');
+    g.fillStyle=gr; g.fillRect(0,0,64,64);
+    g.fillStyle=k%2?'#3ef0ff':'#ff3b6b'; g.fillRect(0,33,64,1);                         // a neon rail
+    for(const [x,y,r] of [[10+k*7,20,3],[38-k*3,14,2.4],[54,24,2]]){ const l=g.createRadialGradient(x,y,0,x,y,r*2.4);
+      l.addColorStop(0,'rgba(255,236,200,1)'); l.addColorStop(1,'rgba(255,200,140,0)'); g.fillStyle=l; g.fillRect(x-8,y-8,16,16); }   // lamps
+    return c; };
+  const flat = col => { const [c,g]=cv(64,64); g.fillStyle=col; g.fillRect(0,0,64,64); return c; };
+  const t=new THREE.CubeTexture([side(0),side(1),flat('#04050d'),flat('#08080d'),side(2),side(3)]);
+  t.encoding=THREE.sRGBEncoding; t.needsUpdate=true; return t;
+})();
+
 /* ---------- sky ---------- */
 // The sky and stars stay centred on the drift track; the highway moves them with the camera.
 export const stars = new THREE.Group();

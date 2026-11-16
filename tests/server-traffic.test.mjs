@@ -28,7 +28,8 @@ function player(room, slot) {
   const me = { x: startPose(slot).x, z: startPose(slot).z, vz: 0 };
   const send = () => room.send('state', { x: me.x, z: me.z, h: 0, vx: 0, vz: me.vz, vf: me.vz, steer: 0, slide: 0, prog: 0, score: me.score || 0, misses: me.misses || 0, t: Date.now() });
   // the car moves at me.vz like a real one (the server refuses teleports)
-  const timer = setInterval(() => { me.z += me.vz * 0.033; send(); }, 33);
+  // (me.quiet: nothing is sent, like the game on the results screen)
+  const timer = setInterval(() => { me.z += me.vz * 0.033; if (!me.quiet) send(); }, 33);
   const snaps = [];
   room.onMessage('tr', m => snaps.push(m));
   room.onMessage('bump', m => (me.bumps = (me.bumps || 0) + 1));
@@ -133,6 +134,37 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   assert.equal(pa.snaps.length, n, 'no traffic after the run');
 
   } finally { pa.stop(); pb.stop(); await A.leave(); await B.leave(); }
+});
+
+// "Ещё заезд": the cars are kilometres down the road when the host starts the next run.
+// The new run's traffic must be built around the start grid, not around those old places.
+test('a second run in the same room starts with traffic from 200 m, like the first', { timeout: 90000 }, async () => {
+  const c = new Colyseus.Client(`ws://localhost:${PORT}`);
+  const R = await c.create('race', { name: 'S', mode: 'traffic' });
+  const p = player(R, 0);
+  const firstBots = async () => {                    // the traffic 1 s into the countdown
+    p.snaps.length = 0;
+    R.send('start');
+    while (R.state.phase !== 'countdown') await sleep(20);
+    // the game puts its car on the grid and only then reports it again
+    Object.assign(p.me, { ...startPose(0), vz: 0, quiet: false });
+    await sleep(1000);
+    return decodeSnapshot(p.snaps.at(-1)).bots.map(b => b.z).sort((a, b) => a - b);
+  };
+  try {
+  R.send('config', { duration: RUN_S }); await sleep(200);
+  const one = await firstBots();
+  assert.ok(one.length > 4 && one[0] >= 200 && one[0] < 330, `first run: nearest bot at ${one[0]} m`);
+  while (R.state.phase !== 'race') await sleep(100);
+  p.me.vz = 60;                                       // 216 km/h to the end of the run: over a kilometre
+  while (R.state.phase === 'race') await sleep(20);
+  p.me.quiet = true; p.me.vz = 0;                     // results: the game stops reporting its car
+  assert.ok(R.state.players.get(R.sessionId).z > 900, 'the car should be far down the road');
+  await sleep(500);
+  const two = await firstBots();
+  assert.ok(two.length > 4 && two[0] >= 200 && two[0] < 330, `second run: nearest bot at ${two[0]} m (the first run had it at ${one[0]} m)`);
+  assert.ok(Math.abs(two.length - one.length) <= 6, `second run starts with ${two.length} bots, the first with ${one.length}`);
+  } finally { p.stop(); await R.leave(); }
 });
 
 test('a track room still works the old way: laps, no traffic', { timeout: 30000 }, async () => {

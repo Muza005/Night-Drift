@@ -17,6 +17,7 @@
   --amber:#ffc23d;
   --panel:rgba(10,12,24,.66);
   --edge:rgba(120,140,255,.22);
+  --r-md:16px;--r-lg:22px;--r-xl:28px;
   --f-display:"Unbounded","Arial Black",system-ui,sans-serif;
   --f-body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
@@ -30,7 +31,7 @@ html,body{height:100%;background:var(--night);color:var(--ink);overflow:hidden}
 body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-select:none}
 #c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none}
 .hud{position:fixed;inset:0;pointer-events:none;z-index:2}
-.panel{background:var(--panel);border:1px solid var(--edge);border-radius:10px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.panel{background:var(--panel);border:1px solid var(--edge);border-radius:var(--r-md);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700}
 .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 
@@ -41,7 +42,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #lapbox .ping{font-size:11px;color:var(--dim)}
 #lapbox .ping.bad{color:var(--rose)}
 .btns{position:absolute;top:calc(var(--top) + 118px);left:var(--lft);display:flex;gap:8px;pointer-events:auto}
-.btns button{font:600 12px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:7px 10px;cursor:pointer}
+.btns button{font:600 12px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:999px;padding:7px 13px;cursor:pointer}
 .btns button:focus-visible,.cta:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 
 #scorebox{position:absolute;top:var(--top);right:var(--rgt);display:grid;gap:8px;justify-items:end}
@@ -74,7 +75,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .nmpop.t3{font-size:30px;color:var(--rose);text-shadow:0 0 18px rgba(255,59,107,.8)}
 /* a near miss: the text fades in where it is, holds, and fades out; nothing moves */
 /* a hit with a bot: its speed against the crash line; amber = a bump, red = a crash */
-.hitpop{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%);font:800 22px var(--f-display);white-space:nowrap;pointer-events:none;text-align:center;line-height:1.15;color:var(--amber);background:rgba(8,8,22,.62);border:1px solid rgba(255,194,61,.35);border-radius:12px;padding:8px 16px;animation:nmfade 1.5s ease-in-out forwards}
+.hitpop{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%);font:800 22px var(--f-display);white-space:nowrap;pointer-events:none;text-align:center;line-height:1.15;color:var(--amber);background:rgba(8,8,22,.62);border:1px solid rgba(255,194,61,.35);border-radius:20px;padding:8px 18px;animation:nmfade 1.5s ease-in-out forwards}
 .hitpop small{display:block;font:700 12px var(--f-body);letter-spacing:.04em;color:#fff;opacity:.85}
 .hitpop.hard{color:var(--rose);font-size:26px;border-color:rgba(255,59,107,.5)}
 @keyframes nmfade{0%{opacity:0}22%{opacity:1}65%{opacity:1}100%{opacity:0}}
@@ -116,7 +117,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #tL{left:var(--lft)}#tR{left:calc(var(--lft) + 88px)}
 #tG{right:var(--rgt);width:84px;height:84px}
 #tB{right:calc(var(--rgt) + 96px);width:64px;height:64px}
-#tH{right:var(--rgt);bottom:calc(var(--bot) + 96px);width:84px;height:56px;border-radius:14px;color:var(--rose)}
+#tH{right:var(--rgt);bottom:calc(var(--bot) + 96px);width:84px;height:56px;border-radius:999px;color:var(--rose)}
 /* phones: the speedometer sits in the left corner above the steering buttons, mirroring
    the drift button on the right, so the middle of the screen stays free for the car */
 .touch #speedo{right:auto;left:var(--lft);min-width:0;width:164px;padding:8px 12px;gap:3px;bottom:calc(var(--bot) + 96px)}
@@ -153,90 +154,136 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .touch #map{width:110px;height:110px}
 .touch .btns{top:calc(var(--top) + 112px)}
 
-#menu{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;background:radial-gradient(ellipse at 50% 60%,rgba(7,8,15,.55),rgba(7,8,15,.9));padding:calc(20px + env(safe-area-inset-top,0px)) var(--rgt) calc(20px + env(safe-area-inset-bottom,0px)) var(--lft);overflow-y:auto}
-.card{width:min(560px,100%);display:grid;gap:18px;margin-block:auto}
-.card h1{margin:0;font-family:var(--f-display);font-weight:800;font-size:clamp(34px,8vw,64px);line-height:.95;letter-spacing:-.01em;text-wrap:balance}
-.card h1 span{color:var(--rose);display:block}
+/* ---------- menus ----------
+   One soft glass card in the middle of the screen, over the live scene. Everything is
+   round: pill buttons and switches, cards with wide corners, round player badges. */
+#menu{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;background:radial-gradient(ellipse at 50% 55%,rgba(7,8,15,.45),rgba(7,8,15,.9));padding:calc(20px + env(safe-area-inset-top,0px)) var(--rgt) calc(20px + env(safe-area-inset-bottom,0px)) var(--lft);overflow-y:auto}
+.card{position:relative;width:min(600px,100%);display:grid;gap:18px;margin-block:auto;padding:clamp(18px,4vw,30px);border-radius:var(--r-xl);background:linear-gradient(160deg,rgba(28,30,62,.84),rgba(11,12,26,.88));border:1px solid rgba(150,160,255,.2);box-shadow:0 30px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.card-main{width:min(740px,100%)}
+.card h1{margin:0;font-family:var(--f-display);font-weight:800;font-size:clamp(28px,6vw,44px);line-height:1;letter-spacing:-.01em;text-wrap:balance}
+.card h1 span{color:var(--rose)}
+.brand{display:grid;gap:8px}
+.brand h1{font-size:clamp(34px,7.4vw,56px);text-shadow:0 0 34px rgba(255,59,107,.35)}
+.tagline{font-size:14px!important}
 .card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55;max-width:60ch}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px;align-items:center}
-.keys kbd{font-family:var(--f-num);font-size:12px;color:var(--ink);background:rgba(255,255,255,.06);border:1px solid var(--edge);border-radius:6px;padding:3px 8px;white-space:nowrap;justify-self:start}
-.tip{border-left:2px solid var(--amber);padding-left:12px;font-size:14px;color:var(--ink);line-height:1.5}
-.cta{justify-self:start;font:800 16px var(--f-display);color:var(--night);background:var(--cyan);border:0;border-radius:10px;padding:14px 28px;cursor:pointer;box-shadow:0 0 30px rgba(62,240,255,.45);pointer-events:auto}
-.cta:hover{background:#7ff5ff}
-@media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
-@media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
-/* online */
-.over-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-.over-stats div{display:grid;gap:4px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px}
-.over-stats b{font-size:22px;font-weight:700}
-.seg{display:inline-flex;justify-self:start;padding:4px;border:1px solid var(--edge);border-radius:12px;background:rgba(14,16,30,.6);gap:4px}
-.seg button{font:700 14px var(--f-body);color:var(--dim);background:transparent;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;min-height:44px}
-.seg button[aria-pressed="true"]{background:var(--cyan);color:var(--night)}
+.keys kbd{font-family:var(--f-num);font-size:12px;color:var(--ink);background:rgba(255,255,255,.07);border:1px solid var(--edge);border-radius:999px;padding:4px 11px;white-space:nowrap;justify-self:start}
+.tip{border-radius:var(--r-md);background:rgba(255,194,61,.08);border:1px solid rgba(255,194,61,.22);padding:10px 14px;font-size:14px;color:var(--ink);line-height:1.5}
+/* buttons */
+.cta{justify-self:start;font:800 16px var(--f-display);color:var(--night);background:linear-gradient(180deg,#8af7ff,var(--cyan));border:0;border-radius:999px;padding:15px 30px;cursor:pointer;box-shadow:0 8px 30px rgba(62,240,255,.38),inset 0 1px 0 rgba(255,255,255,.6);pointer-events:auto;transition:transform .12s,box-shadow .12s}
+.cta:hover{transform:translateY(-1px);box-shadow:0 10px 36px rgba(62,240,255,.55),inset 0 1px 0 rgba(255,255,255,.6)}
+.cta:active{transform:translateY(1px)}
+.cta.small{font-size:14px;padding:13px 22px}
+.cta:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none}
+.ghost-btn{font:700 14px var(--f-body);color:var(--ink);background:rgba(255,255,255,.05);border:1px solid var(--edge);border-radius:999px;padding:13px 20px;cursor:pointer;transition:border-color .12s,background .12s}
+.ghost-btn:hover{border-color:var(--cyan);background:rgba(62,240,255,.08)}
+.ghost-btn:focus-visible,.back:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.back{justify-self:start;font:700 13px var(--f-body);color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--edge);border-radius:999px;padding:8px 14px 8px 11px;cursor:pointer}
+.back:hover{color:var(--ink);border-color:var(--cyan)}
+.row-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+/* switches */
+.seg{display:inline-flex;justify-self:start;padding:4px;border:1px solid var(--edge);border-radius:999px;background:rgba(8,9,20,.6);gap:2px;max-width:100%}
+.seg button{font:700 14px var(--f-body);color:var(--dim);background:transparent;border:0;border-radius:999px;padding:10px 18px;cursor:pointer;min-height:44px;transition:color .12s,background .12s;white-space:nowrap}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:linear-gradient(180deg,#8af7ff,var(--cyan));color:var(--night);box-shadow:0 4px 18px rgba(62,240,255,.35)}
 .seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-/* the highway card carries its traffic density picker as a footer */
+/* main menu: the two modes */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .mode-col{display:grid;align-content:start}
-.mode-col .mode-card{border-bottom-left-radius:0;border-bottom-right-radius:0}
-.mode-col .mode-card:hover{transform:none}
-.dens{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--edge);border-top:0;border-radius:0 0 14px 14px;background:rgba(14,16,30,.72)}
-.dens .seg{padding:3px}
-.dens .seg button{padding:7px 11px;min-height:36px;font-size:12px}
-.mode-card{display:grid;gap:8px;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(14,16,30,.72);border:1px solid var(--edge);border-radius:14px;padding:18px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
-.mode-card:hover{border-color:var(--rose);box-shadow:0 0 26px rgba(255,59,107,.25);transform:translateY(-2px)}
-.mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 0 26px rgba(62,240,255,.25)}
+.mode-card{display:grid;gap:8px;grid-template-rows:auto auto auto 1fr;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(10,11,24,.72);border:1px solid var(--edge);border-radius:var(--r-lg);padding:16px;cursor:pointer;overflow:hidden;transition:border-color .15s,box-shadow .15s,transform .15s}
+.mode-card:hover{border-color:var(--rose);box-shadow:0 12px 40px rgba(255,59,107,.22);transform:translateY(-2px)}
+.mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 12px 40px rgba(62,240,255,.2)}
 .mode-card:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
-.mode-card.last{border-color:rgba(255,255,255,.35)}
+.mode-card.last{border-color:rgba(255,255,255,.34)}
+.mc-art{display:block;margin:-16px -16px 6px;height:112px;background:#0a0b18}
+.mc-art svg{display:block;width:100%;height:100%}
 .mc-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--rose)}
 .mode-card.traffic .mc-kicker{color:var(--cyan)}
-.mc-title{font-family:var(--f-display);font-weight:800;font-size:clamp(22px,4vw,30px);line-height:1}
-.mc-desc{font-size:14px;line-height:1.5;color:var(--dim)}
+.mc-title{font-family:var(--f-display);font-weight:800;font-size:clamp(22px,4vw,28px);line-height:1}
+.mc-desc{font-size:13.5px;line-height:1.5;color:var(--dim)}
 .mc-best{font-size:13px;color:var(--amber);min-height:1.2em}
-.mc-go{justify-self:start;margin-top:4px;font:800 14px var(--f-display);color:var(--night);background:var(--rose);border-radius:8px;padding:9px 14px}
-.mode-card.traffic .mc-go{background:var(--cyan)}
+.mc-go{margin-top:2px;text-align:center;font:800 14px var(--f-display);color:var(--night);background:linear-gradient(180deg,#ff6f93,var(--rose));border-radius:999px;padding:12px 16px;box-shadow:0 6px 22px rgba(255,59,107,.35)}
+.mode-card.traffic .mc-go{background:linear-gradient(180deg,#8af7ff,var(--cyan));box-shadow:0 6px 22px rgba(62,240,255,.32)}
 .mode-card[aria-disabled="true"]{cursor:not-allowed;opacity:.55;transform:none;box-shadow:none;border-color:var(--edge)}
-.mode-card[aria-disabled="true"] .mc-go{background:transparent;color:var(--dim);border:1px solid var(--edge)}
+/* the highway card carries its traffic density picker as a footer */
+.mode-col .mode-card{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mode-col .mode-card:hover{transform:none}
+.dens{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--edge);border-top:0;border-radius:0 0 var(--r-lg) var(--r-lg);background:rgba(10,11,24,.72)}
+.dens .seg{padding:3px}
+.dens .seg button{padding:7px 12px;min-height:36px;font-size:12px}
 #menuNote:empty{display:none}
-.howto summary{cursor:pointer;color:var(--dim);font-size:14px;font-weight:700;padding:6px 0}
+.howto{border:1px solid var(--edge);border-radius:var(--r-md);background:rgba(8,9,20,.45);padding:4px 16px}
+.howto summary{cursor:pointer;color:var(--dim);font-size:14px;font-weight:700;padding:8px 0}
 .howto summary:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.howto[open] summary{margin-bottom:10px}
+.howto[open]{padding-bottom:14px}
+.howto[open] summary{margin-bottom:8px}
 .howto .keys{margin-bottom:12px}
-.over-score{display:grid;justify-items:start;gap:4px}
+/* crash screen */
+.over-score{display:grid;justify-items:start;gap:6px}
 .over-score b{font-family:var(--f-display);font-weight:800;font-size:clamp(40px,9vw,64px);line-height:1;color:var(--ink);text-shadow:0 0 22px rgba(62,240,255,.4)}
-.over-score .rec{font:800 13px var(--f-display);color:var(--night);background:var(--amber);border-radius:6px;padding:5px 10px}
+.over-score .rec{font:800 13px var(--f-display);color:var(--night);background:var(--amber);border-radius:999px;padding:6px 12px;box-shadow:0 0 22px rgba(255,194,61,.45)}
 .over-score .best{font-size:13px;color:var(--dim)}
-@media (max-width:620px){.modes{grid-template-columns:1fr}.mode-card{padding:14px}.mc-desc{font-size:13px}}
-.lobby-cfg{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.lobby-cfg .seg button:disabled{cursor:default}
-.lobby-cfg .seg button:disabled:not([aria-pressed="true"]){opacity:.55}
-.cfg-note{font-size:13px;color:var(--dim);flex-basis:100%}
-.cfg-note:empty{display:none}
-.row-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.ghost-btn{font:700 14px var(--f-body);color:var(--ink);background:transparent;border:1px solid var(--edge);border-radius:10px;padding:13px 20px;cursor:pointer}
-.ghost-btn:hover{border-color:var(--cyan)}
-.ghost-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.cta.small{font-size:14px;padding:12px 20px}
-.cta:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.over-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.over-stats div{display:grid;gap:4px;align-content:start;padding:12px 16px;border:1px solid var(--edge);border-radius:var(--r-md);background:rgba(8,9,20,.45)}
+.over-stats b{font-size:21px;font-weight:700}
+/* playing with friends: name, then create a room or join one */
 .field{display:grid;gap:6px}
-.field input{font:600 16px var(--f-body);color:var(--ink);background:rgba(255,255,255,.05);border:1px solid var(--edge);border-radius:10px;padding:12px 14px;width:100%;min-width:0}
-.field input:focus{outline:2px solid var(--cyan);outline-offset:1px}
-#codeIn{font-family:var(--f-num);text-transform:uppercase;letter-spacing:.3em;max-width:170px}
-.join-row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.field input{font:600 16px var(--f-body);color:var(--ink);background:rgba(8,9,20,.55);border:1px solid var(--edge);border-radius:999px;padding:13px 18px;width:100%;min-width:0;transition:border-color .12s,box-shadow .12s}
+.field input::placeholder{color:rgba(141,147,184,.6)}
+.field input:focus{outline:0;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(62,240,255,.2)}
+#codeIn{font-family:var(--f-num);font-weight:700;text-transform:uppercase;letter-spacing:.34em;text-align:center;font-size:20px;padding-inline:10px}
+.ways{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.way{display:grid;gap:10px;align-content:start;padding:16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
+.way b{font:800 17px var(--f-display)}
+.way p{font-size:13.5px}
+.way .cta,.way .ghost-btn{justify-self:stretch;text-align:center;margin-top:auto}
 .status{font-size:14px;color:var(--amber);min-height:1.4em}
+.status:empty{min-height:0}
 .status.err{color:var(--rose)}
-.code-big{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.code-big .code{font-family:var(--f-num);font-weight:700;font-size:44px;letter-spacing:.18em;color:var(--cyan);text-shadow:0 0 18px rgba(62,240,255,.5)}
-.plist{display:grid;gap:6px;margin:0;padding:0;list-style:none}
-.plist li{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--edge);border-radius:10px;background:rgba(255,255,255,.03);font-size:15px}
-.plist li.empty{color:var(--dim);border-style:dashed;background:none}
+/* lobby */
+.lobby-head{display:flex;align-items:end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap}
+.code-big{display:grid;gap:8px}
+.code-big .code{font-family:var(--f-num);font-weight:700;font-size:38px;line-height:58px;height:58px;width:254px;letter-spacing:41px;padding-left:17px;white-space:nowrap;overflow:hidden;color:var(--cyan);text-shadow:0 0 18px rgba(62,240,255,.55);
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='58'%3E%3Crect x='.5' y='.5' width='55' height='57' rx='16' fill='%23090a16' fill-opacity='.7' stroke='%233ef0ff' stroke-opacity='.4'/%3E%3C/svg%3E") 0 0/64px 58px repeat-x}
+#lobbyHint{font-size:14px}
+.lobby-cfg{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
+.cfg-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap}
+.cfg-row .seg{padding:3px}
+.cfg-row .seg button{min-height:38px;padding:8px 15px;font-size:13px}
+.lobby-cfg .seg button:disabled{cursor:default}
+.lobby-cfg .seg button:disabled:not([aria-pressed="true"]){opacity:.5}
+.cfg-note{font-size:13px;color:var(--dim);line-height:1.5}
+.cfg-note:empty{display:none}
+.plist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:0;list-style:none}
+.plist li{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 14px 8px 8px;border:1px solid var(--edge);border-radius:999px;background:rgba(255,255,255,.04);font-size:15px;font-weight:600}
+.plist li .pn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plist li.empty{color:var(--dim);font-weight:400;border-style:dashed;background:none;padding-left:8px}
+.plist li.empty::before{content:'+';display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;border:1px dashed var(--edge);font:500 18px var(--f-num);color:var(--dim)}
+.ava{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;font:800 14px var(--f-display);color:#0a0b16;box-shadow:0 0 16px currentColor,inset 0 -3px 0 rgba(0,0,0,.18),inset 0 2px 0 rgba(255,255,255,.35)}
+.ava i{font-style:normal;color:#0a0b16}
 .dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
-.badge{margin-left:auto;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700}
-.badge.host{color:var(--amber)}
-.res{width:100%;border-collapse:collapse;font-size:14px}
-.res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:6px 8px}
-.res td{padding:9px 8px;border-top:1px solid var(--edge);font-variant-numeric:tabular-nums}
-.res td.pl{font-family:var(--f-display);font-weight:800;font-size:18px;width:2.2em}
-.res .me td{background:rgba(62,240,255,.07)}
+.badge{margin-left:auto;flex:none;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700;border:1px solid var(--edge);border-radius:999px;padding:3px 8px}
+.badge.host{color:var(--amber);border-color:rgba(255,194,61,.4);background:rgba(255,194,61,.08)}
+/* results */
+.res{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:14px}
+.res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
+.res td{padding:11px 12px;background:rgba(255,255,255,.04);border-block:1px solid var(--edge);font-variant-numeric:tabular-nums;white-space:nowrap}
+.res td:first-child{border-left:1px solid var(--edge);border-radius:18px 0 0 18px}
+.res td:last-child{border-right:1px solid var(--edge);border-radius:0 18px 18px 0}
+.res td.pl{font-family:var(--f-display);font-weight:800;font-size:18px;width:2.4em;color:var(--dim)}
+.res tr:nth-child(1) td.pl{color:var(--amber);text-shadow:0 0 14px rgba(255,194,61,.6)}
+.res .me td{background:rgba(62,240,255,.09);border-color:rgba(62,240,255,.35)}
 .res-wrap{overflow-x:auto}
+@media (max-width:620px){
+  .modes,.ways{grid-template-columns:1fr}
+  .mc-art{height:84px}
+  .mc-desc{font-size:13px}
+  .plist{grid-template-columns:1fr}
+  .seg button{padding:10px 14px}
+  .code-big .code{font-size:32px;line-height:50px;height:50px;width:222px;letter-spacing:36.8px;padding-left:14.4px;background-size:56px 50px}
+}
+@media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
+@media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
 #standings{position:absolute;left:var(--lft);top:calc(var(--top) + 162px);padding:8px 10px;display:grid;gap:4px;min-width:170px;font-size:13px}
 #standings .st{display:flex;align-items:center;gap:8px}
 #standings .st .pos{font-family:var(--f-display);font-weight:800;width:1.2em}
@@ -315,14 +362,37 @@ body{margin:0}
 </div>
 
 <div id="menu">
-  <div class="card" id="pMain">
-    <h1>Night <span>Drift</span></h1>
+  <div class="card card-main" id="pMain">
+    <header class="brand">
+      <h1>Night <span>Drift</span></h1>
+      <p class="tagline">Ночной дрифт по трассе и шоссе с трафиком — в одиночку или с друзьями.</p>
+    </header>
     <div class="seg" role="group" aria-label="Как играть">
       <button type="button" id="segSolo" aria-pressed="true">Одному</button>
       <button type="button" id="segFriends" aria-pressed="false">С друзьями</button>
     </div>
     <div class="modes">
       <button type="button" class="mode-card" id="mTrack" data-mode="track">
+        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="aSky1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1240"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
+            <radialGradient id="aGlow1" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ff3b6b" stop-opacity=".55"/><stop offset="1" stop-color="#ff3b6b" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="112" fill="url(#aSky1)"/>
+          <ellipse cx="250" cy="10" rx="150" ry="46" fill="url(#aGlow1)"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#ff3b6b" stroke-opacity=".55" stroke-width="37" stroke-linecap="round"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#23263a" stroke-width="32" stroke-linecap="round"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#eef0ff" stroke-opacity=".45" stroke-width="1.6" stroke-dasharray="9 11"/>
+          <path d="M70 84C92 62 112 44 150 38" fill="none" stroke="#07080f" stroke-opacity=".8" stroke-width="2.2"/>
+          <path d="M78 92C100 68 122 51 156 46" fill="none" stroke="#07080f" stroke-opacity=".8" stroke-width="2.2"/>
+          <g fill="#eef0ff"><circle cx="118" cy="62" r="9" fill-opacity=".1"/><circle cx="104" cy="74" r="12" fill-opacity=".07"/><circle cx="132" cy="52" r="6" fill-opacity=".13"/></g>
+          <g transform="translate(160 41) rotate(-27)">
+            <ellipse rx="22" ry="12" fill="#3ef0ff" fill-opacity=".22"/>
+            <rect x="-15" y="-7.5" width="30" height="15" rx="6.5" fill="#ff3b6b"/>
+            <rect x="-6" y="-5.5" width="11" height="11" rx="3.5" fill="#101c30"/>
+            <rect x="7" y="-4.5" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/><rect x="7" y="2.1" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/>
+          </g>
+        </svg></span>
         <span class="mc-kicker">Дрифт</span>
         <span class="mc-title">Трасса</span>
         <span class="mc-desc">13 поворотов ночного города. Входи боком и держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
@@ -331,9 +401,24 @@ body{margin:0}
       </button>
       <div class="mode-col">
       <button type="button" class="mode-card traffic" id="mTraffic" data-mode="traffic">
+        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="aSky2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d1238"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
+            <radialGradient id="aGlow2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#3ef0ff" stop-opacity=".5"/><stop offset="1" stop-color="#3ef0ff" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="112" fill="url(#aSky2)"/>
+          <ellipse cx="160" cy="20" rx="120" ry="30" fill="url(#aGlow2)"/>
+          <path d="M40 112L148 20h24L280 112z" fill="#1d2032"/>
+          <path d="M40 112L148 20" stroke="#3ef0ff" stroke-width="2.6" stroke-linecap="round"/><path d="M40 112L148 20" stroke="#3ef0ff" stroke-opacity=".3" stroke-width="7"/>
+          <path d="M280 112L172 20" stroke="#ff3b6b" stroke-width="2.6" stroke-linecap="round"/><path d="M280 112L172 20" stroke="#ff3b6b" stroke-opacity=".3" stroke-width="7"/>
+          <g stroke="#eef0ff" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="7 8"><path d="M100 112L154 20"/><path d="M160 112V20"/><path d="M220 112L166 20"/></g>
+          <g><rect x="163" y="36" width="13" height="9" rx="3.5" fill="#e8e8ee"/><rect x="164.5" y="41.5" width="3" height="1.8" rx=".9" fill="#ff1a3c"/><rect x="171.5" y="41.5" width="3" height="1.8" rx=".9" fill="#ff1a3c"/></g>
+          <g><rect x="176" y="56" width="23" height="16" rx="5.5" fill="#f0b429"/><rect x="179" y="58" width="17" height="6" rx="2.5" fill="#101c30"/><rect x="178" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/><rect x="192" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/></g>
+          <g><ellipse cx="124" cy="101" rx="30" ry="9" fill="#3ef0ff" fill-opacity=".25"/><rect x="104" y="76" width="40" height="25" rx="9" fill="#ff3b6b"/><rect x="110" y="79" width="28" height="9" rx="4" fill="#101c30"/><rect x="108" y="91.5" width="32" height="3" rx="1.5" fill="#ff8aa6"/></g>
+        </svg></span>
         <span class="mc-kicker">Трафик</span>
         <span class="mc-title">Шоссе</span>
-        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч, копи комбо до ×5. Догнал машину быстрее неё на 32+ км/ч или ударил в борт на 50+ — авария.</span>
+        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч, копи комбо до ×5. Догнал машину быстрее неё на 32+ км/ч или ударил в борт на 50+ — авария.</span>
         <span class="mc-best" id="bestTraffic"></span>
         <span class="mc-go" id="goTraffic">Поехали</span>
       </button>
@@ -373,36 +458,54 @@ body{margin:0}
   </div>
 
   <div class="card" id="pOnline" hidden>
-    <h1>Онлайн <span>заезд</span></h1>
-    <p>До 6 игроков в комнате, общий старт. Трасса — 3 круга, кто первый. Шоссе — заезд на время по общему трафику, больше очков — выше место. Машины сталкиваются: можно толкаться и вытеснять соперников с траектории.</p>
+    <button class="back" id="backMain" type="button">← Назад</button>
+    <h1>Заезд <span>с друзьями</span></h1>
+    <p>До 6 игроков в комнате, общий старт. Трасса — 3 круга, кто первый. Шоссе — заезд на время по общему трафику: больше очков — выше место. Машины сталкиваются, можно толкаться.</p>
     <label class="field"><span class="lbl">Ваше имя</span><input id="nameIn" maxlength="16" autocomplete="nickname" placeholder="Например, Muza"></label>
-    <div class="row-btns"><button class="cta small" id="createRoom" type="button">Создать комнату</button></div>
-    <div class="join-row">
-      <label class="field"><span class="lbl">Код комнаты</span><input id="codeIn" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
-      <button class="ghost-btn" id="joinRoom" type="button">Войти по коду</button>
+    <div class="ways">
+      <div class="way">
+        <b>Новая комната</b>
+        <p>Создайте комнату и отправьте друзьям её код или ссылку.</p>
+        <button class="cta small" id="createRoom" type="button">Создать комнату</button>
+      </div>
+      <div class="way">
+        <b>Есть код?</b>
+        <label class="field"><span class="lbl">Код комнаты</span><input id="codeIn" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
+        <button class="ghost-btn" id="joinRoom" type="button">Войти по коду</button>
+      </div>
     </div>
     <div class="status" id="netStatus" role="status"></div>
-    <div class="row-btns"><button class="ghost-btn" id="backMain" type="button">Назад</button></div>
   </div>
 
   <div class="card" id="pLobby" hidden>
-    <div class="lbl">Код комнаты</div>
-    <div class="code-big"><span class="code" id="roomCode">----</span><button class="ghost-btn" id="copyLink" type="button">Скопировать ссылку</button></div>
+    <div class="lobby-head">
+      <div class="code-big"><span class="lbl">Код комнаты</span><span class="code" id="roomCode">----</span></div>
+      <button class="ghost-btn" id="copyLink" type="button">Скопировать ссылку</button>
+    </div>
     <p id="lobbyHint">Отправьте код или ссылку друзьям. Они открывают игру, выбирают «С друзьями» и вводят код.</p>
     <div class="lobby-cfg">
-      <div class="seg" id="cfgMode" role="group" aria-label="Режим">
-        <button type="button" data-mode="track" aria-pressed="true">Трасса</button>
-        <button type="button" data-mode="traffic" aria-pressed="false">Шоссе</button>
+      <div class="cfg-row">
+        <span class="lbl">Режим</span>
+        <div class="seg" id="cfgMode" role="group" aria-label="Режим">
+          <button type="button" data-mode="track" aria-pressed="true">Трасса</button>
+          <button type="button" data-mode="traffic" aria-pressed="false">Шоссе</button>
+        </div>
       </div>
-      <div class="seg" id="cfgDur" role="group" aria-label="Длительность заезда" hidden>
-        <button type="button" data-dur="120" aria-pressed="false">2 мин</button>
-        <button type="button" data-dur="180" aria-pressed="true">3 мин</button>
-        <button type="button" data-dur="300" aria-pressed="false">5 мин</button>
+      <div class="cfg-row" id="rowDur" hidden>
+        <span class="lbl">Заезд</span>
+        <div class="seg" id="cfgDur" role="group" aria-label="Длительность заезда">
+          <button type="button" data-dur="120" aria-pressed="false">2 мин</button>
+          <button type="button" data-dur="180" aria-pressed="true">3 мин</button>
+          <button type="button" data-dur="300" aria-pressed="false">5 мин</button>
+        </div>
       </div>
-      <div class="seg" id="cfgDens" role="group" aria-label="Плотность трафика" hidden>
-        <button type="button" data-dens="low" aria-pressed="false">Трафик низкий</button>
-        <button type="button" data-dens="mid" aria-pressed="true">средний</button>
-        <button type="button" data-dens="high" aria-pressed="false">высокий</button>
+      <div class="cfg-row" id="rowDens" hidden>
+        <span class="lbl">Трафик</span>
+        <div class="seg" id="cfgDens" role="group" aria-label="Плотность трафика">
+          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
+          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
+          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
+        </div>
       </div>
       <div class="cfg-note" id="cfgNote"></div>
     </div>
