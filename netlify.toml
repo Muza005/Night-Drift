@@ -1,3 +1,0 @@
-# Netlify: serve the game from the public/ folder, no build step.
-[build]
-  publish = "public"
