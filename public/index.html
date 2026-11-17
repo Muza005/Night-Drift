@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Night Drift</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: full-bleed 3D canvas, HUD pinned to the four corners, drift meter top-centre. Single deliberate night theme. */
+:root{
+  --night:#07080f;
+  --ink:#eef0ff;
+  --dim:#8d93b8;
+  --cyan:#3ef0ff;
+  --rose:#ff3b6b;
+  --amber:#ffc23d;
+  --panel:rgba(10,12,24,.66);
+  --edge:rgba(120,140,255,.22);
+  --r-md:16px;--r-lg:22px;--r-xl:28px;
+  --f-display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --f-body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --top:calc(14px + env(safe-area-inset-top,0px));
+  --bot:calc(14px + env(safe-area-inset-bottom,0px));
+  --lft:max(16px, env(safe-area-inset-left,0px));
+  --rgt:max(16px, env(safe-area-inset-right,0px));
+  color-scheme:dark;
+}
+html,body{height:100%;background:var(--night);color:var(--ink);overflow:hidden}
+body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-select:none}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none}
+.hud{position:fixed;inset:0;pointer-events:none;z-index:2}
+.panel{background:var(--panel);border:1px solid var(--edge);border-radius:var(--r-md);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+
+#lapbox{position:absolute;top:var(--top);left:var(--lft);padding:10px 14px;display:grid;gap:2px;min-width:150px}
+#lapbox .lapn{font-family:var(--f-display);font-weight:800;font-size:18px}
+#lapbox .lapt{font-size:22px;font-weight:700}
+#lapbox .best{font-size:12px;color:var(--amber)}
+#lapbox .ping{font-size:11px;color:var(--dim)}
+#lapbox .ping.bad{color:var(--rose)}
+.btns{position:absolute;top:calc(var(--top) + 118px);left:var(--lft);display:flex;gap:8px;pointer-events:auto}
+.btns button{font:600 12px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:999px;padding:7px 13px;cursor:pointer}
+.btns button:focus-visible,.cta:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+#scorebox{position:absolute;top:var(--top);right:var(--rgt);display:grid;gap:8px;justify-items:end}
+#scorebox .sc{padding:10px 14px;text-align:right}
+#score{font-size:24px;font-weight:700;color:var(--cyan)}
+#map{width:150px;height:150px;display:block}
+
+#combo[hidden]{display:none}
+#combo{padding:10px 14px;display:grid;gap:4px;justify-items:end;min-width:120px}
+#cmult{font-family:var(--f-display);font-weight:800;font-size:30px;line-height:1;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.55)}
+#cmult.bump{animation:cbump .25s ease-out}
+#cmult.max{animation:cmax .5s ease-in-out infinite alternate}
+@keyframes cbump{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+@keyframes cmax{0%{color:var(--amber)}100%{color:var(--rose)}}
+.cbar{width:100%;height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
+.cbar i{display:block;height:100%;width:0;background:var(--amber)}
+#ctag{font-size:12px;font-weight:700;color:var(--cyan);visibility:hidden}
+#ctag.on{visibility:visible}
+/* slipstream: the speed glows white and a «карман» tag appears */
+#speedo.draft{box-shadow:0 0 0 1px rgba(255,255,255,.7),0 0 26px rgba(255,255,255,.35)}
+#speedo.draft #spd,#hwbar.draft .hs b{color:#fff;text-shadow:0 0 14px rgba(255,255,255,.85)}
+#speedo.draft::before{content:'карман';position:absolute;top:-26px;left:50%;transform:translateX(-50%);font:800 11px var(--f-display);letter-spacing:.14em;text-transform:uppercase;color:#0b0820;background:#fff;border-radius:999px;padding:3px 10px;box-shadow:0 0 16px rgba(255,255,255,.6);white-space:nowrap}
+#hwbar.draft .hs .lbl{font-size:0}
+#hwbar.draft .hs .lbl::after{content:'карман';font-size:9px;color:#fff;letter-spacing:.1em}
+#speedo.hot{box-shadow:0 0 0 1px rgba(62,240,255,.55),0 0 22px rgba(62,240,255,.35)}
+.nmpop{position:absolute;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;white-space:nowrap;pointer-events:none;animation:nmfade 1.15s ease-in-out forwards;text-align:center;line-height:1.05}
+.nmpop small{display:block;font-size:.62em;opacity:.9}
+.nmpop.t1{font-size:20px;color:var(--cyan);text-shadow:0 0 14px rgba(62,240,255,.7)}
+.nmpop.t2{font-size:24px;color:var(--amber);text-shadow:0 0 16px rgba(255,194,61,.7)}
+.nmpop.t3{font-size:30px;color:var(--rose);text-shadow:0 0 18px rgba(255,59,107,.8)}
+/* a near miss: the text fades in where it is, holds, and fades out; nothing moves */
+/* a hit with a bot: its speed against the crash line; amber = a bump, red = a crash */
+.hitpop{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%);font:800 22px var(--f-display);white-space:nowrap;pointer-events:none;text-align:center;line-height:1.15;color:var(--amber);background:rgba(8,8,22,.62);border:1px solid rgba(255,194,61,.35);border-radius:20px;padding:8px 18px;animation:nmfade 1.5s ease-in-out forwards}
+.hitpop small{display:block;font:700 12px var(--f-body);letter-spacing:.04em;color:#fff;opacity:.85}
+.hitpop.hard{color:var(--rose);font-size:26px;border-color:rgba(255,59,107,.5)}
+@keyframes nmfade{0%{opacity:0}22%{opacity:1}65%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.nmpop,#cmult.bump,#cmult.max{animation:none}}
+#drift{position:absolute;top:calc(var(--top) + 8px);left:50%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .2s}
+#drift.on{opacity:1}
+#dpts{font-family:var(--f-display);font-weight:800;font-size:44px;line-height:1;color:var(--ink);text-shadow:0 0 18px rgba(255,59,107,.7)}
+#dmeta{display:flex;gap:12px;justify-content:center;align-items:baseline;margin-top:6px}
+#dmult{font-family:var(--f-display);font-weight:800;font-size:20px;color:var(--rose)}
+#dang{font-size:14px;color:var(--dim)}
+#dbar{width:160px;height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin:8px auto 0;overflow:hidden}
+#dbar i{display:block;height:100%;width:0;background:var(--rose)}
+
+#speedo{position:absolute;right:var(--rgt);bottom:var(--bot);padding:12px 16px;display:grid;gap:4px;min-width:170px}
+#speedo .row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+#spd{font-size:46px;font-weight:700;line-height:1}
+#gear{font-family:var(--f-display);font-weight:800;font-size:22px;color:var(--amber)}
+#sbar{height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden}
+#sbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--rose))}
+
+#hint{position:absolute;left:var(--lft);bottom:var(--bot);font-size:12px;color:var(--dim);line-height:1.6;padding:10px 14px}
+#hint b{color:var(--ink);font-family:var(--f-num);font-weight:500}
+
+#toast{position:absolute;top:34%;left:50%;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;font-size:26px;text-align:center;opacity:0;transition:opacity .25s;text-shadow:0 0 20px rgba(62,240,255,.6);max-width:90vw;text-wrap:balance}
+#toast.on{opacity:1}
+#toast small{display:block;font-family:var(--f-num);font-weight:500;font-size:15px;color:var(--amber);margin-top:6px;text-shadow:none}
+#count{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;font-size:110px;color:var(--amber);text-shadow:0 0 30px rgba(255,194,61,.7)}
+#count.pop{animation:pop .9s ease-out}
+@keyframes pop{0%{transform:translate(-50%,-50%) scale(1.6);opacity:0}25%{opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:.9}}
+.float{position:absolute;top:calc(var(--top) + 110px);left:50%;transform:translateX(-50%);font-family:var(--f-display);font-weight:800;font-size:28px;color:var(--cyan);animation:rise 1.3s ease-out forwards;text-shadow:0 0 16px rgba(62,240,255,.7);white-space:nowrap}
+.float.bad{color:var(--rose);text-shadow:0 0 16px rgba(255,59,107,.7);font-size:22px}
+@keyframes rise{0%{opacity:0;transform:translate(-50%,10px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-50px)}}
+
+#touch{display:none}
+.touch #touch{display:block}
+.touch #hint{display:none}
+.tb{position:absolute;bottom:var(--bot);pointer-events:auto;width:76px;height:76px;border-radius:50%;background:rgba(14,16,30,.55);border:1px solid var(--edge);color:var(--ink);font:800 13px var(--f-display);display:grid;place-items:center;touch-action:none}
+.tb.on{background:rgba(62,240,255,.25);border-color:var(--cyan)}
+#tL{left:var(--lft)}#tR{left:calc(var(--lft) + 88px)}
+#tG{right:var(--rgt);width:84px;height:84px}
+#tB{right:calc(var(--rgt) + 96px);width:64px;height:64px}
+#tH{right:var(--rgt);bottom:calc(var(--bot) + 96px);width:84px;height:56px;border-radius:999px;color:var(--rose)}
+/* phones: the speedometer sits in the left corner above the steering buttons, mirroring
+   the drift button on the right, so the middle of the screen stays free for the car */
+.touch #speedo{right:auto;left:var(--lft);min-width:0;width:164px;padding:8px 12px;gap:3px;bottom:calc(var(--bot) + 96px)}
+.touch #spd{font-size:30px}
+.touch #gear{font-size:19px}
+/* phones held sideways: the car is mid-screen, so the speedometer goes to the bottom centre
+   between the steering and pedal buttons; score, map and combo line up in one row so the
+   drift button below them stays clear */
+@media (orientation:landscape) and (max-height:500px){
+  .touch #speedo{left:50%;transform:translateX(-50%);bottom:var(--bot)}
+  .touch #scorebox{grid-auto-flow:column;align-items:start}
+}
+/* phones, highway: speed, distance, time, score and combo in one strip at the top */
+#hwbar{display:none}
+.touch .hud.hw #lapbox,.touch .hud.hw #scorebox,.touch .hud.hw #speedo{display:none}
+.touch .hud.hw #hwbar{position:absolute;top:var(--top);left:var(--lft);right:var(--rgt);max-width:520px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:6px 12px 8px;overflow:hidden}
+#hwbar .hc{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:5px}
+#hwbar .hc b{font-size:21px;font-weight:700;line-height:1.1;white-space:nowrap}
+#hwbar .hc i{font-style:normal;font-family:var(--f-display);font-weight:800;font-size:14px;color:var(--amber)}
+#hwbar .hc .lbl{grid-column:1/-1;font-size:9px;letter-spacing:.1em;white-space:nowrap}
+#hwbar .hd{grid-template-columns:auto;justify-items:center}
+#hwbar .hd b{font-size:17px}
+#hwbar .hp{justify-items:end}
+#hwbar .hp b{color:var(--cyan)}
+#hwbar.hot .hs b{color:var(--cyan);text-shadow:0 0 12px rgba(62,240,255,.6)}
+#hwMult.max{color:var(--rose)}
+#hwMult.drift{color:var(--rose);text-shadow:0 0 10px rgba(255,79,163,.6)}
+#hwbar .hwcbar{position:absolute;left:0;right:0;bottom:0;height:3px}
+#hwbar .hwcbar i{display:block;height:100%;width:0;background:var(--amber);box-shadow:0 0 8px rgba(255,190,60,.7)}
+.touch .hud.hw .btns{top:calc(var(--top) + 60px)}
+.touch .hud.hw .btns button{padding:5px 9px;font-size:11px}
+.touch .hud.hw #standings{top:calc(var(--top) + 98px)}
+.touch .hud.hw #drift{top:calc(var(--top) + 100px)}
+.touch #map{width:110px;height:110px}
+.touch .btns{top:calc(var(--top) + 112px)}
+
+/* ---------- menus ----------
+   One soft glass card in the middle of the screen, over the live scene. Everything is
+   round: pill buttons and switches, cards with wide corners, round player badges. */
+#menu{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;background:radial-gradient(ellipse at 50% 55%,rgba(7,8,15,.45),rgba(7,8,15,.9));padding:calc(20px + env(safe-area-inset-top,0px)) var(--rgt) calc(20px + env(safe-area-inset-bottom,0px)) var(--lft);overflow-y:auto}
+.card{position:relative;width:min(600px,100%);display:grid;gap:18px;margin-block:auto;padding:clamp(18px,4vw,30px);border-radius:var(--r-xl);background:linear-gradient(160deg,rgba(28,30,62,.84),rgba(11,12,26,.88));border:1px solid rgba(150,160,255,.2);box-shadow:0 30px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.card-main{width:min(740px,100%)}
+.card h1{margin:0;font-family:var(--f-display);font-weight:800;font-size:clamp(28px,6vw,44px);line-height:1;letter-spacing:-.01em;text-wrap:balance}
+.card h1 span{color:var(--rose)}
+.brand{display:grid;gap:8px}
+.brand h1{font-size:clamp(34px,7.4vw,56px);text-shadow:0 0 34px rgba(255,59,107,.35)}
+.tagline{font-size:14px!important}
+.card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55;max-width:60ch}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px;align-items:center}
+.keys kbd{font-family:var(--f-num);font-size:12px;color:var(--ink);background:rgba(255,255,255,.07);border:1px solid var(--edge);border-radius:999px;padding:4px 11px;white-space:nowrap;justify-self:start}
+.tip{border-radius:var(--r-md);background:rgba(255,194,61,.08);border:1px solid rgba(255,194,61,.22);padding:10px 14px;font-size:14px;color:var(--ink);line-height:1.5}
+/* buttons */
+.cta{justify-self:start;font:800 16px var(--f-display);color:var(--night);background:linear-gradient(180deg,#8af7ff,var(--cyan));border:0;border-radius:999px;padding:15px 30px;cursor:pointer;box-shadow:0 8px 30px rgba(62,240,255,.38),inset 0 1px 0 rgba(255,255,255,.6);pointer-events:auto;transition:transform .12s,box-shadow .12s}
+.cta:hover{transform:translateY(-1px);box-shadow:0 10px 36px rgba(62,240,255,.55),inset 0 1px 0 rgba(255,255,255,.6)}
+.cta:active{transform:translateY(1px)}
+.cta.small{font-size:14px;padding:13px 22px}
+.cta:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none}
+.ghost-btn{font:700 14px var(--f-body);color:var(--ink);background:rgba(255,255,255,.05);border:1px solid var(--edge);border-radius:999px;padding:13px 20px;cursor:pointer;transition:border-color .12s,background .12s}
+.ghost-btn:hover{border-color:var(--cyan);background:rgba(62,240,255,.08)}
+.ghost-btn:focus-visible,.back:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.back{justify-self:start;font:700 13px var(--f-body);color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--edge);border-radius:999px;padding:8px 14px 8px 11px;cursor:pointer}
+.back:hover{color:var(--ink);border-color:var(--cyan)}
+.row-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+/* switches */
+.seg{display:inline-flex;justify-self:start;padding:4px;border:1px solid var(--edge);border-radius:999px;background:rgba(8,9,20,.6);gap:2px;max-width:100%}
+.seg button{font:700 14px var(--f-body);color:var(--dim);background:transparent;border:0;border-radius:999px;padding:10px 18px;cursor:pointer;min-height:44px;transition:color .12s,background .12s;white-space:nowrap}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:linear-gradient(180deg,#8af7ff,var(--cyan));color:var(--night);box-shadow:0 4px 18px rgba(62,240,255,.35)}
+.seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+/* main menu: the two modes */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.mode-col{display:grid;align-content:start}
+.mode-card{display:grid;gap:8px;grid-template-rows:auto auto auto 1fr;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(10,11,24,.72);border:1px solid var(--edge);border-radius:var(--r-lg);padding:16px;cursor:pointer;overflow:hidden;transition:border-color .15s,box-shadow .15s,transform .15s}
+.mode-card:hover{border-color:var(--rose);box-shadow:0 12px 40px rgba(255,59,107,.22);transform:translateY(-2px)}
+.mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 12px 40px rgba(62,240,255,.2)}
+.mode-card:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+.mode-card.last{border-color:rgba(255,255,255,.34)}
+.mc-art{display:block;margin:-16px -16px 6px;height:112px;background:#0a0b18}
+.mc-art svg{display:block;width:100%;height:100%}
+.mc-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--rose)}
+.mode-card.traffic .mc-kicker{color:var(--cyan)}
+.mc-title{font-family:var(--f-display);font-weight:800;font-size:clamp(22px,4vw,28px);line-height:1}
+.mc-desc{font-size:13.5px;line-height:1.5;color:var(--dim)}
+.mc-best{font-size:13px;color:var(--amber);min-height:1.2em}
+.mc-go{margin-top:2px;text-align:center;font:800 14px var(--f-display);color:var(--night);background:linear-gradient(180deg,#ff6f93,var(--rose));border-radius:999px;padding:12px 16px;box-shadow:0 6px 22px rgba(255,59,107,.35)}
+.mode-card.traffic .mc-go{background:linear-gradient(180deg,#8af7ff,var(--cyan));box-shadow:0 6px 22px rgba(62,240,255,.32)}
+.mode-card[aria-disabled="true"]{cursor:not-allowed;opacity:.55;transform:none;box-shadow:none;border-color:var(--edge)}
+/* the highway card carries its traffic density picker as a footer */
+.mode-col .mode-card{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mode-col .mode-card:hover{transform:none}
+.dens{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--edge);border-top:0;border-radius:0 0 var(--r-lg) var(--r-lg);background:rgba(10,11,24,.72)}
+.dens .seg{padding:3px}
+.dens .seg button{padding:7px 12px;min-height:36px;font-size:12px}
+#menuNote:empty{display:none}
+.howto{border:1px solid var(--edge);border-radius:var(--r-md);background:rgba(8,9,20,.45);padding:4px 16px}
+.howto summary{cursor:pointer;color:var(--dim);font-size:14px;font-weight:700;padding:8px 0}
+.howto summary:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.howto[open]{padding-bottom:14px}
+.howto[open] summary{margin-bottom:8px}
+.howto .keys{margin-bottom:12px}
+/* crash screen */
+.over-score{display:grid;justify-items:start;gap:6px}
+.over-score b{font-family:var(--f-display);font-weight:800;font-size:clamp(40px,9vw,64px);line-height:1;color:var(--ink);text-shadow:0 0 22px rgba(62,240,255,.4)}
+.over-score .rec{font:800 13px var(--f-display);color:var(--night);background:var(--amber);border-radius:999px;padding:6px 12px;box-shadow:0 0 22px rgba(255,194,61,.45)}
+.over-score .best{font-size:13px;color:var(--dim)}
+.over-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.over-stats div{display:grid;gap:4px;align-content:start;padding:12px 16px;border:1px solid var(--edge);border-radius:var(--r-md);background:rgba(8,9,20,.45)}
+.over-stats b{font-size:21px;font-weight:700}
+/* playing with friends: name, then create a room or join one */
+.field{display:grid;gap:6px}
+.field input{font:600 16px var(--f-body);color:var(--ink);background:rgba(8,9,20,.55);border:1px solid var(--edge);border-radius:999px;padding:13px 18px;width:100%;min-width:0;transition:border-color .12s,box-shadow .12s}
+.field input::placeholder{color:rgba(141,147,184,.6)}
+.field input:focus{outline:0;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(62,240,255,.2)}
+#codeIn{font-family:var(--f-num);font-weight:700;text-transform:uppercase;letter-spacing:.34em;text-align:center;font-size:20px;padding-inline:10px}
+.ways{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.way{display:grid;gap:10px;align-content:start;padding:16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
+.way b{font:800 17px var(--f-display)}
+.way p{font-size:13.5px}
+.way .cta,.way .ghost-btn{justify-self:stretch;text-align:center;margin-top:auto}
+.status{font-size:14px;color:var(--amber);min-height:1.4em}
+.status:empty{min-height:0}
+.status.err{color:var(--rose)}
+/* lobby */
+.lobby-head{display:flex;align-items:end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap}
+.code-big{display:grid;gap:8px}
+.code-big .code{font-family:var(--f-num);font-weight:700;font-size:38px;line-height:58px;height:58px;width:254px;letter-spacing:41px;padding-left:17px;white-space:nowrap;overflow:hidden;color:var(--cyan);text-shadow:0 0 18px rgba(62,240,255,.55);
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='58'%3E%3Crect x='.5' y='.5' width='55' height='57' rx='16' fill='%23090a16' fill-opacity='.7' stroke='%233ef0ff' stroke-opacity='.4'/%3E%3C/svg%3E") 0 0/64px 58px repeat-x}
+#lobbyHint{font-size:14px}
+.lobby-cfg{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
+.cfg-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap}
+.cfg-row .seg{padding:3px}
+.cfg-row .seg button{min-height:38px;padding:8px 15px;font-size:13px}
+.lobby-cfg .seg button:disabled{cursor:default}
+.lobby-cfg .seg button:disabled:not([aria-pressed="true"]){opacity:.5}
+.cfg-note{font-size:13px;color:var(--dim);line-height:1.5}
+.cfg-note:empty{display:none}
+.plist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:0;list-style:none}
+.plist li{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 14px 8px 8px;border:1px solid var(--edge);border-radius:999px;background:rgba(255,255,255,.04);font-size:15px;font-weight:600}
+.plist li .pn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plist li.empty{color:var(--dim);font-weight:400;border-style:dashed;background:none;padding-left:8px}
+.plist li.empty::before{content:'+';display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;border:1px dashed var(--edge);font:500 18px var(--f-num);color:var(--dim)}
+.ava{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;font:800 14px var(--f-display);color:#0a0b16;box-shadow:0 0 16px currentColor,inset 0 -3px 0 rgba(0,0,0,.18),inset 0 2px 0 rgba(255,255,255,.35)}
+.ava i{font-style:normal;color:#0a0b16}
+.dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
+.badge{margin-left:auto;flex:none;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700;border:1px solid var(--edge);border-radius:999px;padding:3px 8px}
+.badge.host{color:var(--amber);border-color:rgba(255,194,61,.4);background:rgba(255,194,61,.08)}
+/* results */
+.res{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:14px}
+.res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
+.res td{padding:11px 12px;background:rgba(255,255,255,.04);border-block:1px solid var(--edge);font-variant-numeric:tabular-nums;white-space:nowrap}
+.res td:first-child{border-left:1px solid var(--edge);border-radius:18px 0 0 18px}
+.res td:last-child{border-right:1px solid var(--edge);border-radius:0 18px 18px 0}
+.res td.pl{font-family:var(--f-display);font-weight:800;font-size:18px;width:2.4em;color:var(--dim)}
+.res tr:nth-child(1) td.pl{color:var(--amber);text-shadow:0 0 14px rgba(255,194,61,.6)}
+.res .me td{background:rgba(62,240,255,.09);border-color:rgba(62,240,255,.35)}
+.res-wrap{overflow-x:auto}
+@media (max-width:620px){
+  .modes,.ways{grid-template-columns:1fr}
+  .mc-art{height:84px}
+  .mc-desc{font-size:13px}
+  .plist{grid-template-columns:1fr}
+  .seg button{padding:10px 14px}
+  .code-big .code{font-size:32px;line-height:50px;height:50px;width:222px;letter-spacing:36.8px;padding-left:14.4px;background-size:56px 50px}
+}
+@media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
+@media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
+#standings{position:absolute;left:var(--lft);top:calc(var(--top) + 162px);padding:8px 10px;display:grid;gap:4px;min-width:170px;font-size:13px}
+#standings .st{display:flex;align-items:center;gap:8px}
+#standings .st .pos{font-family:var(--f-display);font-weight:800;width:1.2em}
+#standings .st .nm{max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#standings .st .lp{margin-left:auto;color:var(--dim);font-family:var(--f-num);font-size:12px}
+#standings .st.me .nm{color:var(--cyan);font-weight:700}
+.info{position:absolute;left:50%;bottom:calc(var(--bot) + 120px);transform:translateX(-50%);font-size:14px;font-weight:600;background:var(--panel);border:1px solid var(--edge);border-radius:20px;padding:6px 14px;animation:fadeinfo 3s forwards;white-space:nowrap}
+@keyframes fadeinfo{0%{opacity:0}10%{opacity:1}80%{opacity:1}100%{opacity:0}}
+.touch #standings{top:calc(var(--top) + 156px);min-width:0;font-size:12px}
+[hidden]{display:none!important}
+body{margin:0}
+*,*::before,*::after{box-sizing:border-box}
+</style>
+</head>
+<body>
+
+<canvas id="c" tabindex="0" aria-label="Игровое поле"></canvas>
+
+<div class="hud">
+  <div id="lapbox" class="panel">
+    <div class="lbl">Круг</div>
+    <div class="lapn num" id="lapn">1</div>
+    <div class="lapt num" id="lapt">0:00.00</div>
+    <div class="best num" id="best">Лучший —</div>
+    <div class="ping num" id="ping" hidden></div>
+  </div>
+  <div class="btns">
+    <button id="bPause" type="button">Пауза</button>
+    <button id="bSound" type="button">Звук: вкл</button>
+    <button id="bCam" type="button" hidden>Камера: сверху</button>
+  </div>
+  <div id="standings" class="panel" hidden></div>
+
+  <div id="scorebox">
+    <div class="sc panel"><div class="lbl">Очки дрифта</div><div id="score" class="num">0</div></div>
+    <canvas id="map" class="panel" width="300" height="300" aria-label="Мини-карта"></canvas>
+    <div id="combo" class="panel" hidden>
+      <div class="lbl">Комбо</div>
+      <div id="cmult" class="num">×1</div>
+      <div class="cbar"><i></i></div>
+      <div id="ctag">×2 дрифт</div>
+    </div>
+  </div>
+
+  <!-- phones, highway: one compact strip instead of four panels -->
+  <div id="hwbar" class="panel">
+    <div class="hc hs"><b id="hwSpd" class="num">0</b><i id="hwGear">N</i><span class="lbl">км/ч</span></div>
+    <div class="hc hd"><b id="hwDist" class="num">0,00 км</b><span id="hwTime" class="lbl num">0:00.00</span></div>
+    <div class="hc hp"><b id="hwScore" class="num">0</b><i id="hwMult">×1</i><span id="hwBest" class="lbl">рекорд —</span></div>
+    <div class="hwcbar"><i></i></div>
+  </div>
+
+  <div id="drift">
+    <div id="dpts" class="num">0</div>
+    <div id="dmeta"><span id="dmult">×1</span><span id="dang" class="num">0°</span></div>
+    <div id="dbar"><i></i></div>
+  </div>
+
+  <div id="speedo" class="panel">
+    <div class="row"><span id="spd" class="num">0</span><span id="gear">N</span></div>
+    <div class="row"><span class="lbl">км/ч</span><span class="lbl">передача</span></div>
+    <div id="sbar"><i></i></div>
+  </div>
+
+  <div id="hint" class="panel"><b>W A S D</b> руль и газ · <b>Пробел</b> ручник · <b>R</b> на трассу</div>
+  <div id="toast"></div>
+  <div id="count"></div>
+
+  <div id="touch">
+    <div class="tb" id="tL" data-k="left">◀</div>
+    <div class="tb" id="tR" data-k="right">▶</div>
+    <div class="tb" id="tB" data-k="down">ТОРМ</div>
+    <div class="tb" id="tG" data-k="up">ГАЗ</div>
+    <div class="tb" id="tH" data-k="hb">ДРИФТ</div>
+  </div>
+</div>
+
+<div id="menu">
+  <div class="card card-main" id="pMain">
+    <header class="brand">
+      <h1>Night <span>Drift</span></h1>
+      <p class="tagline">Ночной дрифт по трассе и шоссе с трафиком — в одиночку или с друзьями.</p>
+    </header>
+    <div class="seg" role="group" aria-label="Как играть">
+      <button type="button" id="segSolo" aria-pressed="true">Одному</button>
+      <button type="button" id="segFriends" aria-pressed="false">С друзьями</button>
+    </div>
+    <div class="modes">
+      <button type="button" class="mode-card" id="mTrack" data-mode="track">
+        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="aSky1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1240"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
+            <radialGradient id="aGlow1" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ff3b6b" stop-opacity=".55"/><stop offset="1" stop-color="#ff3b6b" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="112" fill="url(#aSky1)"/>
+          <ellipse cx="250" cy="10" rx="150" ry="46" fill="url(#aGlow1)"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#ff3b6b" stroke-opacity=".55" stroke-width="37" stroke-linecap="round"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#23263a" stroke-width="32" stroke-linecap="round"/>
+          <path d="M-20 100C70 100 86 34 168 36S292 78 344 22" fill="none" stroke="#eef0ff" stroke-opacity=".45" stroke-width="1.6" stroke-dasharray="9 11"/>
+          <path d="M70 84C92 62 112 44 150 38" fill="none" stroke="#07080f" stroke-opacity=".8" stroke-width="2.2"/>
+          <path d="M78 92C100 68 122 51 156 46" fill="none" stroke="#07080f" stroke-opacity=".8" stroke-width="2.2"/>
+          <g fill="#eef0ff"><circle cx="118" cy="62" r="9" fill-opacity=".1"/><circle cx="104" cy="74" r="12" fill-opacity=".07"/><circle cx="132" cy="52" r="6" fill-opacity=".13"/></g>
+          <g transform="translate(160 41) rotate(-27)">
+            <ellipse rx="22" ry="12" fill="#3ef0ff" fill-opacity=".22"/>
+            <rect x="-15" y="-7.5" width="30" height="15" rx="6.5" fill="#ff3b6b"/>
+            <rect x="-6" y="-5.5" width="11" height="11" rx="3.5" fill="#101c30"/>
+            <rect x="7" y="-4.5" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/><rect x="7" y="2.1" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/>
+          </g>
+        </svg></span>
+        <span class="mc-kicker">Дрифт</span>
+        <span class="mc-title">Трасса</span>
+        <span class="mc-desc">13 поворотов ночного города. Входи боком и держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
+        <span class="mc-best" id="bestTrack"></span>
+        <span class="mc-go" id="goTrack">Поехали</span>
+      </button>
+      <div class="mode-col">
+      <button type="button" class="mode-card traffic" id="mTraffic" data-mode="traffic">
+        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="aSky2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d1238"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
+            <radialGradient id="aGlow2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#3ef0ff" stop-opacity=".5"/><stop offset="1" stop-color="#3ef0ff" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="112" fill="url(#aSky2)"/>
+          <ellipse cx="160" cy="20" rx="120" ry="30" fill="url(#aGlow2)"/>
+          <path d="M40 112L148 20h24L280 112z" fill="#1d2032"/>
+          <path d="M40 112L148 20" stroke="#3ef0ff" stroke-width="2.6" stroke-linecap="round"/><path d="M40 112L148 20" stroke="#3ef0ff" stroke-opacity=".3" stroke-width="7"/>
+          <path d="M280 112L172 20" stroke="#ff3b6b" stroke-width="2.6" stroke-linecap="round"/><path d="M280 112L172 20" stroke="#ff3b6b" stroke-opacity=".3" stroke-width="7"/>
+          <g stroke="#eef0ff" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="7 8"><path d="M100 112L154 20"/><path d="M160 112V20"/><path d="M220 112L166 20"/></g>
+          <g><rect x="163" y="36" width="13" height="9" rx="3.5" fill="#e8e8ee"/><rect x="164.5" y="41.5" width="3" height="1.8" rx=".9" fill="#ff1a3c"/><rect x="171.5" y="41.5" width="3" height="1.8" rx=".9" fill="#ff1a3c"/></g>
+          <g><rect x="176" y="56" width="23" height="16" rx="5.5" fill="#f0b429"/><rect x="179" y="58" width="17" height="6" rx="2.5" fill="#101c30"/><rect x="178" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/><rect x="192" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/></g>
+          <g><ellipse cx="124" cy="101" rx="30" ry="9" fill="#3ef0ff" fill-opacity=".25"/><rect x="104" y="76" width="40" height="25" rx="9" fill="#ff3b6b"/><rect x="110" y="79" width="28" height="9" rx="4" fill="#101c30"/><rect x="108" y="91.5" width="32" height="3" rx="1.5" fill="#ff8aa6"/></g>
+        </svg></span>
+        <span class="mc-kicker">Трафик</span>
+        <span class="mc-title">Шоссе</span>
+        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч, копи комбо до ×5. Догнал машину быстрее неё на 32+ км/ч или ударил в борт на 50+ — авария.</span>
+        <span class="mc-best" id="bestTraffic"></span>
+        <span class="mc-go" id="goTraffic">Поехали</span>
+      </button>
+      <div class="dens">
+        <span class="lbl" id="densLbl">Плотность</span>
+        <div class="seg" id="densPick" role="group" aria-labelledby="densLbl">
+          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
+          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
+          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
+        </div>
+      </div>
+      </div>
+    </div>
+    <div class="status" id="menuNote" role="status"></div>
+    <details class="howto">
+      <summary>Управление</summary>
+      <div class="keys">
+        <kbd>W / ↑</kbd><span>газ</span>
+        <kbd>S / ↓</kbd><span>тормоз и задний ход</span>
+        <kbd>A D / ← →</kbd><span>руль</span>
+        <kbd>Пробел</kbd><span>ручник, срыв в занос</span>
+        <kbd>R</kbd><span>вернуться на дорогу</span>
+        <kbd>P · M</kbd><span>пауза · звук</span>
+      </div>
+      <div class="tip">Занос: дай руль, коротко дёрни ручник и сразу жми газ, угол лови контррулём. На телефоне — кнопки на экране.</div>
+    </details>
+  </div>
+
+  <div class="card" id="pPause" hidden>
+    <h1>Пауза</h1>
+    <div class="row-btns">
+      <button class="cta" id="resume" type="button">Продолжить</button>
+      <button class="ghost-btn" id="restart" type="button">Заново</button>
+      <button class="ghost-btn" id="pauseMenu" type="button">В меню</button>
+    </div>
+    <div class="tip">P или Esc — продолжить.</div>
+  </div>
+
+  <div class="card" id="pOnline" hidden>
+    <button class="back" id="backMain" type="button">← Назад</button>
+    <h1>Заезд <span>с друзьями</span></h1>
+    <p>До 6 игроков в комнате, общий старт. Трасса — 3 круга, кто первый. Шоссе — заезд на время по общему трафику: больше очков — выше место. Машины сталкиваются, можно толкаться.</p>
+    <label class="field"><span class="lbl">Ваше имя</span><input id="nameIn" maxlength="16" autocomplete="nickname" placeholder="Например, Muza"></label>
+    <div class="ways">
+      <div class="way">
+        <b>Новая комната</b>
+        <p>Создайте комнату и отправьте друзьям её код или ссылку.</p>
+        <button class="cta small" id="createRoom" type="button">Создать комнату</button>
+      </div>
+      <div class="way">
+        <b>Есть код?</b>
+        <label class="field"><span class="lbl">Код комнаты</span><input id="codeIn" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
+        <button class="ghost-btn" id="joinRoom" type="button">Войти по коду</button>
+      </div>
+    </div>
+    <div class="status" id="netStatus" role="status"></div>
+  </div>
+
+  <div class="card" id="pLobby" hidden>
+    <div class="lobby-head">
+      <div class="code-big"><span class="lbl">Код комнаты</span><span class="code" id="roomCode">----</span></div>
+      <button class="ghost-btn" id="copyLink" type="button">Скопировать ссылку</button>
+    </div>
+    <p id="lobbyHint">Отправьте код или ссылку друзьям. Они открывают игру, выбирают «С друзьями» и вводят код.</p>
+    <div class="lobby-cfg">
+      <div class="cfg-row">
+        <span class="lbl">Режим</span>
+        <div class="seg" id="cfgMode" role="group" aria-label="Режим">
+          <button type="button" data-mode="track" aria-pressed="true">Трасса</button>
+          <button type="button" data-mode="traffic" aria-pressed="false">Шоссе</button>
+        </div>
+      </div>
+      <div class="cfg-row" id="rowDur" hidden>
+        <span class="lbl">Заезд</span>
+        <div class="seg" id="cfgDur" role="group" aria-label="Длительность заезда">
+          <button type="button" data-dur="120" aria-pressed="false">2 мин</button>
+          <button type="button" data-dur="180" aria-pressed="true">3 мин</button>
+          <button type="button" data-dur="300" aria-pressed="false">5 мин</button>
+        </div>
+      </div>
+      <div class="cfg-row" id="rowDens" hidden>
+        <span class="lbl">Трафик</span>
+        <div class="seg" id="cfgDens" role="group" aria-label="Плотность трафика">
+          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
+          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
+          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
+        </div>
+      </div>
+      <div class="cfg-note" id="cfgNote"></div>
+    </div>
+    <ul class="plist" id="plist"></ul>
+    <div class="row-btns">
+      <button class="cta small" id="startRace" type="button">Старт</button>
+      <button class="ghost-btn" id="leaveLobby" type="button">Выйти</button>
+    </div>
+    <div class="status" id="lobbyStatus" role="status"></div>
+  </div>
+
+  <div class="card" id="pResults" hidden>
+    <h1>Итоги <span>заезда</span></h1>
+    <div class="res-wrap"><table class="res"><thead><tr id="resHead"><th>#</th><th>Гонщик</th><th>Время</th><th>Лучший круг</th><th>Дрифт</th></tr></thead><tbody id="resBody"></tbody></table></div>
+    <div class="row-btns">
+      <button class="cta small" id="again" type="button">Ещё заезд</button>
+      <button class="ghost-btn" id="leaveRes" type="button">Выйти в меню</button>
+    </div>
+    <div class="status" id="resStatus" role="status"></div>
+  </div>
+
+  <div class="card" id="pOver" hidden>
+    <h1>Авария <span>на шоссе</span></h1>
+    <div class="over-score">
+      <span class="lbl">Очки</span>
+      <b class="num" id="overScore">0</b>
+      <span class="rec" id="overRecord" hidden>Новый рекорд</span>
+      <span class="best" id="overBest"></span>
+    </div>
+    <div class="over-stats" id="overStats"></div>
+    <div class="row-btns">
+      <button class="cta" id="retry" type="button">Ещё раз</button>
+      <button class="ghost-btn" id="overMenu" type="button">В меню</button>
+    </div>
+    <div class="tip">Пробел или Enter — сразу ещё раз, Esc — в меню.</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/colyseus.js@0.15.27/dist/colyseus.js"></script>
+<script src="config.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
