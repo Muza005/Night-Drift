@@ -13,7 +13,9 @@
    server's traffic snapshots ('tr', handed to the traffic mode), and crashed cars that
    blink and pass through others for a moment (no bumps either way while ghosted). */
 import { $, G, NET, serverNow } from '../state.js';
-import { car } from '../player.js';
+import { car, applyLook } from '../player.js';
+import { choice, savePick, renderGarage } from '../ui/garage.js';
+import { carById } from '../core/cars.js';
 import { canvas, cv, tex, scene } from '../core/render.js';
 import { wake, stepDraft } from '../core/draft.js';
 import { createWake, updateWake, disposeWake } from '../core/draftfx.js';
@@ -60,7 +62,7 @@ async function connect(kind){
   netStatus('netStatus','Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track',density:G.density||'mid'}) : await NET.client.joinById(code,{name:myName()});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
@@ -104,10 +106,11 @@ function bindRoom(room){
     flash(last?'Финиш!':'Круг '+m.lap+' из '+room.state.laps, fmtT(m.ms/1000)+(m.lap>1&&m.best===m.ms?' · лучший круг':''), 2.6);
   });
   room.state.players.onAdd((p,id)=>{
-    if(id===room.sessionId){ NET.me=p; car.paint.color.setHex(p.color); }
+    if(id===room.sessionId){ NET.me=p; applyLook(p.car,p.color); }
     else addGhost(id,p);
     p.onChange(()=>{
-      const g=NET.ghosts.get(id); if(g) pushSnap(g,p);
+      if(id===room.sessionId && (p.car!==car.carId || p.color!==car.paintHex)) applyLook(p.car,p.color);
+      const g=NET.ghosts.get(id); if(g){ ghostLook(g,p); pushSnap(g,p); }
       const ph=room.state.phase; if(ph==='lobby') renderLobby(); else if(ph==='results') renderResults();
     });
     renderLobby();
@@ -168,7 +171,7 @@ export async function leaveOnline(msg){
   const r=NET.room;
   Object.assign(NET,{leaving:true,room:null,online:false,me:null,finished:false});
   clearInterval(NET.pingTimer); clearGhosts(); stopClockWorker();
-  car.paint.color.setHex(0xff3b6b); $('standings').hidden=true;
+  applyLook(choice.car,choice.paint); $('standings').hidden=true;
   // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
   $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
@@ -189,9 +192,18 @@ function makeLabel(name,color){
 }
 function addGhost(id,p){
   if(NET.ghosts.has(id)) return;
-  const m=makeCar(p.color,false); m.root.add(makeLabel(p.name,p.color)); m.root.visible=false;
+  const m=makeCar(p.color,false), label=makeLabel(p.name,p.color); m.root.add(label); m.root.visible=false;
   const fx=createWake(); scene.add(fx.root);              // its slipstream lines (core/draftfx.js)
-  NET.ghosts.set(id,{id,p,m,fx,buf:[],x:0,z:0});
+  NET.ghosts.set(id,{id,p,m,fx,label,color:p.color,car:p.car,buf:[],x:0,z:0});
+}
+// A player picked another paint (or car) in the lobby: repaint the car and its name tag.
+// (Every car has the same 3D model for now; the models per car come later.)
+function ghostLook(g,p){
+  if(g.color===p.color && g.car===p.car) return;
+  g.color=p.color; g.car=p.car;
+  g.m.paint.color.setHex(p.color);
+  g.m.root.remove(g.label); g.label.material.map.dispose(); g.label.material.dispose();
+  g.label=makeLabel(p.name,p.color); g.m.root.add(g.label);
 }
 function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
@@ -343,6 +355,15 @@ export function sendState(dt,slide){
 }
 
 /* lobby, standings, results */
+// Our car and paint between runs. The pick goes to the room; the room's answer (our
+// player's car and colour) is what is shown, so two players never end up the same colour.
+function myGarage(id){
+  const s=NET.room.state, me=NET.room.sessionId, p=s.players.get(me); if(!p) return;
+  const taken=new Set(); s.players.forEach((o,oid)=>{ if(oid!==me) taken.add(o.color); });
+  const send=(c,paint)=>{ savePick(c,paint); NET.room.send('pick',{car:c,paint}); };
+  renderGarage($(id), { car:p.car, paint:p.color, taken,
+    onCar: c => send(c, p.color), onPaint: c => send(p.car, c) });
+}
 function renderLobby(){
   if(!NET.room) return;
   const s=NET.room.state, me=NET.room.sessionId, isHost=s.hostId===me;
@@ -351,12 +372,14 @@ function renderLobby(){
   s.players.forEach((p,id)=>{
     const li=el('li'); const d=el('span','ava'); d.style.color=hex(p.color); d.style.background=hex(p.color);
     d.append(el('i',null,(p.name.trim()[0]||'?').toUpperCase()));
-    li.append(d, el('span','pn',p.name+(id===me?' (вы)':'')));
+    const who=el('span','pn'); who.append(el('b',null,p.name+(id===me?' (вы)':'')), el('small',null,carById(p.car).name));
+    li.append(d, who);
     if(id===s.hostId) li.append(el('span','badge host','хост'));
     else if(!p.connected) li.append(el('span','badge','нет связи'));
     ul.append(li);
   });
   for(let i=s.players.size;i<6;i++) ul.append(el('li','empty','Свободное место'));
+  myGarage('garageLobby');
   $('startRace').hidden=!isHost;
   $('startRace').textContent='Старт · '+s.players.size+' из 6';
   if(G.setMode && G.mode.id!==s.mode) G.setMode(s.mode);   // the scene behind the lobby shows the room's mode
@@ -412,6 +435,7 @@ function renderResults(){
       el('td',null,fmtN(p.score)));
     tb.append(tr);
   });
+  myGarage('garageRes');
   const isHost=s.hostId===me;
   $('again').hidden=!isHost;
   netStatus('resStatus', isHost?'':'Ждём, когда хост запустит следующий заезд.');

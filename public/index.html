@@ -264,6 +264,38 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
 .badge{margin-left:auto;flex:none;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700;border:1px solid var(--edge);border-radius:999px;padding:3px 8px}
 .badge.host{color:var(--amber);border-color:rgba(255,194,61,.4);background:rgba(255,194,61,.08)}
+/* garage: car and paint */
+.garage{display:grid;gap:12px}
+.g-cars{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.g-cars button{font:700 13px var(--f-body);color:var(--ink);background:rgba(255,255,255,.04);border:1px solid var(--edge);border-radius:999px;padding:9px 6px;cursor:pointer;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .12s,background .12s}
+.g-cars button:hover{border-color:rgba(62,240,255,.45)}
+.g-cars button[aria-pressed="true"]{background:rgba(62,240,255,.14);border-color:var(--cyan);color:#fff;box-shadow:0 0 14px rgba(62,240,255,.25)}
+.g-cars button:focus-visible,.g-paint:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.g-info{display:grid;gap:8px}
+.g-tag{font-size:13px;color:var(--dim)}
+.g-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.g-stat{display:grid;grid-template-columns:7.2em 1fr;align-items:center;gap:8px}
+.g-stat .lbl{font-size:10px}
+.g-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.g-bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--cyan),#9b7bff);transition:width .25s}
+.g-paints{display:flex;flex-wrap:wrap;gap:8px}
+.g-paint{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.18);cursor:pointer;padding:0;box-shadow:inset 0 -3px 0 rgba(0,0,0,.2),inset 0 2px 0 rgba(255,255,255,.3);transition:transform .12s}
+.g-paint:hover:not(:disabled){transform:scale(1.1)}
+.g-paint[aria-pressed="true"]{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.18),0 0 14px currentColor}
+.g-paint:disabled{opacity:.25;cursor:not-allowed;background-image:linear-gradient(135deg,transparent 45%,rgba(10,11,22,.9) 45%,rgba(10,11,22,.9) 55%,transparent 55%)!important}
+.garage-box{border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45);padding:0 16px}
+.garage-box>summary{display:flex;align-items:center;gap:10px;padding:12px 0;cursor:pointer;list-style:none;font-size:14px;font-weight:600}
+.garage-box>summary::-webkit-details-marker{display:none}
+.garage-box>summary::after{content:'▾';margin-left:auto;color:var(--dim);transition:transform .15s}
+.garage-box[open]>summary::after{transform:rotate(180deg)}
+.garage-box[open]{padding-bottom:14px}
+#garageSum{display:flex;align-items:center;gap:8px}
+#garageSum .dot{width:12px;height:12px}
+.lobby-garage{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
+.plist li .pn{display:grid;line-height:1.2}
+.plist li .pn b,.plist li .pn small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plist li .pn small{font-size:11.5px;font-weight:500;color:var(--dim)}
+@media (max-width:620px){.g-cars{grid-template-columns:repeat(2,1fr)}.g-stats{grid-template-columns:1fr}}
 /* results */
 .res{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:14px}
 .res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
@@ -371,6 +403,10 @@ body{margin:0}
       <button type="button" id="segSolo" aria-pressed="true">Одному</button>
       <button type="button" id="segFriends" aria-pressed="false">С друзьями</button>
     </div>
+    <details class="garage-box" id="garageBox">
+      <summary><span class="lbl">Гараж</span><span id="garageSum"></span></summary>
+      <div class="garage" id="garageMain"></div>
+    </details>
     <div class="modes">
       <button type="button" class="mode-card" id="mTrack" data-mode="track">
         <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
@@ -509,6 +545,10 @@ body{margin:0}
       </div>
       <div class="cfg-note" id="cfgNote"></div>
     </div>
+    <div class="lobby-garage">
+      <span class="lbl">Ваша машина</span>
+      <div class="garage" id="garageLobby"></div>
+    </div>
     <ul class="plist" id="plist"></ul>
     <div class="row-btns">
       <button class="cta small" id="startRace" type="button">Старт</button>
@@ -520,6 +560,10 @@ body{margin:0}
   <div class="card" id="pResults" hidden>
     <h1>Итоги <span>заезда</span></h1>
     <div class="res-wrap"><table class="res"><thead><tr id="resHead"><th>#</th><th>Гонщик</th><th>Время</th><th>Лучший круг</th><th>Дрифт</th></tr></thead><tbody id="resBody"></tbody></table></div>
+    <details class="garage-box">
+      <summary><span class="lbl">Сменить машину или цвет</span></summary>
+      <div class="garage" id="garageRes"></div>
+    </details>
     <div class="row-btns">
       <button class="cta small" id="again" type="button">Ещё заезд</button>
       <button class="ghost-btn" id="leaveRes" type="button">Выйти в меню</button>

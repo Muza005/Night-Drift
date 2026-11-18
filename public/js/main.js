@@ -7,7 +7,8 @@ import { $, G, NET, drift, isTouch, serverNow } from './state.js';
 import { canvas, renderer, scene, camera, moon, qualityTick } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
-import { car } from './player.js';
+import { car, applyLook } from './player.js';
+import { choice, savePick, renderGarage } from './ui/garage.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
 import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft } from './core/audio.js';
@@ -15,7 +16,8 @@ import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline } from './net/net.js';
-import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
+import { setT, fmtN, fmtT, showPanel, netStatus, hex } from './ui/hud.js';
+import { carById } from './core/cars.js';
 
 if (isTouch) document.body.classList.add('touch');
 const LS = {
@@ -131,6 +133,17 @@ function renderMenu(){
   for(const b of $('densPick').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.dens===G.density));
   $('menuNote').textContent = together ? 'Создай комнату и отправь код друзьям. Режим можно сменить и в комнате.' : '';
 }
+// The garage in the main menu: the car and paint for solo runs, and the wish taken into
+// a room (the room may give another colour if a friend already has this one).
+function renderMenuGarage(){
+  renderGarage($('garageMain'), { car: choice.car, paint: choice.paint,
+    onCar: id => { savePick(id, choice.paint); applyLook(choice.car, choice.paint); renderMenuGarage(); },
+    onPaint: c => { savePick(choice.car, c); applyLook(choice.car, choice.paint); renderMenuGarage(); } });
+  // folded, the garage's header still says which car and colour are picked
+  const dot=document.createElement('span'); dot.className='dot'; dot.style.color=dot.style.background=hex(choice.paint);
+  $('garageSum').replaceChildren(dot, carById(choice.car).name);
+}
+renderMenuGarage();
 function setTogether(v){ together=v; LS.set('nightdrift.play', v?'friends':'solo'); renderMenu(); }
 $('segSolo').addEventListener('click',()=>setTogether(false));
 $('segFriends').addEventListener('click',()=>setTogether(true));

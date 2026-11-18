@@ -26,7 +26,6 @@ const LAPS = 3;
 const COUNTDOWN_MS = 4000;      // time from "start" to green light
 const MIN_LAP_MS = Number(process.env.MIN_LAP_MS) || 20000;       // no lap on this track can be faster than this
 const FINISH_GRACE_MS = Number(process.env.FINISH_GRACE_MS) || 45000;  // after the winner finishes, others get this long
-const COLORS = [0xff3b6b, 0x3ef0ff, 0xffc23d, 0x9b7bff, 0x4dff9a, 0xff8a3d];
 const MODES = ['track', 'traffic'];
 // Traffic run lengths (s) the host can pick. EXTRA_DURATION adds one (tests use a short run).
 const DURATIONS = [120, 180, 300].concat(Number(process.env.EXTRA_DURATION) > 0 ? [Number(process.env.EXTRA_DURATION)] : []);
@@ -46,6 +45,13 @@ async function trafficLib() {
   }
   return T;
 }
+// The cars and paints players can pick: public/js/core/cars.js, shared with the game.
+// The first six paints are the colours players always had, given by seat.
+let CARS = null;
+async function carsLib() {
+  if (!CARS) CARS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'core', 'cars.js')).href);
+  return CARS;
+}
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 class Player extends Schema {
@@ -53,6 +59,7 @@ class Player extends Schema {
     super();
     this.name = '';
     this.color = 0;
+    this.car = 'coupe';      // public/js/core/cars.js
     this.slot = 0;
     this.connected = true;
     this.x = 0; this.z = 0; this.h = 0;
@@ -74,7 +81,7 @@ class Player extends Schema {
   }
 }
 defineTypes(Player, {
-  name: 'string', color: 'number', slot: 'uint8', connected: 'boolean',
+  name: 'string', color: 'number', car: 'string', slot: 'uint8', connected: 'boolean',
   x: 'float32', z: 'float32', h: 'float32',
   vf: 'float32', steer: 'float32', slide: 'float32',
   vx: 'float32', vz: 'float32', t: 'float64',
@@ -123,6 +130,7 @@ async function freeCode() {
 class RaceRoom extends Room {
   async onCreate(options) {
     this.maxClients = MAX_PLAYERS;
+    this.cars = await carsLib();
     this.roomId = await freeCode();
     this.setState(new RaceState());
     if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
@@ -143,6 +151,16 @@ class RaceRoom extends Room {
       if (client.sessionId !== this.state.hostId) return;
       if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
       this.beginCountdown();
+    });
+
+    // Anyone, between runs: their car and paint. A paint another player has is refused
+    // (the colour marks the player in the standings and on the name tag).
+    this.onMessage('pick', (client, m) => {
+      const p = this.state.players.get(client.sessionId);
+      if (!p || !m) return;
+      if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
+      if (this.cars.CAR_IDS.includes(m.car)) p.car = m.car;
+      if (this.cars.PAINT_HEXES.includes(m.paint) && !this.paintTaken(m.paint, client.sessionId)) p.color = m.paint;
     });
 
     // Host only, between runs: pick the mode and (traffic) the run length.
@@ -174,7 +192,7 @@ class RaceRoom extends Room {
       p.vf = finite(m.vf, -20, 80);          // forward speed: 72.3 m/s flat out, a little more in a slipstream
       p.steer = finite(m.steer, -1, 1);
       p.slide = finite(m.slide, 0, 1);
-      p.vx = finite(m.vx, -70, 70); p.vz = finite(m.vz, -70, 70);
+      p.vx = finite(m.vx, -80, 80); p.vz = finite(m.vz, -80, 80);   // the fastest car in a slipstream: ~72 m/s
       // Trust the sender's timestamp only within a sane window around the server clock.
       p.t = finite(m.t, now - 1500, now, now);
       p.prog = Math.round(finite(m.prog, -50, 900));
@@ -257,7 +275,13 @@ class RaceRoom extends Room {
     const p = new Player();
     p.name = cleanName(options && options.name);
     p.slot = slot;
-    p.color = COLORS[slot % COLORS.length];
+    // the car and paint the player asked for; a paint someone has already is swapped for
+    // this seat's colour, or else the first free one
+    const want = options || {};
+    if (this.cars.CAR_IDS.includes(want.car)) p.car = want.car;
+    const paints = this.cars.PAINT_HEXES;
+    p.color = [want.paint, paints[slot % paints.length], ...paints]
+      .find(c => paints.includes(c) && !this.paintTaken(c, client.sessionId));
     this.state.players.set(client.sessionId, p);
     if (!this.state.hostId) this.state.hostId = client.sessionId;
     this.broadcast('event', { text: p.name + ' в комнате' }, { except: client });
@@ -282,6 +306,11 @@ class RaceRoom extends Room {
       }
       this.checkRaceOver();
     }
+  }
+
+  paintTaken(c, except) {
+    for (const [id, o] of this.state.players) if (id !== except && o.color === c) return true;
+    return false;
   }
 
   onDispose() { this.timers.forEach(clearTimeout); this.stopTraffic(); }
