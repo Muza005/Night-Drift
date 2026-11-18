@@ -243,3 +243,14 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 @media (prefers-reduced-motion: reduce) {
   .screen-enter, .screen-enter.back { animation: screen-fade-in var(--dur-hover) ease both; }
 }
+
+/* ---------- the car stand (js/ui/stand.js draws into this box) ----------
+   A horizontal drag turns it; a vertical one still scrolls the page on a phone. */
+.stand {
+  position: relative;
+  touch-action: pan-y;            /* not none: on a phone a vertical swipe still scrolls */
+  -webkit-user-select: none;      /* Safari first */
+  user-select: none;
+  cursor: grab;
+}
+.stand.grabbing { cursor: grabbing; }

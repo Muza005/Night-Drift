@@ -106,7 +106,7 @@ export async function makeModel(carId, code, envMap){
   const inst = {
     carId, root, wheels, paint, size: t.size,
     repaint(c){ setPaint(paint, paintHex(c, carId)); inst.code = c; },
-    dispose(){ root.removeFromParent(); paint.dispose(); },
+    dispose(){ if(root.parent) root.parent.remove(root); paint.dispose(); },   // (r128 has no removeFromParent)
   };
   inst.repaint(code);
   return inst;
