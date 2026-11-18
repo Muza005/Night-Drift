@@ -46,6 +46,8 @@ function errText(e){
 }
 function myName(){ const n=$('nameIn').value.trim().slice(0,16)||'Гонщик'; try{localStorage.setItem('nightdrift.name',n);}catch(e){} return n; }
 try{ $('nameIn').value=localStorage.getItem('nightdrift.name')||''; }catch(e){}
+// This browser's player id: a room the host kicked us out of knows it and won't let us back.
+const PID=(()=>{ try{ let v=localStorage.getItem('nightdrift.pid'); if(!v){ v=crypto.randomUUID(); localStorage.setItem('nightdrift.pid',v); } return v; }catch(e){ return crypto.randomUUID(); } })();
 
 let connecting=false;
 async function connect(kind){
@@ -63,7 +65,7 @@ async function connect(kind){
   netStatus('netStatus','Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),car:choice.car,paint:choice.paint});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
@@ -102,6 +104,8 @@ function bindRoom(room){
   // highway: the server's traffic, 10 snapshots a second
   room.onMessage('tr',m=>{ if(G.mode.id==='traffic' && G.mode.netTraffic) G.mode.netTraffic(m); });
   room.onMessage('bump',onBump);
+  // the host sent us out of the room: no reconnecting, back to the online panel
+  room.onMessage('kicked',()=>{ if(NET.room===room) leaveOnline('Вас исключили из комнаты.'); });
   room.onMessage('lapTime',m=>{
     const last=m.lap>=room.state.laps;
     flash(last?'Финиш!':'Круг '+m.lap+' из '+room.state.laps, fmtT(m.ms/1000)+(m.lap>1&&m.best===m.ms?' · лучший круг':''), 2.6);
@@ -148,8 +152,10 @@ function onPhase(ph){
   else if(ph==='results'){ G.state='results'; clearInput(); bank(); car.root.visible=true; $('count').textContent=''; showPanel('pResults'); renderResults(); }
 }
 
-function onRoomLeave(room){
+const KICKED=4001;                 // the close code the server uses for a kicked player
+function onRoomLeave(room,code){
   if(NET.room!==room||NET.leaving) return;
+  if(code===KICKED){ leaveOnline('Вас исключили из комнаты.'); return; }
   flash('Связь потеряна','переподключаюсь…',4);
   // The player may press «Выйти» while this is trying (and then start a solo run or join
   // another room): from that moment the attempts must stop. They used to carry on, and
@@ -379,13 +385,18 @@ function renderLobby(){
     const who=el('span','pn'); who.append(el('b',null,p.name+(id===me?' (вы)':'')), el('small',null,carById(p.car).name));
     li.append(d, who);
     if(id===s.hostId) li.append(el('span','badge host','хост'));
+    else if(p.ready) li.append(el('span','badge','готов'));
     else if(!p.connected) li.append(el('span','badge','нет связи'));
     ul.append(li);
   });
   for(let i=s.players.size;i<6;i++) ul.append(el('li','empty','Свободное место'));
   myGarage('garageLobby');
-  $('startRace').hidden=!isHost;
-  $('startRace').textContent='Старт · '+s.players.size+' из 6';
+  // the host starts once every other player is ready; the others press "Готово"
+  const meP=s.players.get(me);
+  let waiting=0; s.players.forEach((o,oid)=>{ if(oid!==s.hostId && o.connected && !o.ready) waiting++; });
+  const sb=$('startRace');
+  if(isHost){ sb.textContent='Старт · '+s.players.size+' из 6'; sb.disabled=waiting>0; sb.removeAttribute('aria-pressed'); }
+  else { sb.textContent=meP&&meP.ready?'Готов ✓':'Готово'; sb.disabled=false; sb.setAttribute('aria-pressed',String(!!(meP&&meP.ready))); }
   if(G.setMode && G.mode.id!==s.mode) G.setMode(s.mode);   // the scene behind the lobby shows the room's mode
   // mode and run length: the host picks, everyone sees
   for(const b of $('cfgMode').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.mode===s.mode)); b.disabled=!isHost; }
@@ -395,7 +406,7 @@ function renderLobby(){
   $('cfgDens').hidden = s.mode!=='traffic';
   for(const b of $('cfgDens').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.dens===(s.density||'mid'))); b.disabled=!isHost; }
   $('cfgNote').textContent = (s.mode==='traffic' ? 'Шоссе на время: больше очков — выше место. Авария (догнал машину на 32+ км/ч быстрее неё) — 3 секунды простоя.' : 'Трасса: 3 круга, кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
-  netStatus('lobbyStatus', isHost ? (s.players.size<2?'Можно стартовать и одному, чтобы обкатать трассу.':'') : 'Ждём, когда хост нажмёт «Старт».');
+  netStatus('lobbyStatus', isHost ? (s.players.size<2?'Можно стартовать и одному, чтобы обкатать трассу.':waiting?'Ждём «Готово» от игроков: '+waiting+'.':'') : 'Нажмите «Готово», и хост запустит заезд.');
 }
 export function renderStandings(){
   const box=$('standings');
@@ -440,9 +451,12 @@ function renderResults(){
     tb.append(tr);
   });
   myGarage('garageRes');
-  const isHost=s.hostId===me;
-  $('again').hidden=!isHost;
-  netStatus('resStatus', isHost?'':'Ждём, когда хост запустит следующий заезд.');
+  // the next run: as in the lobby, the host starts once every other player is ready
+  const isHost=s.hostId===me, meP=s.players.get(me), ag=$('again');
+  let waiting=0; s.players.forEach((o,oid)=>{ if(oid!==s.hostId && o.connected && !o.ready) waiting++; });
+  if(isHost){ ag.textContent='Ещё заезд'; ag.disabled=waiting>0; ag.removeAttribute('aria-pressed'); }
+  else { ag.textContent=meP&&meP.ready?'Готов ✓':'Готово'; ag.disabled=false; ag.setAttribute('aria-pressed',String(!!(meP&&meP.ready))); }
+  netStatus('resStatus', isHost?(waiting?'Ждём «Готово» от игроков: '+waiting+'.':''):'Нажмите «Готово», и хост запустит следующий заезд.');
 }
 
 // The menu (main.js) opens the online panel when "С друзьями" + "Трасса" is picked.
@@ -450,11 +464,21 @@ $('backMain').addEventListener('click',()=>{ showPanel('pMain'); });
 $('createRoom').addEventListener('click',()=>connect('create'));
 $('joinRoom').addEventListener('click',()=>connect('join'));
 $('codeIn').addEventListener('keydown',e=>{ if(e.key==='Enter') connect('join'); });
-$('startRace').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
+$('startRace').addEventListener('click',()=>{
+  if(!NET.room) return;
+  const s=NET.room.state, me=NET.room.sessionId;
+  if(s.hostId===me) NET.room.send('start');
+  else { const p=s.players.get(me); NET.room.send('ready',{value:!(p&&p.ready)}); }
+});
 $('cfgMode').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{mode:b.dataset.mode}); });
 $('cfgDur').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{duration:Number(b.dataset.dur)}); });
 $('cfgDens').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b && NET.room) NET.room.send('config',{density:b.dataset.dens}); });
-$('again').addEventListener('click',()=>{ if(NET.room) NET.room.send('start'); });
+$('again').addEventListener('click',()=>{
+  if(!NET.room) return;
+  const s=NET.room.state, me=NET.room.sessionId;
+  if(s.hostId===me) NET.room.send('start');
+  else { const p=s.players.get(me); NET.room.send('ready',{value:!(p&&p.ready)}); }
+});
 $('leaveLobby').addEventListener('click',()=>leaveOnline());
 $('leaveRes').addEventListener('click',()=>leaveOnline());
 $('copyLink').addEventListener('click',async()=>{

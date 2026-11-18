@@ -22,13 +22,15 @@ const { Schema, MapSchema, defineTypes } = require('@colyseus/schema');
 
 const PORT = Number(process.env.PORT) || 2567;
 const MAX_PLAYERS = 6;
-const LAPS = 3;
+const LAPS = 3, MIN_LAPS = 1, MAX_LAPS = 10;            // drift track: laps the host can pick
 const COUNTDOWN_MS = 4000;      // time from "start" to green light
 const MIN_LAP_MS = Number(process.env.MIN_LAP_MS) || 20000;       // no lap on this track can be faster than this
 const FINISH_GRACE_MS = Number(process.env.FINISH_GRACE_MS) || 45000;  // after the winner finishes, others get this long
 const MODES = ['track', 'traffic'];
-// Traffic run lengths (s) the host can pick. EXTRA_DURATION adds one (tests use a short run).
-const DURATIONS = [120, 180, 300].concat(Number(process.env.EXTRA_DURATION) > 0 ? [Number(process.env.EXTRA_DURATION)] : []);
+// Traffic run lengths the host can pick: 1 to 10 minutes, whole minutes. EXTRA_DURATION
+// (seconds) adds one more, for tests that need a short run.
+const EXTRA_DURATION = Number(process.env.EXTRA_DURATION) > 0 ? Number(process.env.EXTRA_DURATION) : 0;
+const okDuration = d => Number.isInteger(d) && ((d >= 60 && d <= 600 && d % 60 === 0) || (EXTRA_DURATION > 0 && d === EXTRA_DURATION));
 const DENSITIES = ['low', 'mid', 'high'];   // traffic density (public/js/modes/traffic/sim.js DENSITY)
 const WRECK_MS = 3000, GHOST_MS = 1500;     // online crash: stopped and blinking, then can't be hit
 const SNAPSHOT_EVERY = 2;                    // traffic steps (1/20 s) per snapshot: 10 a second
@@ -46,7 +48,7 @@ async function trafficLib() {
   return T;
 }
 // The cars and paints players can pick: public/js/core/cars.js, shared with the game.
-// The first six paints are the colours players always had, given by seat.
+// Players may share a paint: the interface marks a player by their seat, not by colour.
 let CARS = null;
 async function carsLib() {
   if (!CARS) CARS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'core', 'cars.js')).href);
@@ -59,8 +61,11 @@ class Player extends Schema {
     super();
     this.name = '';
     this.color = 0;
-    this.car = 'coupe';      // public/js/core/cars.js
-    this.slot = 0;
+    this.car = '';           // public/js/core/cars.js, set on join
+    this.slot = 0;           // start grid position (and the traffic simulation's player id)
+    this.order = 0;          // when the player came in: 1, 2, 3... never reused in a room.
+                             // Everyone lists the room the same way: the host first, then by order.
+    this.ready = false;      // pressed "Готово" in the lobby (the host does not need to)
     this.connected = true;
     this.x = 0; this.z = 0; this.h = 0;
     this.vf = 0; this.steer = 0; this.slide = 0;
@@ -81,7 +86,7 @@ class Player extends Schema {
   }
 }
 defineTypes(Player, {
-  name: 'string', color: 'number', car: 'string', slot: 'uint8', connected: 'boolean',
+  name: 'string', color: 'number', car: 'string', slot: 'uint8', order: 'uint16', ready: 'boolean', connected: 'boolean',
   x: 'float32', z: 'float32', h: 'float32',
   vf: 'float32', steer: 'float32', slide: 'float32',
   vx: 'float32', vz: 'float32', t: 'float64',
@@ -95,10 +100,10 @@ class RaceState extends Schema {
     super();
     this.phase = 'lobby';    // lobby | countdown | race | results
     this.hostId = '';
-    this.laps = LAPS;
+    this.laps = LAPS;        // drift track: laps in a race (1..10)
     this.startAt = 0;        // server clock (ms) of the green light
     this.mode = 'track';     // track | traffic, picked by the host in the lobby
-    this.duration = 180;     // traffic: run length, s
+    this.duration = 180;     // traffic: run length, s (60..600, whole minutes)
     this.density = 'mid';    // traffic: low | mid | high
     this.endAt = 0;          // traffic: server clock (ms) when the run ends
     this.seed = 0;           // traffic: seed of this run's traffic
@@ -115,7 +120,10 @@ const finite = (v, lo, hi, d = 0) => {
   if (typeof v === 'bigint') v = Number(v);   // large integers (e.g. timestamps) arrive as BigInt
   return (typeof v === 'number' && Number.isFinite(v)) ? Math.min(hi, Math.max(lo, v)) : d;
 };
-const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16) || 'Гонщик';
+const isObj = m => m !== null && typeof m === 'object' && !Array.isArray(m);
+// No control characters, no angle brackets, and no invisible or direction-flipping ones
+// (zero-width spaces, right-to-left overrides): those let a name pass for someone else's.
+const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f\u007f<>\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '').trim().slice(0, 16) || 'Гонщик';
 
 async function freeCode() {
   for (let i = 0; i < 50; i++) {
@@ -135,6 +143,9 @@ class RaceRoom extends Room {
     this.setState(new RaceState());
     if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
     if (options && DENSITIES.includes(options.density)) this.state.density = options.density;
+    this.nextOrder = 1;          // the next player's order
+    this.banned = new Set();     // sessionIds and player ids the host kicked out: never back in
+    this.reconnecting = new Map();   // sessionId -> the seat kept for a player who lost connection
     this.traffic = null;         // traffic mode: the simulation of the current run
     this.trafficTimer = null;
     this.botHitAt = new Map();   // bot id -> server ms of the last accepted hit
@@ -147,29 +158,66 @@ class RaceRoom extends Room {
       client.send('pong', { t: msg && msg.t, server: Date.now() });
     });
 
+    // Host only, between runs, and only when every other player in the room has pressed
+    // "Готово" (checked here, not only on the host's screen). A host alone can start at once.
     this.onMessage('start', (client) => {
-      if (client.sessionId !== this.state.hostId) return;
-      if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
+      if (client.sessionId !== this.state.hostId || !this.betweenRuns()) return;
+      if (!this.allReady()) return;
       this.beginCountdown();
     });
 
-    // Anyone, between runs: their car and paint. A paint another player has is refused
-    // (the colour marks the player in the standings and on the name tag).
-    this.onMessage('pick', (client, m) => {
+    // Anyone but the host, between runs: ready or not ({ value: true | false }).
+    this.onMessage('ready', (client, m) => {
       const p = this.state.players.get(client.sessionId);
-      if (!p || !m) return;
-      if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
-      if (this.cars.CAR_IDS.includes(m.car)) p.car = m.car;
-      if (this.cars.PAINT_HEXES.includes(m.paint) && !this.paintTaken(m.paint, client.sessionId)) p.color = m.paint;
+      if (!p || !isObj(m) || typeof m.value !== 'boolean' || !this.betweenRuns()) return;
+      if (client.sessionId === this.state.hostId) return;
+      p.ready = m.value;
     });
 
-    // Host only, between runs: pick the mode and (traffic) the run length.
+    // Anyone, between runs: their car and paint (any paint: players may share one).
+    this.onMessage('pick', (client, m) => {
+      const p = this.state.players.get(client.sessionId);
+      if (!p || !isObj(m) || !this.betweenRuns()) return;
+      if (this.cars.CAR_IDS.includes(m.car)) p.car = m.car;
+      if (this.cars.isPaint(m.paint)) p.color = m.paint;
+    });
+
+    // Anyone, between runs: their name.
+    this.onMessage('name', (client, m) => {
+      const p = this.state.players.get(client.sessionId);
+      if (!p || !isObj(m) || typeof m.name !== 'string' || !this.betweenRuns()) return;
+      const now = Date.now();
+      if (now - (p._nameAt || 0) < 500) return;                // at most two renames a second: no flooding the room
+      p._nameAt = now;
+      p.name = cleanName(m.name);
+    });
+
+    // Host only, between runs: the mode, laps (track), run length and density (traffic).
+    // A value out of range is ignored, the rest of the message still counts.
     this.onMessage('config', (client, m) => {
-      if (client.sessionId !== this.state.hostId || !m) return;
-      if (this.state.phase !== 'lobby' && this.state.phase !== 'results') return;
+      if (client.sessionId !== this.state.hostId || !isObj(m) || !this.betweenRuns()) return;
       if (MODES.includes(m.mode)) this.state.mode = m.mode;
-      if (DURATIONS.includes(m.duration)) this.state.duration = m.duration;
+      if (Number.isInteger(m.laps) && m.laps >= MIN_LAPS && m.laps <= MAX_LAPS) this.state.laps = m.laps;
+      if (okDuration(m.duration)) this.state.duration = m.duration;
       if (DENSITIES.includes(m.density)) this.state.density = m.density;
+    });
+
+    // Host only, between runs: send a player out of the room for good. They are told
+    // ('kicked') and disconnected; neither that connection nor that player's id can come
+    // back into this room.
+    this.onMessage('kick', (client, m) => {
+      if (client.sessionId !== this.state.hostId || !isObj(m) || !this.betweenRuns()) return;
+      const id = m.id;
+      if (typeof id !== 'string' || id === client.sessionId) return;
+      const p = this.state.players.get(id);
+      if (!p) return;
+      this.banned.add(id);
+      if (p._pid) this.banned.add('pid:' + p._pid);
+      const target = this.clients.find(c => c.sessionId === id);
+      const seat = this.reconnecting.get(id);
+      if (seat && seat.reject) seat.reject(new Error('kicked'));   // was reconnecting: that seat is gone too
+      this.removePlayer(id, p, 'исключён');
+      if (target) { target.send('kicked', {}); target.leave(4001); }
     });
 
     this.onMessage('state', (client, m) => {
@@ -269,19 +317,27 @@ class RaceRoom extends Room {
     });
   }
 
+  // A player the host kicked out can't come back: not on that connection (a reconnect
+  // keeps the sessionId) and not as the same player (pid: the game's id for this browser).
+  onAuth(client, options) {
+    if (this.banned.has(client.sessionId)) return false;
+    const pid = options && typeof options.pid === 'string' ? options.pid.slice(0, 64) : '';
+    if (pid && this.banned.has('pid:' + pid)) return false;
+    return true;
+  }
+
   onJoin(client, options) {
     const used = new Set([...this.state.players.values()].map(p => p.slot));
     let slot = 0; while (used.has(slot)) slot++;
     const p = new Player();
     p.name = cleanName(options && options.name);
     p.slot = slot;
-    // the car and paint the player asked for; a paint someone has already is swapped for
-    // this seat's colour, or else the first free one
+    p.order = this.nextOrder++;
+    // the car and paint the player asked for (an unknown one: the first car, its own colour)
     const want = options || {};
-    if (this.cars.CAR_IDS.includes(want.car)) p.car = want.car;
-    const paints = this.cars.PAINT_HEXES;
-    p.color = [want.paint, paints[slot % paints.length], ...paints]
-      .find(c => paints.includes(c) && !this.paintTaken(c, client.sessionId));
+    p.car = this.cars.CAR_IDS.includes(want.car) ? want.car : this.cars.DEFAULT_CAR;
+    p.color = this.cars.isPaint(want.paint) ? want.paint : this.cars.DEFAULT_PAINT;
+    if (typeof want.pid === 'string') p._pid = want.pid.slice(0, 64);
     this.state.players.set(client.sessionId, p);
     if (!this.state.hostId) this.state.hostId = client.sessionId;
     this.broadcast('event', { text: p.name + ' в комнате' }, { except: client });
@@ -289,28 +345,41 @@ class RaceRoom extends Room {
 
   async onLeave(client, consented) {
     const p = this.state.players.get(client.sessionId);
-    if (!p) return;
+    if (!p) return;                                          // already gone (kicked)
     p.connected = false;
     try {
-      if (consented) throw new Error('left');
-      await this.allowReconnection(client, 20);
+      if (consented || this.banned.has(client.sessionId)) throw new Error('left');
+      const seat = this.allowReconnection(client, 20);
+      this.reconnecting.set(client.sessionId, seat);
+      await seat;
       p.connected = true;
     } catch (e) {
-      this.state.players.delete(client.sessionId);
-      this.lapStamp.delete(client.sessionId);
-      this.lastState.delete(client.sessionId);
-      this.broadcast('event', { text: p.name + ' вышел' });
-      if (this.state.hostId === client.sessionId) {
-        const next = [...this.state.players.keys()][0];
-        this.state.hostId = next || '';
-      }
-      this.checkRaceOver();
+      if (this.state.players.get(client.sessionId) === p) this.removePlayer(client.sessionId, p, 'вышел');
+    } finally {
+      this.reconnecting.delete(client.sessionId);
     }
   }
 
-  paintTaken(c, except) {
-    for (const [id, o] of this.state.players) if (id !== except && o.color === c) return true;
-    return false;
+  // A player leaves the room for good. If it was the host, the next player by order is.
+  removePlayer(id, p, how) {
+    this.state.players.delete(id);
+    this.lapStamp.delete(id);
+    this.lastState.delete(id);
+    this.broadcast('event', { text: p.name + ' ' + how });
+    if (this.state.hostId === id) {
+      // a player who is connected first (one who is reconnecting may never come back), then by order
+      const next = [...this.state.players.entries()].sort((a, b) => (b[1].connected - a[1].connected) || (a[1].order - b[1].order))[0];
+      this.state.hostId = next ? next[0] : '';
+      if (next) next[1].ready = false;                       // the host has no "Готово"
+    }
+    this.checkRaceOver();
+  }
+
+  betweenRuns() { return this.state.phase === 'lobby' || this.state.phase === 'results'; }
+  // Every other player who is connected has pressed "Готово".
+  allReady() {
+    for (const [id, p] of this.state.players) if (id !== this.state.hostId && p.connected && !p.ready) return false;
+    return true;
   }
 
   onDispose() { this.timers.forEach(clearTimeout); this.stopTraffic(); }
@@ -383,6 +452,7 @@ class RaceRoom extends Room {
     this.timers.forEach(clearTimeout); this.timers = [];
     const s = this.state;
     s.players.forEach((p) => {
+      p.ready = false;                                       // back in the lobby, everyone presses "Готово" again
       p.lap = 0; p.prog = 0; p.score = 0; p.bestLap = 0;
       p.finished = false; p.finishTime = 0; p.place = 0;
       p.wreckUntil = 0; p.ghostUntil = 0; p.misses = 0; p.wrecks = 0; p._scoreAt = 0;

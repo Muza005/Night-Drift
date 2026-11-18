@@ -124,7 +124,7 @@ async function runOnce(browser) {
     step = 'B joins'; await B.click('#segFriends'); await B.click(CARD); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
-    step = 'race start'; await A.click('#startRace');
+    step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => !document.getElementById('startRace').disabled); await A.click('#startRace');   // B: «Готово», then A: «Старт»
     for (const p of [A, B]) await p.waitForFunction(() => window.__nd.NET.room.state.phase === 'race', null, { timeout: 20000 });
     await A.bringToFront(); await A.click('#c'); await sleep(600);
 

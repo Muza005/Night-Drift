@@ -62,8 +62,11 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   A.send('config', { density: 'high' }); await sleep(200);
   assert.equal(B.state.density, 'high', 'everyone sees the host\'s choice');
 
+  A.send('start'); await sleep(200);
+  assert.equal(A.state.phase, 'lobby', 'no start while B is not ready');
+  B.send('ready', { value: true }); await sleep(200);
   A.send('start');
-  await sleep(1500);
+  await sleep(1300);
   assert.equal(A.state.phase, 'countdown');
   assert.ok(A.state.seed > 0);
 

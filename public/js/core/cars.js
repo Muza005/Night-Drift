@@ -73,7 +73,7 @@ export const CARS = [
     stats: S({ vmax: 0.95, acc: 1.02, brake: 1.0, grip: 1.03, slide: 0.97, turn: 1.06, dirt: 1.25 }) },
 ];
 export const CAR_IDS = CARS.map(c => c.id);
-export const DEFAULT_CAR = 'coupe';
+export const DEFAULT_CAR = CARS[0].id;           // the first car of the list: reorder CARS to change it
 export const carById = id => CARS.find(c => c.id === id) || CARS[0];
 export const classById = id => CLASSES.find(c => c.id === id) || CLASSES[0];
 
