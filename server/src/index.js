@@ -166,6 +166,12 @@ class RaceRoom extends Room {
       this.beginCountdown();
     });
 
+    // Host only, on the results: everyone back to the lobby (settings, kicks, renames).
+    this.onMessage('toLobby', (client) => {
+      if (client.sessionId !== this.state.hostId || this.state.phase !== 'results') return;
+      this.state.phase = 'lobby';
+    });
+
     // Anyone but the host, between runs: ready or not ({ value: true | false }).
     this.onMessage('ready', (client, m) => {
       const p = this.state.players.get(client.sessionId);

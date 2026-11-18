@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
+import { roster } from '../public/js/ui/seats.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 2594;
@@ -14,7 +15,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let server;
 
 before(async () => {
-  server = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT), EXTRA_DURATION: '2', MIN_LAP_MS: '50' }, stdio: 'ignore' });   // (a 2 s highway run and quick laps: tests 3.11, 3.12)
   for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) return; } catch {} await sleep(200); }
   throw new Error('server did not start');
 });
@@ -24,13 +25,10 @@ const client = () => new Colyseus.Client(`ws://localhost:${PORT}`);
 const quiet = room => { for (const t of ['pong', 'event', 'lapTime', 'kicked']) room.onMessage(t, () => {}); return room; };
 // leaving a room that is already closed never settles: give each a moment, no more
 const leaveAll = rooms => Promise.all(rooms.map(r => Promise.race([r.leave(true).catch(() => {}), sleep(500)])));
-// The room's list as a player's screen shows it: the host first, then by order.
-const listed = room => {
-  const s = room.state;
-  return [...s.players.entries()]
-    .sort((a, b) => (b[0] === s.hostId) - (a[0] === s.hostId) || a[1].order - b[1].order)
-    .map(([, p]) => p.name);
-};
+// The room's list as a player's screen shows it (the game's own ui/seats.js): the host
+// first, then by order.
+const listed = room => roster(room.state).map(([, p]) => p.name);
+const until = async (fn, ms = 15000) => { const t = Date.now(); while (!fn()) { if (Date.now() - t > ms) throw new Error('timed out'); await sleep(50); } };
 
 test('3.1 every player sees the room in the same order: the host first, then who came in first', { timeout: 20000 }, async () => {
   const A = quiet(await client().create('race', { name: 'Ann' }));
@@ -62,8 +60,6 @@ test('3.2–3.3 "Готово": only guests, only between runs; the host starts 
     assert.equal(P(B).ready, true);
     A.send('start'); await sleep(200);
     assert.equal(A.state.phase, 'lobby', 'C is not ready: no start');
-    B.send('start'); await sleep(200);
-    assert.equal(A.state.phase, 'lobby', 'a guest cannot start');
 
     C.send('ready', { value: true }); await sleep(150);
     C.send('ready', { value: false }); await sleep(150);
@@ -72,6 +68,8 @@ test('3.2–3.3 "Готово": only guests, only between runs; the host starts 
     assert.equal(A.state.phase, 'lobby');
 
     C.send('ready', { value: true }); await sleep(150);
+    B.send('start'); await sleep(200);
+    assert.equal(A.state.phase, 'lobby', 'a guest cannot start, even with everyone ready');
     A.send('start'); await sleep(200);
     assert.equal(A.state.phase, 'countdown', 'everyone ready: the race starts');
     assert.ok([...A.state.players.values()].every(p => !p.ready), 'back in the lobby everyone presses "Готово" again');
@@ -207,4 +205,83 @@ test('3.8 names: anyone renames themselves between runs, cleaned like on joining
     assert.equal(P(B).name, 'Гонщик', 'only text');
     assert.equal(P(A).name, 'A', 'one player renames only themselves');
   } finally { await leaveAll([A, B]); }
+});
+
+test('3.9 a guest who lost the connection does not hold up the start; a newcomer does', { timeout: 30000 }, async () => {
+  const A = quiet(await client().create('race', { name: 'A' }));
+  const B = quiet(await client().joinById(A.roomId, { name: 'B' }));
+  const C = quiet(await client().joinById(A.roomId, { name: 'C' }));
+  let D = null;
+  try {
+    await sleep(300);
+    B.send('ready', { value: true }); await sleep(150);
+    C.leave(false);                                       // dropped, not left: the seat is kept 20 s
+    await until(() => A.state.players.get(C.sessionId) && !A.state.players.get(C.sessionId).connected, 5000);
+    D = quiet(await client().joinById(A.roomId, { name: 'D' })); await sleep(200);
+    A.send('start'); await sleep(200);
+    assert.equal(A.state.phase, 'lobby', 'D came in and is not ready: no start');
+    D.send('ready', { value: true }); await sleep(150);
+    A.send('start'); await sleep(200);
+    assert.equal(A.state.phase, 'countdown', 'C is away and does not count');
+  } finally { await leaveAll([A, B, ...(D ? [D] : [])]); }
+});
+
+test('3.10 the new host is a player still connected, before one who is away', { timeout: 30000 }, async () => {
+  const A = quiet(await client().create('race', { name: 'A' }));
+  const B = quiet(await client().joinById(A.roomId, { name: 'B' }));
+  const C = quiet(await client().joinById(A.roomId, { name: 'C' }));
+  try {
+    await sleep(300);
+    B.leave(false);
+    await until(() => A.state.players.get(B.sessionId) && !A.state.players.get(B.sessionId).connected, 5000);
+    await A.leave(true); await sleep(300);
+    assert.equal(C.state.hostId, C.sessionId, 'B came in first but is away: C is the host');
+    assert.deepEqual(listed(C), ['C', 'B']);
+  } finally { await leaveAll([A, C]); }
+});
+
+test('3.11 after the results: everyone presses "Готово" again, the host changes settings, kicks, goes back to the lobby, starts', { timeout: 40000 }, async () => {
+  const A = quiet(await client().create('race', { name: 'A', mode: 'traffic' }));
+  const B = quiet(await client().joinById(A.roomId, { name: 'B' }));
+  const C = quiet(await client().joinById(A.roomId, { name: 'C' }));
+  try {
+    await sleep(300);
+    A.send('config', { duration: 2 }); await sleep(150);
+    B.send('ready', { value: true }); C.send('ready', { value: true }); await sleep(150);
+    A.send('start');
+    await until(() => A.state.phase === 'results', 20000);
+    const P = r => A.state.players.get(r.sessionId);
+    assert.equal(P(B).ready, false, 'nobody is ready after a run');
+    A.send('start'); await sleep(200);
+    assert.equal(A.state.phase, 'results', 'not before the others are ready');
+    A.send('config', { laps: 4, mode: 'track' }); await sleep(150);
+    assert.deepEqual([A.state.laps, A.state.mode], [4, 'track'], 'the host changes the settings between runs');
+    A.send('kick', { id: C.sessionId });
+    await until(() => !A.state.players.has(C.sessionId), 5000);
+    B.send('ready', { value: true }); await sleep(150);
+    assert.equal(P(B).ready, true);
+    B.send('toLobby'); await sleep(150);
+    assert.equal(A.state.phase, 'results', 'only the host takes everyone back to the lobby');
+    A.send('toLobby'); await sleep(150);
+    assert.equal(A.state.phase, 'lobby', '«В лобби»: everyone is back in the lobby');
+    assert.equal(P(B).ready, true, '"Готово" pressed on the results still counts');
+    A.send('start'); await sleep(200);
+    assert.equal(A.state.phase, 'countdown', 'the next run');
+  } finally { await leaveAll([A, B, C]); }
+});
+
+test('3.12 the host\'s laps decide when a drift race ends', { timeout: 30000 }, async () => {
+  const A = quiet(await client().create('race', { name: 'A' }));
+  try {
+    await sleep(200);
+    A.send('config', { laps: 2 }); await sleep(150);
+    A.send('start');
+    await until(() => A.state.phase === 'race', 10000);
+    const me = () => A.state.players.get(A.sessionId);
+    await sleep(100); A.send('lap'); await sleep(200);
+    assert.equal(me().lap, 1); assert.equal(me().finished, false, 'one lap of two: still racing');
+    A.send('lap'); await until(() => me().finished, 3000);
+    assert.equal(me().place, 1);
+    await until(() => A.state.phase === 'results', 5000);
+  } finally { await leaveAll([A]); }
 });

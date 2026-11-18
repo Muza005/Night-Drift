@@ -13,6 +13,7 @@ export function applyLook(carId, paint){
   const same = car.model && car.model.carId === c.id;
   car.carId = c.id; car.spec = c.stats; car.paintHex = paint;
   setPaint(car.paint, paintHex(paint, c.id));
+  car.wantCode = paint;                           // (a model still loading takes this paint)
   if(same) car.model.code = paint;
   else dressCar(car, c.id, paint);                // the picked car's own model (loads once)
 }

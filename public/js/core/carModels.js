@@ -89,8 +89,9 @@ const TAIL = /^(Glass_-_Red(_-_Rough)?|brakelights|rearlights|glow|Material\.00[
 export function loadModel(carId){
   const c = carById(carId);
   if(!templates.has(c.model)){
+    const fail = err => { templates.delete(c.model); throw err; };   // a failure is not kept: the next ask tries again
     templates.set(c.model, new Promise((resolve, reject) => {
-      gltfLoader().load(modelUrl(c.model), gltf => {
+      gltfLoader().load(modelUrl(c.model), gltf => { try {
         const t = normalise(gltf.scene);
         t.root.traverse(o => {
           if(!o.isMesh) return;
@@ -101,11 +102,12 @@ export function loadModel(carId){
           }
           if(o.geometry) o.geometry.userData.shared = true;
         });
+        if(!t.paint) throw new Error(c.model + ': no material named "Paint"');
         pivotWheels(t);
         t.model = c.model;
         resolve(t);
-      }, undefined, err => { templates.delete(c.model); reject(err); });
-    }));
+      } catch(err){ reject(err); } }, undefined, reject);
+    }).catch(fail));
   }
   return templates.get(c.model);
 }

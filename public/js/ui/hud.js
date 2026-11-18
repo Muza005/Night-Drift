@@ -16,11 +16,14 @@ export function info(text){ const d=el('div','info',text); document.querySelecto
 // first is still running takes over from it (the browser skips the first). Returns a
 // promise kept once the new screen is in the page (to move focus there).
 const PANELS=['pHome','pModes','pGarage','pPause','pLobby','pResults','pOver'];
+let panelGen=0;
+// A run starting hides the menu: a screen change still on its way must not show it again.
+export function cancelPanels(){ panelGen++; }
 export function showPanel(id, dir){
-  const menu=$('menu'), to=$(id);
+  const menu=$('menu'), to=$(id), gen=++panelGen;
   const from=menu.hidden ? null : PANELS.map(p=>$(p)).find(p=>!p.hidden);
   for(const p of PANELS) $(p).style.viewTransitionName='';
-  const swap=()=>{ for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
+  const swap=()=>{ if(gen!==panelGen) return; for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
   if(!dir || !from || from===to){ swap(); return Promise.resolve(); }
   document.documentElement.dataset.nav=dir;
   if(document.startViewTransition){

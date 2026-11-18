@@ -76,7 +76,8 @@ addEventListener('keydown',e=>{
     if((e.code==='KeyP'||e.code==='Escape') && (G.state==='race'||G.state==='count')) pause();
     else if((e.code==='KeyP'||e.code==='Escape') && G.state==='pause'){ e.preventDefault(); resume(); }
   }
-  if(e.code==='Escape' && !e.repeat && G.state==='menu' && !$('pModes').hidden && !$('menu').hidden){ e.preventDefault(); openHome('back'); }
+  // (not when another screen's handler already took this Esc: the garage going back here)
+  if(e.code==='Escape' && !e.repeat && !e.defaultPrevented && G.state==='menu' && !$('pModes').hidden && !$('menu').hidden){ e.preventDefault(); openHome('back'); }
   if(e.code==='KeyM' && !e.repeat) toggleSound();
   if(e.code==='KeyC' && !e.repeat && G.mode && G.mode.toggleCamera) G.mode.toggleCamera();
   if(G.state==='over' && !e.repeat){                           // a fresh press only: a held handbrake skipped the crash screen
@@ -162,7 +163,9 @@ $('modesBack').addEventListener('click',()=>{ if(G.state==='menu') openHome('bac
 
 async function pick(id){
   if(G.state!=='menu') return;
-  await setMode(id);
+  // the highway's module loads the first time it is picked: a failed load says so
+  try{ await setMode(id); }
+  catch(e){ console.error('mode failed to load', id, e); netStatus('netStatus','Не загрузился режим. Проверьте интернет и попробуйте ещё раз.',true); return; }
   if(menuKind==='online'){
     NET.wantMode = id;                   // the room starts in this mode
     connectRoom('create');
@@ -242,7 +245,7 @@ G.menuView=menuView;
 // canvas keeps that picture. Behind home, the cards and the results it is the blurred
 // still the garage uses; behind pause and the finish screen, the race as it stood.
 // Drawn again only when something it shows changes: the mode, my car, the window.
-let stillKey='';
+let stillKey='', audioIdle=false;
 function stillFrame(){
   if($('menu').hidden){ stillKey=''; return false; }
   const s=G.state, frozen=s==='pause'||s==='over';
@@ -259,6 +262,10 @@ function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
   // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
+  // Out of the race (results, the menu, the garage…) the engine and the tyres go back to
+  // idle once: the screens below return early and never reach the audio further down.
+  const racing=G.state==='race'||G.state==='count'||G.state==='crash';
+  if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioIdle=true; } else if(racing) audioIdle=false;
   if(garage.open){ stillKey=''; garage.frame(now); return; }
   if(lobby.open){ stillKey=''; lobby.frame(now); return; }        // the lobby: the same, with my car
   if(stillFrame()) return;

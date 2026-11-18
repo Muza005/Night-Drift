@@ -5,9 +5,10 @@
    cars are predicted forward to the present moment (position + velocity × age of the
    update) and eased toward each new prediction, so what you see matches what they see.
 
-   Moved here unchanged from the single-file version: same messages, same rates, same
-   clock sync, same prediction and smoothing, same collision exchange. Only references
-   to shared variables changed (state → G.state and so on).
+   Started as a move from the single-file version (same rates, clock sync, prediction,
+   smoothing and collision exchange); the lobby since added the ready, kick/kicked,
+   name, pick and config messages, a per-browser id (pid) on joining, and close code
+   4001 for a kicked player.
 
    Stage 6 adds the highway: the room's mode (picked by the host in the lobby), the
    server's traffic snapshots ('tr', handed to the traffic mode), and crashed cars that
@@ -29,7 +30,7 @@ import { addMark, emitSmoke, clearMarks } from '../core/fx.js';
 import { clearInput } from '../core/input.js';
 import { audioInit } from '../core/audio.js';
 import { crash, bank, dropDrift } from '../game.js';
-import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note } from '../ui/hud.js';
+import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note, cancelPanels } from '../ui/hud.js';
 import { renderLobby as drawLobby, openLobby, leaveLobby, openRoomGarage } from '../ui/lobbyScreen.js';
 import { roster, seatOf, seatHex } from '../ui/seats.js';
 
@@ -55,7 +56,10 @@ function errText(e){
 // The name we come into a room with: the last one used (it is changed in the lobby).
 function myName(){ try{ return (localStorage.getItem('nightdrift.name')||'').trim().slice(0,16)||'Гонщик'; }catch(e){ return 'Гонщик'; } }
 // This browser's player id: a room the host kicked us out of knows it and won't let us back.
-const PID=(()=>{ try{ let v=localStorage.getItem('nightdrift.pid'); if(!v){ v=crypto.randomUUID(); localStorage.setItem('nightdrift.pid',v); } return v; }catch(e){ return crypto.randomUUID(); } })();
+// (crypto.randomUUID exists only on https and localhost; a game on the local network is
+// plain http, where getRandomValues still works)
+const uid=()=>crypto.randomUUID ? crypto.randomUUID() : [...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join('');
+const PID=(()=>{ try{ let v=localStorage.getItem('nightdrift.pid'); if(!v){ v=uid(); localStorage.setItem('nightdrift.pid',v); } return v; }catch(e){ return uid(); } })();
 
 let connecting=false;
 // kind: 'create' (a room in NET.wantMode, from a mode card) or 'join' (the code typed in)
@@ -76,8 +80,9 @@ export async function connectRoom(kind){
     NET.client=new Colyseus.Client(ep);
     const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
-    bindRoom(room);
-  }catch(e){ netStatus('netStatus',errText(e),true); }
+    try{ bindRoom(room); }
+    catch(e){ console.error('joining the room failed', e); try{ room.leave(true); }catch(_){} leaveOnline('Не получилось войти в комнату. Обновите страницу.'); }
+  }catch(e){ console.warn('connectRoom', kind, e); netStatus('netStatus',errText(e),true); }
   finally{ connecting=false; $('pModes').removeAttribute('aria-busy'); $('joinRoom').disabled=false; }
 }
 
@@ -113,7 +118,7 @@ function bindRoom(room){
   // highway: the server's traffic, 10 snapshots a second
   room.onMessage('tr',m=>{ if(G.mode.id==='traffic' && G.mode.netTraffic) G.mode.netTraffic(m); });
   room.onMessage('bump',onBump);
-  // the host sent us out of the room: no reconnecting, back to the online panel
+  // the host sent us out of the room: no reconnecting, back to the online mode cards
   room.onMessage('kicked',()=>{ if(NET.room===room) leaveOnline('Вас исключили из комнаты.'); });
   room.onMessage('lapTime',m=>{
     const last=m.lap>=room.state.laps;
@@ -127,12 +132,12 @@ function bindRoom(room){
       const g=NET.ghosts.get(id); if(g){ ghostLook(g,p); pushSnap(g,p); }
       const ph=room.state.phase; if(ph==='lobby') renderLobby(); else if(ph==='results') renderResults();
     });
-    renderLobby();
+    renderLobby(); if(room.state.phase==='results') renderResults();
   });
-  room.state.players.onRemove((p,id)=>{ removeGhost(id); relabel(); renderLobby(); });
+  room.state.players.onRemove((p,id)=>{ removeGhost(id); relabel(); renderLobby(); if(room.state.phase==='results') renderResults(); });
   room.state.listen('hostId',()=>{ relabel(); renderLobby(); renderResults(); });
   // between runs the scene behind the lobby follows the mode the host picked
-  room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m); renderLobby(); });
+  room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m).catch(e=>console.error('mode failed to load', m, e)); renderLobby(); });
   room.state.listen('duration',()=>renderLobby());
   room.state.listen('density',()=>renderLobby());
   room.state.listen('laps',()=>renderLobby());
@@ -143,13 +148,13 @@ function bindRoom(room){
 function onPhase(ph){
   if(!NET.room) return;
   const s=NET.room.state;
-  if(ph==='lobby'){ const from=G.state; leaveLobby(); garageFor=null; G.state='lobby'; openLobby(from==='menu'||from==='results'?'forward':undefined); }
+  if(ph==='lobby'){ const from=G.state; leaveLobby(); G.state='lobby'; openLobby(from==='menu'||from==='results'?'forward':undefined); }
   else if(ph==='countdown'||ph==='race'){
-    leaveLobby(); garageFor=null;                      // a garage opened from the lobby goes too
+    leaveLobby();                                      // a garage opened from the lobby goes too
     if(G.state==='race'||G.state==='count') return;   // already racing (e.g. after a reconnect)
     const go=()=>{
       if(!NET.room || G.state==='race'||G.state==='count') return;
-      $('menu').hidden=true; canvas.focus();
+      cancelPanels(); $('menu').hidden=true; canvas.focus();
       G.mode.enter(car,{slot:NET.me?NET.me.slot:0, online:true});
       G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
       NET.finished=false; NET.laps=s.laps; NET.sendT=0;
@@ -158,9 +163,10 @@ function onPhase(ph){
       else { G.state='count'; G.prevCount=99; }
     };
     // the room's mode decides the scene (the highway module may still need to load)
-    if(G.mode.id!==s.mode && G.setMode) G.setMode(s.mode).then(go); else go();
+    if(G.mode.id!==s.mode && G.setMode) G.setMode(s.mode).then(go, e=>{ console.error('mode failed to load', s.mode, e); leaveOnline('Не загрузился режим «Трасса». Обновите страницу.'); });
+    else go();
   }
-  else if(ph==='results'){ leaveLobby(); garageFor=null; G.state='results'; clearInput(); bank(); car.root.visible=true; $('count').textContent=''; showPanel('pResults'); renderResults(); }
+  else if(ph==='results'){ leaveLobby(); G.state='results'; clearInput(); bank(); car.root.visible=true; $('count').textContent=''; showPanel('pResults'); renderResults(); }
 }
 
 const KICKED=4001;                 // the close code the server uses for a kicked player
@@ -174,21 +180,24 @@ function onRoomLeave(room,code){
   // they were doing by then.
   const client=NET.client, token=NET.token, mine=()=>NET.room===room && !NET.leaving;
   (async()=>{
+    let last=null;
     for(let i=0;i<4;i++){
       if(!mine()) return;
       let r=null;
       try{ r=await client.reconnect(token); }
-      catch(e){ await new Promise(res=>setTimeout(res,1500)); continue; }
+      catch(e){ last=e; console.warn('reconnect attempt', i+1, e);
+        if(/onAuth|kicked/i.test(String(e&&e.message||e))) break;    // the host sent us out meanwhile: no use trying again
+        await new Promise(res=>setTimeout(res,1500)); continue; }
       if(!mine()){ try{ r.leave(true); }catch(e){} return; }   // left while the attempt was on its way
       bindRoom(r); flash('Связь восстановлена'); return;
     }
-    if(mine()) leaveOnline('Связь с комнатой потеряна.');
+    if(mine()) leaveOnline(/onAuth|kicked/i.test(String(last&&last.message||last)) ? 'Вас исключили из комнаты.' : 'Связь с комнатой потеряна.');
   })();
 }
 export async function leaveOnline(msg){
   const r=NET.room;
   Object.assign(NET,{leaving:true,room:null,online:false,me:null,finished:false});
-  leaveLobby(); garageFor=null;
+  leaveLobby();
   clearInterval(NET.pingTimer); clearGhosts(); stopClockWorker();
   applyLook(choice.car,choice.paint); $('standings').hidden=true;
   // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
@@ -230,7 +239,7 @@ function addGhost(id,p){
 function ghostLook(g,p){
   const ac=accent(g.id);
   if(g.car!==p.car){ g.car=p.car; g.color=p.color; setPaint(g.m.paint, look(p)); dressCar(g.m,p.car,p.color); }
-  else if(g.color!==p.color){ g.color=p.color; setPaint(g.m.paint, look(p)); if(g.m.model) g.m.model.code=p.color; }
+  else if(g.color!==p.color){ g.color=p.color; g.m.wantCode=p.color; setPaint(g.m.paint, look(p)); if(g.m.model) g.m.model.code=p.color; }
   if(g.name===p.name && g.accent===ac) return;
   g.name=p.name; g.accent=ac;
   g.m.under.material.color.setHex(ac);
@@ -240,7 +249,7 @@ function ghostLook(g,p){
 }
 // seats move when a player leaves: every tag again
 function relabel(){ if(!NET.room) return; NET.room.state.players.forEach((p,id)=>{ const g=NET.ghosts.get(id); if(g) ghostLook(g,p); }); }
-function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
+function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; g.m.dressing=(g.m.dressing||0)+1; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
 function pushSnap(g,p){
   if(NET.room && NET.room.state.phase==='lobby'){ g.buf.length=0; g.last=g.lastPrev=null; g.off=null; return; }
@@ -399,8 +408,6 @@ export function sendState(dt,slide){
 /* lobby, standings, results */
 // The lobby is drawn by ui/lobbyScreen.js; here only when the room is in it.
 function renderLobby(){ if(NET.room && NET.room.state.phase==='lobby') drawLobby(); }
-// Which screen a garage opened from the room goes back to ('lobby' | 'results' | null).
-let garageFor=null;
 export function renderStandings(){
   const box=$('standings');
   if(!NET.online || !NET.room || !(G.state==='race'||G.state==='count')){ box.hidden=true; return; }
@@ -446,12 +453,14 @@ function renderResults(){
   // the next run: as in the lobby, the host starts once every other player is ready
   const isHost=s.hostId===me, meP=s.players.get(me), ag=$('again');
   let waiting=0; s.players.forEach((o,oid)=>{ if(oid!==s.hostId && o.connected && !o.ready) waiting++; });
+  $('resLobby').hidden=!isHost;            // the host takes everyone back to the lobby (settings, kicks)
   if(isHost){ ag.textContent='Ещё заезд'; ag.disabled=waiting>0; ag.removeAttribute('aria-pressed'); }
   else { ag.textContent=meP&&meP.ready?'Готов ✓':'Готово'; ag.disabled=false; ag.setAttribute('aria-pressed',String(!!(meP&&meP.ready))); }
   netStatus('resStatus', isHost?(waiting?'Ждём «Готово» от игроков: '+waiting+'.':''):'Нажмите «Готово», и хост запустит следующий заезд.');
 }
 
-// The menu (main.js) opens the online panel when "С друзьями" + "Трасса" is picked.
+// The online mode cards: a card creates a room (main.js → connectRoom('create')); this
+// form joins a friend's room by its code.
 $('joinForm').addEventListener('submit',e=>{ e.preventDefault(); connectRoom('join'); });
 $('codeIn').addEventListener('input',e=>{ const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''); if(v!==e.target.value) e.target.value=v; });
 $('again').addEventListener('click',()=>{
@@ -462,8 +471,9 @@ $('again').addEventListener('click',()=>{
 });
 $('leaveLobby').addEventListener('click',()=>leaveOnline());
 $('leaveRes').addEventListener('click',()=>leaveOnline());
+$('resLobby').addEventListener('click',()=>{ if(NET.room && NET.room.state.hostId===NET.room.sessionId) NET.room.send('toLobby'); });
 // «Авто» on the results: the garage, then back to the results
-$('resCar').addEventListener('click',()=>{ if(!NET.room) return; garageFor='results';
-  openRoomGarage(()=>{ garageFor=null; if(NET.room && NET.room.state.phase==='results') showPanel('pResults','back').then(()=>$('resCar').focus({preventScroll:true})); }); });
+$('resCar').addEventListener('click',()=>{ if(!NET.room) return;
+  openRoomGarage(()=>{ if(NET.room && NET.room.state.phase==='results') showPanel('pResults','back').then(()=>$('resCar').focus({preventScroll:true})); }); });
 // The "?room=CODE" invite link: main.js opens the online screen with the code filled in.
 export function inviteCode(){ try{ return (new URLSearchParams(location.search).get('room')||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4); }catch(e){ return ''; } }

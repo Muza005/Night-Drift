@@ -1,7 +1,8 @@
 // The car stand: a round podium with a thin neon rim, the car on it, a soft shadow under
 // the car. It turns slowly by itself; a horizontal drag (mouse or finger) turns it by
 // hand, a flick keeps it turning and slowing down, and ~2 s after the last touch the slow
-// turn comes back. The lobby, the garage and the solo-run screen all show this one stand.
+// turn comes back. The garage (solo and from a room) and the lobby each show one of these,
+// drawn into the game's single renderer.
 //
 // The stand has no renderer and no loop of its own: the game has one WebGLRenderer, and
 // the stand draws into it, only inside the box of its DOM element (`el`), and only when
@@ -129,7 +130,15 @@ export function createStand({ renderer, el }){
       slot.blob.visible = true;
       if(slot === cur) describe();
       return inst;
-    }, e => { if(my === slot.token) console.warn('stand: model failed', id, e); return null; });
+    }).catch(e => {
+      if(my !== slot.token) return null;
+      console.error('stand: model failed', id, e);
+      // no other car left standing under this one's name: an empty podium, and it says so
+      if(slot.inst){ slot.inst.dispose(); slot.inst = null; }
+      slot.blob.visible = false;
+      if(slot === cur) el.setAttribute('aria-label', carById(id).name + ': модель не загрузилась');
+      return null;
+    });
   }
   function drop(slot){
     slot.alive = false; slot.token++;
@@ -290,7 +299,7 @@ export function createStand({ renderer, el }){
   }
 
   function dispose(){
-    disposed = true; token++;
+    disposed = true;                 // (drop() below retires each slot's pending load)
     off.abort();
     drop(cur); if(gone) drop(gone);
     for(const x of own) x.dispose();

@@ -100,6 +100,15 @@ try {
   check('the host sets 5 laps, the others see 5', await C.innerText('#cfgLaps') === '5');
   check('only the host has the controls', await B.$eval('#cfgLapsUp', b => b.hidden) && await B.$eval('#cfgMode input', i => i.disabled) && !(await A.$eval('#cfgLapsUp', b => b.hidden)));
 
+  // the highway: minutes (sent in seconds) and traffic, then back to the drift track
+  await A.click('#cfgMode label:nth-child(2)');
+  await B.waitForFunction(() => !document.getElementById('rowMins').hidden);
+  await A.click('#cfgMinsUp'); await A.click('#cfgMinsUp'); await A.click('#cfgDens label:nth-child(3)');
+  await B.waitForFunction(() => __nd.NET.room.state.duration === 300 && __nd.NET.room.state.density === 'high');
+  check('«Трасса»: the host sets 5 minutes and high traffic, the others see them', await B.innerText('#cfgMins') === '5' && await B.$eval('#rowLaps', e => e.hidden) && await B.$eval('#cfgDens input[value="high"]', i => i.checked));
+  await A.click('#cfgMode label:nth-child(1)');
+  await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
+
   // «Авто» → the garage → «Выбрать»: back in the lobby with the pick
   await B.click('#lobCar');
   await B.waitForFunction(() => !document.getElementById('pGarage').hidden);
@@ -114,9 +123,12 @@ try {
   check('«Выбрать»: back in the lobby with that car, and the others see it', await B.innerText('#lobPaint') === 'Цвет: красный');
   // «←» in the garage changes nothing
   await C.click('#lobCar'); await C.waitForFunction(() => !document.getElementById('pGarage').hidden);
-  await C.keyboard.press('ArrowRight'); await sleep(150); await C.click('#garBack');
-  await C.waitForFunction(() => !document.getElementById('pLobby').hidden);
-  check('«←» in the garage: back with nothing changed', await C.innerText('#lobCarName') === CARS[0][1]);
+  await C.keyboard.press('ArrowRight'); await sleep(150);
+  await C.click('#garPaint'); await C.click('#garSwatches button[aria-label="Синий"]'); await C.keyboard.press('Escape');
+  await C.click('#garBack');
+  await C.waitForFunction(() => !document.getElementById('pLobby').hidden); await sleep(400);
+  const cSeen = await A.evaluate(id => { const p = __nd.NET.room.state.players.get(id); return [p.car, p.color]; }, await C.evaluate(() => __nd.NET.room.sessionId));
+  check('«←» in the garage: back with nothing changed, car and paint', await C.innerText('#lobCarName') === CARS[0][1] && cSeen[0] === CARS[0][0] && cSeen[1] === -1, JSON.stringify(cSeen));
   await C.click('#lobCar'); await C.waitForFunction(() => !document.getElementById('pGarage').hidden);
   for (let i = 0; i < 4; i++) { await C.keyboard.press('ArrowRight'); await sleep(150); }
   await C.click('#garGo'); await C.waitForFunction(() => !document.getElementById('pLobby').hidden);

@@ -6,7 +6,8 @@
 //   garage.open        is it on screen
 //   garage.frame(now)  the main loop calls this instead of drawing the track while it is open
 //
-// Nothing is saved here: onGo gets the pick and the caller keeps it; onBack drops it.
+// The car and paint are not saved here: onGo gets the pick and the caller keeps it; onBack
+// drops it. The "!" settings (laps, density) are saved as soon as they change.
 import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
 import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
@@ -190,7 +191,7 @@ addEventListener('keydown', e => {
 export const garage = {
   get open(){ return S.open && !$('pGarage').hidden; },
   frame(now){ drawBackdrop(); stand.frame(now); },
-  close(){ if(S.open) leave(); },          // a run starts (online) or the room is gone: no callback
+  close(){ if(S.open) leave(); },          // (S.open, not .open: also while its screen is still on its way in)          // a run starts (online) or the room is gone: no callback
   stand,
   get pick(){ return { car: CARS[S.idx].id, paint: S.paint }; },
 };

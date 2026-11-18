@@ -59,10 +59,17 @@ export function makeCar(color, local){
 const glowGeo = new THREE.PlaneGeometry(1, 1).rotateY(Math.PI); glowGeo.userData.shared = true;   // faces backwards
 export async function dressCar(m, carId, code){
   const my = m.dressing = (m.dressing || 0) + 1;
+  m.wantCode = code;                       // a repaint while this loads changes it
   let inst;
   try { inst = await makeModel(carId, code, carEnv); }
-  catch(e){ console.warn('car model failed, the coupe stays', carId, e); return null; }
+  catch(e){
+    // the coupe built from shapes comes back (not the car that was there before)
+    console.error('car model failed, showing the coupe', carId, e);
+    if(my === m.dressing) undress(m);
+    return null;
+  }
   if(my !== m.dressing){ inst.dispose(); return null; }
+  if(m.wantCode !== code) inst.repaint(m.wantCode);
   undress(m);
   inst.root.traverse(o => { if(o.isMesh) o.castShadow = true; });
   m.body.add(inst.root);
@@ -103,6 +110,9 @@ function undress(m){
   Object.assign(m, { wheels: m.proc.wheels, pivots: m.proc.pivots, tailMat: m.proc.tailMat, paint: m.proc.paint });
 }
 export function disposeCar(m){
+  // the model first, by its own dispose: its other materials and textures belong to the
+  // shared template (every car of that model, the stand), not to this car
+  undress(m);
   scene.remove(m.root);
   // the body and wheel shapes are shared by every car: only this car's own things go
   m.root.traverse(o=>{ if(o.geometry && !o.geometry.userData.shared) o.geometry.dispose(); if(o.material){ if(o.material.map&&o.material.map!==glowTex) o.material.map.dispose(); o.material.dispose(); } });

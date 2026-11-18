@@ -79,7 +79,9 @@ function fillRow(r, id, p, i, s){
 }
 function drawPlayers(s){
   const list = roster(s), ul = $('plist');
-  if(S.room !== NET.room){ for(const r of rows.values()) r.li.remove(); rows.clear(); S.room = NET.room; S.armed = null; }
+  // a new room (or a reconnect): every row goes, a rename in one of them too (a removed
+  // input gets no blur, so its end is not heard)
+  if(S.room !== NET.room){ for(const r of rows.values()) r.li.remove(); rows.clear(); S.room = NET.room; S.armed = null; S.editing = false; }
   const seen = new Set();
   list.forEach(([id, p], i) => {
     seen.add(id);
@@ -167,7 +169,7 @@ function legacyCopy(text){
   const f = Object.assign(document.createElement('textarea'), { value: text });
   f.setAttribute('readonly', ''); f.style.cssText = 'position:fixed;inset-block-start:0;opacity:0';
   document.body.append(f); f.select();
-  try{ return document.execCommand('copy'); }finally{ f.remove(); }
+  try{ return document.execCommand('copy'); }catch(e){ return false; }finally{ f.remove(); }
 }
 $('copyCode').addEventListener('click', async () => {
   if(!NET.room) return;
@@ -283,7 +285,7 @@ export function renderLobby(){
   drawPlayers(s); drawSettings(s); drawButton(s); drawCar(s);
   $('lobCar').disabled = !between();
   // the scene behind follows the room's mode (the picture of it is taken again)
-  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).then(() => { if(lobby.open) backdrop(); });
+  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).then(() => { if(lobby.open) backdrop(); }, e => console.error('mode failed to load', s.mode, e));
 }
 function backdrop(){ if(G.menuView) G.menuView(); captureBackdrop(); }
 export function openLobby(dir){
@@ -306,7 +308,7 @@ addEventListener('resize', () => { if(lobby.open) backdrop(); });
 // Keys: Esc leaves the room (after closing the ✕ panel or a rename first), Enter is the
 // main button unless a control has the focus.
 addEventListener('keydown', e => {
-  if(!lobby.open || e.repeat) return;
+  if(!lobby.open || e.repeat || e.defaultPrevented) return;    // (the garage's Esc or Enter that brought us here)
   const t = e.target;
   if(S.editing || (t && (t.tagName === 'INPUT' && t.type === 'text'))) return;
   if(e.key === 'Escape'){ if(!$('kickPop').matches(':popover-open')){ e.preventDefault(); $('leaveLobby').click(); } return; }
