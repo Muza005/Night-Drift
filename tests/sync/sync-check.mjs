@@ -118,10 +118,10 @@ async function runOnce(browser) {
   const A = await openPlayer(browser, url, errors, 'A'), B = await openPlayer(browser, url, errors, 'B');
   let step = 'create room';
   try {
-    await A.click('#segFriends'); await A.click(CARD); await A.fill('#nameIn', 'A'); await A.click('#createRoom');
+    await A.evaluate(() => localStorage.setItem('nightdrift.name', 'A')); await A.click('#goOnline'); await A.click(CARD);   // the mode card makes the room
     await A.waitForFunction(() => document.getElementById('roomCode').textContent !== '----');
     const code = (await A.innerText('#roomCode')).trim();
-    step = 'B joins'; await B.click('#segFriends'); await B.click(CARD); await B.fill('#nameIn', 'B'); await B.fill('#codeIn', code); await B.click('#joinRoom');
+    step = 'B joins'; await B.evaluate(() => localStorage.setItem('nightdrift.name', 'B')); await B.click('#goOnline'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
     step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => !document.getElementById('startRace').disabled); await A.click('#startRace');   // B: «Готово», then A: «Старт»

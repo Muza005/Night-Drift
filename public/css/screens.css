@@ -1,0 +1,245 @@
+/* Night Drift — the menu screens (home, mode select; lobby and garage come later).
+ * Values come from tokens.css only. */
+
+/* while a menu screen is up, the race HUD behind it is not shown */
+body:has(#menu:not([hidden])) .hud { visibility: hidden; }
+
+/* ---------- a screen: no box of its own, the content sits on the dimmed scene ---------- */
+.screen {
+  width: min(1080px, 100%);
+  margin-block: auto;
+  display: grid;
+  gap: var(--sp-5);
+}
+.screen-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.screen-bar h1 {
+  margin: 0;
+  font: 800 var(--fs-2xl)/1 var(--f-display);
+  letter-spacing: -0.01em;
+}
+.screen-note {
+  margin: 0;
+  color: var(--c-ink-1);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+  font-size: var(--fs-sm);
+}
+
+/* the brand on the home screen */
+#pHome .brand { display: grid; gap: var(--sp-2); justify-items: start; }
+#pHome .brand h1 {
+  margin: 0;
+  font: 800 var(--fs-3xl)/0.95 var(--f-display);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 34px rgba(255, 59, 107, 0.35);
+}
+#pHome .brand h1 span { color: var(--brand); }
+#pHome .tagline { margin: 0; color: var(--c-ink-1); font-size: var(--fs-lg); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+#pHome .howto { justify-self: start; }
+
+/* a round icon button (back, garage, colour...) */
+.icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: var(--btn-h);
+  block-size: var(--btn-h);
+  padding: 0;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--dur-hover) ease, background-color var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
+}
+.icon-btn svg { inline-size: 22px; block-size: 22px; }
+.icon-btn:active { scale: 0.94; }
+.icon-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover { border-color: var(--action); background: rgba(62, 240, 255, 0.08); }
+}
+
+/* ---------- tiles: a picture on top, the name under it ---------- */
+.tiles { display: grid; gap: var(--sp-4); }
+.tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tiles-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.tile {
+  --tile-accent: var(--c-cyan);
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  align-content: start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-4);
+  text-align: start;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lift);
+  cursor: pointer;
+  transition: translate var(--dur-hover) var(--ease-out), scale var(--dur-press) var(--ease-out), border-color var(--dur-hover) ease;
+}
+/* the glow is a ready-made shadow on a layer of its own: only its opacity changes */
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px var(--tile-accent), 0 18px 54px -12px var(--tile-accent);
+  opacity: 0;
+  transition: opacity var(--dur-hover) ease;
+}
+.tile-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: calc(var(--r-lg) - var(--sp-2));
+  background: var(--c-night-2);
+}
+.tile-art svg {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  transition: scale var(--dur-screen) var(--ease-out);
+}
+.mode-tile .tile-art { aspect-ratio: 21 / 9; }        /* the mode pictures are wide road scenes */
+.tile-name {
+  padding-inline: var(--sp-2);
+  margin-block-start: var(--sp-2);
+  font: 800 var(--fs-xl)/1.05 var(--f-display);
+}
+.tile-desc {
+  padding-inline: var(--sp-2);
+  color: var(--text-quiet);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  max-inline-size: 46ch;
+}
+.tile-rec {
+  padding-inline: var(--sp-2);
+  margin-block-start: var(--sp-1);
+  color: var(--record);
+  font: 700 var(--fs-sm) var(--f-num);
+  font-variant-numeric: tabular-nums;
+}
+.tile:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.tile:focus-visible::after { opacity: 1; }
+.tile:not([aria-disabled="true"]):active { scale: 0.98; }
+
+@media (hover: hover) and (pointer: fine) {
+  .tile:not([aria-disabled="true"]):hover { translate: 0 var(--card-lift); border-color: transparent; }
+  .tile:not([aria-disabled="true"]):hover::after { opacity: 1; }
+  .tile:not([aria-disabled="true"]):hover .tile-art svg { scale: var(--card-zoom); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile:not([aria-disabled="true"]):hover { translate: none; }
+  .tile:not([aria-disabled="true"]):hover .tile-art svg { scale: none; }
+}
+
+/* a tile that isn't ready yet: grey, still, no pointer; the words stay readable */
+.tile[aria-disabled="true"] {
+  cursor: default;
+  background: var(--surface-sunk);
+  box-shadow: none;
+}
+.tile[aria-disabled="true"] .tile-art svg { filter: grayscale(1); }
+.tile[aria-disabled="true"]:focus-visible::after { opacity: 0; }
+.tile[aria-disabled="true"] .tile-name { color: var(--text-quiet); }
+.soon {
+  position: absolute;
+  inset-block-start: 22px;
+  inset-inline-end: -46px;
+  rotate: 35deg;
+  padding: 6px 56px;
+  background: var(--c-ink-1);
+  color: var(--bg);
+  font: 800 var(--fs-sm)/1 var(--f-display);
+  letter-spacing: 0.24em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- joining a room by its code ---------- */
+.join {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  justify-self: start;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  backdrop-filter: var(--blur-panel);
+}
+.join label { font-weight: 600; font-size: var(--fs-md); }
+.join input {
+  inline-size: 7.5ch;
+  min-block-size: var(--btn-h);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunk);
+  color: var(--text);
+  font: 700 var(--fs-lg) var(--f-num);
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  transition: border-color var(--dur-hover) ease;
+}
+.join input::placeholder { color: var(--text-quiet); }
+.join input:focus-visible { outline: var(--focus-ring); outline-offset: 2px; border-color: var(--action); }
+.join .ghost-btn { min-block-size: var(--btn-h); padding-block: 0; }
+#pModes[aria-busy="true"] .tile { cursor: progress; }
+
+/* ---------- phones and narrow windows ---------- */
+@media (max-width: 760px) {
+  .tiles-3 { grid-template-columns: 1fr; }
+  .tiles-3 .tile { grid-template-columns: 42% 1fr; grid-template-rows: auto 1fr; column-gap: var(--sp-3); padding: var(--sp-2); }
+  .tiles-3 .tile-art { grid-row: 1 / span 2; aspect-ratio: 4 / 3; }
+  .tiles-3 .tile-name { margin-block-start: var(--sp-1); padding-inline: 0; font-size: var(--fs-lg); }
+  .tiles-3 .tile-desc { padding-inline: 0; }
+  .soon { inset-block-start: 12px; inset-inline-end: -52px; padding: 4px 56px; font-size: var(--fs-xs); }
+}
+@media (max-width: 560px) {
+  .tiles-2 { grid-template-columns: 1fr; }
+  .tiles-2 .tile-art { aspect-ratio: 5 / 2; }
+  .join { display: grid; grid-template-columns: 1fr auto; justify-self: stretch; border-radius: var(--r-lg); }
+  .join label { grid-column: 1 / -1; }
+  .join input { inline-size: 100%; }
+  .join + .status { justify-self: stretch; }
+}
+
+/* ---------- moving between screens ----------
+   The screen you leave slides a little and fades fast; the next one comes in from the
+   side you are heading to. Back is the mirror. Only these two pictures move: the scene
+   behind stays put. With reduced motion: a short fade, nothing slides. */
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-old(screen-out) { animation: screen-leave var(--dur-hover) var(--ease-out) both; }
+::view-transition-new(screen-in) { animation: screen-come var(--dur-screen) var(--ease-out) both; }
+html[data-nav="back"]::view-transition-old(screen-out) { animation-name: screen-leave-back; }
+html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-come-back; }
+@keyframes screen-leave { to { opacity: 0; translate: -24px 0; } }
+@keyframes screen-come { from { opacity: 0; translate: 40px 0; } }
+@keyframes screen-leave-back { to { opacity: 0; translate: 24px 0; } }
+@keyframes screen-come-back { from { opacity: 0; translate: -40px 0; } }
+@keyframes screen-fade-out { to { opacity: 0; } }
+@keyframes screen-fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(screen-out), html[data-nav="back"]::view-transition-old(screen-out) { animation-name: screen-fade-out; }
+  ::view-transition-new(screen-in), html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-fade-in; animation-duration: var(--dur-hover); }
+}
+/* without the View Transitions API: the next screen still comes in, by a class */
+.screen-enter { animation: screen-come var(--dur-screen) var(--ease-out) both; }
+.screen-enter.back { animation-name: screen-come-back; }
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter, .screen-enter.back { animation: screen-fade-in var(--dur-hover) ease both; }
+}

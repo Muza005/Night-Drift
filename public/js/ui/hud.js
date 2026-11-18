@@ -10,5 +10,30 @@ export function setT(id,v){ if(cache[id]!==v){ cache[id]=v; $(id).textContent=v;
 export const hex=c=>'#'+(c>>>0).toString(16).padStart(6,'0');
 export const el=(tag,cls,text)=>{ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; };
 export function info(text){ const d=el('div','info',text); document.querySelector('.hud').appendChild(d); setTimeout(()=>d.remove(),3000); }
-export function showPanel(id){ for(const p of ['pMain','pPause','pOnline','pLobby','pResults','pOver']) $(p).hidden=p!==id; $('menu').hidden=false; }
+// The menu's screens. showPanel(id) shows one of them; with dir ('forward' | 'back') the
+// change is animated: the View Transitions API where there is one (only the two screens
+// move, the scene behind stays still), a CSS class otherwise. A second change while the
+// first is still running takes over from it (the browser skips the first). Returns a
+// promise kept once the new screen is in the page (to move focus there).
+const PANELS=['pHome','pModes','pPause','pLobby','pResults','pOver'];
+export function showPanel(id, dir){
+  const menu=$('menu'), to=$(id);
+  const from=menu.hidden ? null : PANELS.map(p=>$(p)).find(p=>!p.hidden);
+  for(const p of PANELS) $(p).style.viewTransitionName='';
+  const swap=()=>{ for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
+  if(!dir || !from || from===to){ swap(); return Promise.resolve(); }
+  document.documentElement.dataset.nav=dir;
+  if(document.startViewTransition){
+    from.style.viewTransitionName='screen-out';
+    const vt=document.startViewTransition(()=>{ from.style.viewTransitionName=''; swap(); to.style.viewTransitionName='screen-in'; });
+    vt.finished.finally(()=>{ to.style.viewTransitionName=''; }).catch(()=>{});
+    return vt.updateCallbackDone.catch(()=>{});
+  } else {
+    swap();
+    to.classList.remove('screen-enter','back'); void to.offsetWidth;
+    to.classList.add('screen-enter'); to.classList.toggle('back', dir==='back');
+    to.addEventListener('animationend',()=>to.classList.remove('screen-enter','back'),{once:true});
+    return Promise.resolve();
+  }
+}
 export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s.classList.toggle('err',!!err); }

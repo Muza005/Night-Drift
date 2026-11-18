@@ -44,15 +44,16 @@ function errText(e){
   if(/fetch|network|ECONNREFUSED|connect|socket/i.test(m)) return 'Сервер не отвечает. Проверьте адрес в config.js. Бесплатный сервер может просыпаться до минуты: попробуйте ещё раз.';
   return 'Не получилось: '+m;
 }
-function myName(){ const n=$('nameIn').value.trim().slice(0,16)||'Гонщик'; try{localStorage.setItem('nightdrift.name',n);}catch(e){} return n; }
-try{ $('nameIn').value=localStorage.getItem('nightdrift.name')||''; }catch(e){}
+// The name we come into a room with: the last one used (it is changed in the lobby).
+function myName(){ try{ return (localStorage.getItem('nightdrift.name')||'').trim().slice(0,16)||'Гонщик'; }catch(e){ return 'Гонщик'; } }
 // This browser's player id: a room the host kicked us out of knows it and won't let us back.
 const PID=(()=>{ try{ let v=localStorage.getItem('nightdrift.pid'); if(!v){ v=crypto.randomUUID(); localStorage.setItem('nightdrift.pid',v); } return v; }catch(e){ return crypto.randomUUID(); } })();
 
 let connecting=false;
-async function connect(kind){
-  // One attempt at a time. The two buttons are disabled while it runs, but Enter in the
-  // code field is not: a second Enter joined the room a second time, as a second player.
+// kind: 'create' (a room in NET.wantMode, from a mode card) or 'join' (the code typed in)
+export async function connectRoom(kind){
+  // One attempt at a time: a second click or Enter while the first is on its way would
+  // come into the room a second time, as a second player.
   if(connecting || NET.online) return;
   const ep=endpoint();
   if(!ep){ netStatus('netStatus','Онлайн-сервер не настроен. Укажите его адрес в файле config.js.',true); return; }
@@ -61,15 +62,15 @@ async function connect(kind){
   if(kind==='join' && code.length!==4){ netStatus('netStatus','Введите код из 4 символов.',true); return; }
   audioInit();
   connecting=true;
-  $('createRoom').disabled=$('joinRoom').disabled=true;
-  netStatus('netStatus','Подключаюсь…');
+  $('pModes').setAttribute('aria-busy','true'); $('joinRoom').disabled=true;
+  netStatus('netStatus', kind==='create' ? 'Создаю комнату…' : 'Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
     const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     bindRoom(room);
   }catch(e){ netStatus('netStatus',errText(e),true); }
-  finally{ connecting=false; $('createRoom').disabled=$('joinRoom').disabled=false; }
+  finally{ connecting=false; $('pModes').removeAttribute('aria-busy'); $('joinRoom').disabled=false; }
 }
 
 // Clock samples from a worker thread that drawing never blocks (see clock-worker.js).
@@ -182,7 +183,8 @@ export async function leaveOnline(msg){
   // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
   $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
-  showPanel('pOnline'); netStatus('netStatus',msg||'',!!msg);
+  if(G.openModes) G.openModes('online','back'); else showPanel('pModes');
+  netStatus('netStatus',msg||'',!!msg);
   try{ if(r) await r.leave(true); }catch(e){}
 }
 
@@ -405,7 +407,7 @@ function renderLobby(){
   for(const b of $('cfgDur').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(Number(b.dataset.dur)===s.duration)); b.disabled=!isHost; }
   $('cfgDens').hidden = s.mode!=='traffic';
   for(const b of $('cfgDens').querySelectorAll('button')){ b.setAttribute('aria-pressed', String(b.dataset.dens===(s.density||'mid'))); b.disabled=!isHost; }
-  $('cfgNote').textContent = (s.mode==='traffic' ? 'Шоссе на время: больше очков — выше место. Авария (догнал машину на 32+ км/ч быстрее неё) — 3 секунды простоя.' : 'Трасса: 3 круга, кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
+  $('cfgNote').textContent = (s.mode==='traffic' ? 'Трасса на время: больше очков — выше место. Авария (догнал машину на 32+ км/ч быстрее неё) — 3 секунды простоя.' : 'Дрифт: '+s.laps+' '+(s.laps===1?'круг':s.laps<5?'круга':'кругов')+', кто первый.') + (isHost ? '' : ' Режим выбирает хост.');
   netStatus('lobbyStatus', isHost ? (s.players.size<2?'Можно стартовать и одному, чтобы обкатать трассу.':waiting?'Ждём «Готово» от игроков: '+waiting+'.':'') : 'Нажмите «Готово», и хост запустит заезд.');
 }
 export function renderStandings(){
@@ -460,10 +462,8 @@ function renderResults(){
 }
 
 // The menu (main.js) opens the online panel when "С друзьями" + "Трасса" is picked.
-$('backMain').addEventListener('click',()=>{ showPanel('pMain'); });
-$('createRoom').addEventListener('click',()=>connect('create'));
-$('joinRoom').addEventListener('click',()=>connect('join'));
-$('codeIn').addEventListener('keydown',e=>{ if(e.key==='Enter') connect('join'); });
+$('joinForm').addEventListener('submit',e=>{ e.preventDefault(); connectRoom('join'); });
+$('codeIn').addEventListener('input',e=>{ const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''); if(v!==e.target.value) e.target.value=v; });
 $('startRace').addEventListener('click',()=>{
   if(!NET.room) return;
   const s=NET.room.state, me=NET.room.sessionId;
@@ -487,7 +487,5 @@ $('copyLink').addEventListener('click',async()=>{
   try{ await navigator.clipboard.writeText(link); netStatus('lobbyStatus','Ссылка скопирована: '+link); }
   catch(e){ netStatus('lobbyStatus','Скопируйте ссылку вручную: '+link); }
 });
-try{
-  const r=new URLSearchParams(location.search).get('room');
-  if(r){ $('codeIn').value=r.toUpperCase().slice(0,4); showPanel('pOnline'); netStatus('netStatus','Вас пригласили в комнату '+$('codeIn').value+'. Введите имя и нажмите «Войти по коду».'); }
-}catch(e){}
+// The "?room=CODE" invite link: main.js opens the online screen with the code filled in.
+export function inviteCode(){ try{ return (new URLSearchParams(location.search).get('room')||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4); }catch(e){ return ''; } }

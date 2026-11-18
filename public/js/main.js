@@ -7,17 +7,15 @@ import { $, G, NET, drift, isTouch, serverNow } from './state.js';
 import { canvas, renderer, scene, camera, moon, qualityTick } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
-import { car, applyLook } from './player.js';
-import { choice, savePick, renderGarage } from './ui/garage.js';
+import { car } from './player.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
 import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft } from './core/audio.js';
 import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
-import { collideGhosts, updateGhosts, sendState, leaveOnline } from './net/net.js';
-import { setT, fmtN, fmtT, showPanel, netStatus, hex } from './ui/hud.js';
-import { carById, paintHex } from './core/cars.js';
+import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
+import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
 
 if (isTouch) document.body.classList.add('touch');
 const LS = {
@@ -74,6 +72,7 @@ addEventListener('keydown',e=>{
     if((e.code==='KeyP'||e.code==='Escape') && (G.state==='race'||G.state==='count')) pause();
     else if((e.code==='KeyP'||e.code==='Escape') && G.state==='pause'){ e.preventDefault(); resume(); }
   }
+  if(e.code==='Escape' && !e.repeat && G.state==='menu' && !$('pModes').hidden && !$('menu').hidden){ e.preventDefault(); openHome('back'); }
   if(e.code==='KeyM' && !e.repeat) toggleSound();
   if(e.code==='KeyC' && !e.repeat && G.mode && G.mode.toggleCamera) G.mode.toggleCamera();
   if(G.state==='over' && !e.repeat){                           // a fresh press only: a held handbrake skipped the crash screen
@@ -103,59 +102,66 @@ function pause(){ G.state='pause'; clearInput(); audioSuspend(); showPanel('pPau
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
 function toMenu(){
   if(G.state==='pause') audioResume();
-  G.state='menu'; G.mode.idle(car); clearMarks(); dropDrift(); $('count').textContent=''; showPanel('pMain'); renderMenu();
-  (G.mode.id==='traffic' ? $('mTraffic') : $('mTrack')).focus();
+  // back to the mode screen the run was started from, with its records up to date
+  G.state='menu'; G.mode.idle(car); clearMarks(); dropDrift(); $('count').textContent=''; openModes(menuKind,'back');
 }
 // a key press on a focused button also fires its click: act only in the right state
 $('resume').addEventListener('click',()=>{ if(G.state==='pause') resume(); });
 $('restart').addEventListener('click',()=>{ if(G.state==='pause'){ audioResume(); startRace(); } });
 $('pauseMenu').addEventListener('click',()=>{ if(G.state==='pause') toMenu(); });
 
-/* main menu: "Одному / С друзьями" and the two mode cards */
-let together = LS.get('nightdrift.play')==='friends';
+/* ---------- menu screens ----------
+   Home: Одиночная, Онлайн (Карьера is not ready). Either opens the mode screen: Дрифт
+   (track) or Трасса (traffic). Solo, a card starts the run; online, it makes a room in
+   that mode, and a code typed under the cards joins a friend's room. */
 // highway traffic density: low | mid | high (modes/traffic/sim.js DENSITY), remembered;
 // online the host's choice in the lobby wins
 G.density = ['low','mid','high'].includes(LS.get('nightdrift.density')) ? LS.get('nightdrift.density') : 'mid';
-$('densPick').addEventListener('click',e=>{
-  const b=e.target.closest('button'); if(!b || G.state!=='menu') return;
-  G.density=b.dataset.dens; LS.set('nightdrift.density',G.density); renderMenu();
-  if(G.mode.id==='traffic') G.mode.idle(car);           // the road behind the menu shows the new density
-});
-function renderMenu(){
-  $('segSolo').setAttribute('aria-pressed', String(!together));
-  $('segFriends').setAttribute('aria-pressed', String(together));
+let menuKind = 'solo';                   // which mode screen is open: 'solo' | 'online'
+
+function renderRecords(){
   const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
-  $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : '';
-  $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) + ' очков' : '';
-  $('goTrack').textContent = $('goTraffic').textContent = together ? 'Комната с друзьями' : 'Поехали';
-  $('mTrack').classList.toggle('last', G.mode.id==='track');
-  $('mTraffic').classList.toggle('last', G.mode.id==='traffic');
-  for(const b of $('densPick').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.dens===G.density));
-  $('menuNote').textContent = together ? 'Создай комнату и отправь код друзьям. Режим можно сменить и в комнате.' : '';
+  $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : 'Лучшего круга пока нет';
+  $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) : 'Рекорда пока нет';
 }
-// The garage in the main menu: the car and paint for solo runs, and the wish taken into
-// a room (the room may give another colour if a friend already has this one).
-function renderMenuGarage(){
-  renderGarage($('garageMain'), { car: choice.car, paint: choice.paint,
-    onCar: id => { savePick(id, choice.paint); applyLook(choice.car, choice.paint); renderMenuGarage(); },
-    onPaint: c => { savePick(choice.car, c); applyLook(choice.car, choice.paint); renderMenuGarage(); } });
-  // folded, the garage's header still says which car and colour are picked
-  const dot=document.createElement('span'); dot.className='dot'; dot.style.color=dot.style.background=hex(paintHex(choice.paint, choice.car));
-  $('garageSum').replaceChildren(dot, carById(choice.car).name);
+// Focus moves with the screens when they are changed, so the keyboard carries on where the
+// eye is; on the very first screen nothing is focused (no ring on a card nobody chose).
+// After a click or tap the ring stays hidden (focusVisible: false): it is for keyboards.
+let viaKeys = false;
+addEventListener('keydown', () => { viaKeys = true; }, true);
+addEventListener('pointerdown', () => { viaKeys = false; }, true);
+const moveFocus = el => el.focus({ preventScroll: true, focusVisible: viaKeys });
+function openHome(dir){
+  const was = menuKind;
+  menuKind = 'solo';
+  showPanel('pHome', dir).then(()=>{ if(dir) moveFocus($(was==='online' ? 'goOnline' : 'goSolo')); });
 }
-renderMenuGarage();
-function setTogether(v){ together=v; LS.set('nightdrift.play', v?'friends':'solo'); renderMenu(); }
-$('segSolo').addEventListener('click',()=>setTogether(false));
-$('segFriends').addEventListener('click',()=>setTogether(true));
+// kind: 'solo' | 'online'; dir: how the screen comes in
+function openModes(kind, dir){
+  menuKind = kind;
+  const online = kind==='online';
+  $('modesTitle').textContent = online ? 'Онлайн' : 'Одиночная';
+  $('modesNote').hidden = $('joinForm').hidden = !online;
+  for(const id of ['mTrack','mTraffic']) $(id).setAttribute('aria-label', $(id).querySelector('.tile-name').textContent + (online ? ': создать комнату' : ': начать заезд'));
+  netStatus('netStatus','');
+  renderRecords();
+  showPanel('pModes', dir).then(()=>{ if(dir) moveFocus(G.mode.id==='traffic' ? $('mTraffic') : $('mTrack')); });
+}
+G.openModes = openModes;                 // net.js: back here after leaving a room
+$('goSolo').addEventListener('click',()=>{ if(G.state==='menu') openModes('solo','forward'); });
+$('goOnline').addEventListener('click',()=>{ if(G.state==='menu') openModes('online','forward'); });
+// Карьера: not ready. aria-disabled keeps it in the tab order, so it can be found and its
+// "скоро" read out; it does nothing.
+$('modesBack').addEventListener('click',()=>{ if(G.state==='menu') openHome('back'); });
+
 async function pick(id){
   if(G.state!=='menu') return;
-  if(together){
-    await setMode(id);
-    NET.wantMode = id;                   // a room created now starts in this mode
-    showPanel('pOnline'); netStatus('netStatus',''); $('nameIn').focus();
+  await setMode(id);
+  if(menuKind==='online'){
+    NET.wantMode = id;                   // the room starts in this mode
+    connectRoom('create');
     return;
   }
-  await setMode(id);
   startRace();
 }
 $('mTrack').addEventListener('click',()=>pick('track'));
@@ -181,10 +187,11 @@ function showOver(){
 }
 $('retry').addEventListener('click',()=>{ if(G.state==='over') startRace(true); });
 $('overMenu').addEventListener('click',()=>{ if(G.state==='over') toMenu(); });
-renderMenu();
 G.mode.idle(car);
-// The "?room=CODE" invite link opens the online panel: that is the track, with friends.
-if(!$('pOnline').hidden){ together=true; renderMenu(); }
+// The "?room=CODE" invite link opens the online screen with the code filled in.
+{ const code=inviteCode();
+  if(code){ openModes('online'); $('codeIn').value=code; netStatus('netStatus','Вас пригласили в комнату '+code+'. Нажмите «Войти».'); $('joinRoom').focus(); }
+  else openHome(); }
 
 /* ---------- loop ---------- */
 let last=performance.now(), menuA=0;

@@ -170,29 +170,6 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .seg button[aria-pressed="true"]{background:linear-gradient(180deg,#8af7ff,var(--cyan));color:var(--night);box-shadow:0 4px 18px rgba(62,240,255,.35)}
 .seg button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 /* main menu: the two modes */
-.modes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.mode-col{display:grid;align-content:start}
-.mode-card{display:grid;gap:8px;grid-template-rows:auto auto auto 1fr;align-content:start;text-align:left;font:inherit;color:var(--ink);background:rgba(10,11,24,.72);border:1px solid var(--edge);border-radius:var(--r-lg);padding:16px;cursor:pointer;overflow:hidden;transition:border-color .15s,box-shadow .15s,transform .15s}
-.mode-card:hover{border-color:var(--rose);box-shadow:0 12px 40px rgba(255,59,107,.22);transform:translateY(-2px)}
-.mode-card.traffic:hover{border-color:var(--cyan);box-shadow:0 12px 40px rgba(62,240,255,.2)}
-.mode-card:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
-.mode-card.last{border-color:rgba(255,255,255,.34)}
-.mc-art{display:block;margin:-16px -16px 6px;height:112px;background:#0a0b18}
-.mc-art svg{display:block;width:100%;height:100%}
-.mc-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--rose)}
-.mode-card.traffic .mc-kicker{color:var(--cyan)}
-.mc-title{font-family:var(--f-display);font-weight:800;font-size:clamp(22px,4vw,28px);line-height:1}
-.mc-desc{font-size:13.5px;line-height:1.5;color:var(--dim)}
-.mc-best{font-size:13px;color:var(--amber);min-height:1.2em}
-.mc-go{margin-top:2px;text-align:center;font:800 14px var(--f-display);color:var(--night);background:linear-gradient(180deg,#ff6f93,var(--rose));border-radius:999px;padding:12px 16px;box-shadow:0 6px 22px rgba(255,59,107,.35)}
-.mode-card.traffic .mc-go{background:linear-gradient(180deg,#8af7ff,var(--cyan));box-shadow:0 6px 22px rgba(62,240,255,.32)}
-.mode-card[aria-disabled="true"]{cursor:not-allowed;opacity:.55;transform:none;box-shadow:none;border-color:var(--edge)}
-/* the highway card carries its traffic density picker as a footer */
-.mode-col .mode-card{border-bottom-left-radius:0;border-bottom-right-radius:0}
-.mode-col .mode-card:hover{transform:none}
-.dens{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--edge);border-top:0;border-radius:0 0 var(--r-lg) var(--r-lg);background:rgba(10,11,24,.72)}
-.dens .seg{padding:3px}
-.dens .seg button{padding:7px 12px;min-height:36px;font-size:12px}
 #menuNote:empty{display:none}
 .howto{border:1px solid var(--edge);border-radius:var(--r-md);background:rgba(8,9,20,.45);padding:4px 16px}
 .howto summary{cursor:pointer;color:var(--dim);font-size:14px;font-weight:700;padding:8px 0}
@@ -289,9 +266,6 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .res .me td{background:rgba(62,240,255,.09);border-color:rgba(62,240,255,.35)}
 .res-wrap{overflow-x:auto}
 @media (max-width:620px){
-  .modes,.ways{grid-template-columns:1fr}
-  .mc-art{height:84px}
-  .mc-desc{font-size:13px}
   .plist{grid-template-columns:1fr}
   .seg button{padding:10px 14px}
   .code-big .code{font-size:32px;line-height:50px;height:50px;width:222px;letter-spacing:36.8px;padding-left:14.4px;background-size:56px 50px}
@@ -311,10 +285,11 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 body{margin:0}
 *,*::before,*::after{box-sizing:border-box}
 </style>
+<link rel="stylesheet" href="css/screens.css">
 </head>
 <body>
 
-<canvas id="c" tabindex="0" aria-label="Игровое поле"></canvas>
+<canvas id="c" tabindex="-1" aria-label="Игровое поле"></canvas>
 
 <div class="hud">
   <div id="lapbox" class="panel">
@@ -376,22 +351,82 @@ body{margin:0}
 </div>
 
 <div id="menu">
-  <div class="card card-main" id="pMain">
+  <section class="screen" id="pHome" aria-labelledby="homeTitle">
     <header class="brand">
-      <h1>Night <span>Drift</span></h1>
-      <p class="tagline">Ночной дрифт по трассе и шоссе с трафиком — в одиночку или с друзьями.</p>
+      <h1 id="homeTitle">Night <span>Drift</span></h1>
+      <p class="tagline">Ночной город, неон и занос. Один или с друзьями.</p>
     </header>
-    <div class="seg" role="group" aria-label="Как играть">
-      <button type="button" id="segSolo" aria-pressed="true">Одному</button>
-      <button type="button" id="segFriends" aria-pressed="false">С друзьями</button>
+    <div class="tiles tiles-3">
+      <button type="button" class="tile" id="goSolo" style="--tile-accent:var(--c-cyan)">
+        <span class="tile-art" aria-hidden="true"><svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="hSky1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d1238"/><stop offset=".55" stop-color="#151a44"/><stop offset="1" stop-color="#07080f"/></linearGradient>
+            <radialGradient id="hBeam1" cx=".5" cy="1" r=".75"><stop offset="0" stop-color="#e8f4ff" stop-opacity=".55"/><stop offset="1" stop-color="#e8f4ff" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="200" fill="url(#hSky1)"/>
+          <g fill="#0a0c1c"><rect x="8" y="58" width="26" height="66"/><rect x="38" y="40" width="20" height="84"/><rect x="62" y="70" width="30" height="54"/><rect x="226" y="52" width="24" height="72"/><rect x="254" y="30" width="22" height="94"/><rect x="280" y="66" width="34" height="58"/></g>
+          <g fill="#3ef0ff" fill-opacity=".55"><rect x="42" y="50" width="3" height="3"/><rect x="50" y="62" width="3" height="3"/><rect x="258" y="42" width="3" height="3"/><rect x="266" y="58" width="3" height="3"/><rect x="232" y="64" width="3" height="3"/></g>
+          <g fill="#ff3b6b" fill-opacity=".6"><rect x="70" y="80" width="3" height="3"/><rect x="290" y="78" width="3" height="3"/><rect x="14" y="70" width="3" height="3"/></g>
+          <path d="M0 200L150 120h20L320 200z" fill="#161a2e"/>
+          <path d="M0 200L150 120" stroke="#3ef0ff" stroke-width="2"/><path d="M320 200L170 120" stroke="#3ef0ff" stroke-width="2"/>
+          <path d="M160 200V124" stroke="#eef0ff" stroke-opacity=".5" stroke-width="2" stroke-dasharray="10 12"/>
+          <ellipse cx="160" cy="150" rx="70" ry="34" fill="url(#hBeam1)"/>
+          <g transform="translate(160 176)"><ellipse rx="44" ry="9" fill="#3ef0ff" fill-opacity=".3"/><rect x="-34" y="-30" width="68" height="28" rx="10" fill="#ff3b6b"/><rect x="-24" y="-38" width="48" height="14" rx="6" fill="#101c30"/><rect x="-30" y="-16" width="14" height="4" rx="2" fill="#ff1a3c"/><rect x="16" y="-16" width="14" height="4" rx="2" fill="#ff1a3c"/></g>
+        </svg></span>
+        <span class="tile-name">Одиночная</span>
+        <span class="tile-desc">Дрифт по кругам или трасса с трафиком. Только ты и ночь.</span>
+      </button>
+      <button type="button" class="tile" id="goOnline" style="--tile-accent:var(--c-rose)">
+        <span class="tile-art" aria-hidden="true"><svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="hSky2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1240"/><stop offset=".6" stop-color="#1b1446"/><stop offset="1" stop-color="#07080f"/></linearGradient>
+            <radialGradient id="hGlow2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ff3b6b" stop-opacity=".5"/><stop offset="1" stop-color="#ff3b6b" stop-opacity="0"/></radialGradient>
+          </defs>
+          <rect width="320" height="200" fill="url(#hSky2)"/>
+          <ellipse cx="160" cy="60" rx="150" ry="50" fill="url(#hGlow2)"/>
+          <path d="M0 200L120 110h80L320 200z" fill="#161a2e"/>
+          <path d="M18 186h284" stroke="#eef0ff" stroke-opacity=".7" stroke-width="3" stroke-dasharray="8 8"/>
+          <g stroke="#eef0ff" stroke-opacity=".35" stroke-width="1.5" stroke-dasharray="7 9"><path d="M107 200L146 112"/><path d="M213 200L174 112"/></g>
+          <g transform="translate(70 172)"><ellipse rx="34" ry="7" fill="#3ef0ff" fill-opacity=".3"/><rect x="-27" y="-24" width="54" height="22" rx="8" fill="#3ef0ff"/><rect x="-19" y="-30" width="38" height="11" rx="5" fill="#101c30"/></g>
+          <g transform="translate(160 178)"><ellipse rx="36" ry="7" fill="#ff3b6b" fill-opacity=".32"/><rect x="-29" y="-26" width="58" height="24" rx="8" fill="#ff3b6b"/><rect x="-20" y="-33" width="40" height="12" rx="5" fill="#101c30"/></g>
+          <g transform="translate(250 172)"><ellipse rx="34" ry="7" fill="#ffc23d" fill-opacity=".3"/><rect x="-27" y="-24" width="54" height="22" rx="8" fill="#ffc23d"/><rect x="-19" y="-30" width="38" height="11" rx="5" fill="#101c30"/></g>
+        </svg></span>
+        <span class="tile-name">Онлайн</span>
+        <span class="tile-desc">Комната до 6 игроков и общий старт. Друзьям нужен только код.</span>
+      </button>
+      <button type="button" class="tile" id="goCareer" aria-disabled="true" aria-describedby="careerSoon">
+        <span class="tile-art" aria-hidden="true"><svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice">
+          <rect width="320" height="200" fill="#12142a"/>
+          <g fill="#262a48"><rect x="70" y="118" width="60" height="82"/><rect x="130" y="92" width="60" height="108"/><rect x="190" y="136" width="60" height="64"/></g>
+          <g fill="#4a4f78" font-family="Unbounded,sans-serif" font-weight="800" font-size="22" text-anchor="middle"><text x="100" y="150">2</text><text x="160" y="124">1</text><text x="220" y="166">3</text></g>
+          <path d="M146 46h28v12a14 14 0 0 1-28 0z M140 50h6v6a6 6 0 0 1-6-6z M174 50h6a6 6 0 0 1-6 6z M156 70h8v10h-8z M150 80h20v6h-20z" fill="#4a4f78"/>
+        </svg><span class="soon">SOON</span></span>
+        <span class="tile-name">Карьера</span>
+        <span class="tile-desc" id="careerSoon">Скоро: сезон заездов и свой гараж.</span>
+      </button>
     </div>
-    <details class="garage-box" id="garageBox">
-      <summary><span class="lbl">Гараж</span><span id="garageSum"></span></summary>
-      <div class="garage" id="garageMain"></div>
+    <details class="howto">
+      <summary>Управление</summary>
+      <div class="keys">
+        <kbd>W / ↑</kbd><span>газ</span>
+        <kbd>S / ↓</kbd><span>тормоз и задний ход</span>
+        <kbd>A D / ← →</kbd><span>руль</span>
+        <kbd>Пробел</kbd><span>ручник, срыв в занос</span>
+        <kbd>R</kbd><span>вернуться на дорогу</span>
+        <kbd>P · M</kbd><span>пауза · звук</span>
+      </div>
+      <div class="tip">Занос: дай руль, коротко дёрни ручник и сразу жми газ, угол лови контррулём. На телефоне — кнопки на экране.</div>
     </details>
-    <div class="modes">
-      <button type="button" class="mode-card" id="mTrack" data-mode="track">
-        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+  </section>
+
+  <section class="screen" id="pModes" hidden aria-labelledby="modesTitle">
+    <header class="screen-bar">
+      <button type="button" class="icon-btn" id="modesBack" aria-label="Назад на главный экран"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <h1 id="modesTitle">Одиночная</h1>
+    </header>
+    <div class="tiles tiles-2">
+      <button type="button" class="tile mode-tile" id="mTrack" data-mode="track" style="--tile-accent:var(--c-rose)">
+        <span class="tile-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
           <defs>
             <linearGradient id="aSky1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1240"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
             <radialGradient id="aGlow1" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ff3b6b" stop-opacity=".55"/><stop offset="1" stop-color="#ff3b6b" stop-opacity="0"/></radialGradient>
@@ -411,15 +446,12 @@ body{margin:0}
             <rect x="7" y="-4.5" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/><rect x="7" y="2.1" width="5" height="2.4" rx="1.2" fill="#3ef0ff"/>
           </g>
         </svg></span>
-        <span class="mc-kicker">Дрифт</span>
-        <span class="mc-title">Трасса</span>
-        <span class="mc-desc">13 поворотов ночного города. Входи боком и держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
-        <span class="mc-best" id="bestTrack"></span>
-        <span class="mc-go" id="goTrack">Поехали</span>
+        <span class="tile-name">Дрифт</span>
+        <span class="tile-desc">13 поворотов ночного города. Держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
+        <span class="tile-rec" id="bestTrack">Лучший круг —</span>
       </button>
-      <div class="mode-col">
-      <button type="button" class="mode-card traffic" id="mTraffic" data-mode="traffic">
-        <span class="mc-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
+      <button type="button" class="tile mode-tile" id="mTraffic" data-mode="traffic" style="--tile-accent:var(--c-cyan)">
+        <span class="tile-art" aria-hidden="true"><svg viewBox="0 0 320 112" preserveAspectRatio="xMidYMid slice">
           <defs>
             <linearGradient id="aSky2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d1238"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
             <radialGradient id="aGlow2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#3ef0ff" stop-opacity=".5"/><stop offset="1" stop-color="#3ef0ff" stop-opacity="0"/></radialGradient>
@@ -434,36 +466,19 @@ body{margin:0}
           <g><rect x="176" y="56" width="23" height="16" rx="5.5" fill="#f0b429"/><rect x="179" y="58" width="17" height="6" rx="2.5" fill="#101c30"/><rect x="178" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/><rect x="192" y="66" width="5" height="2.6" rx="1.3" fill="#ff1a3c"/></g>
           <g><ellipse cx="124" cy="101" rx="30" ry="9" fill="#3ef0ff" fill-opacity=".25"/><rect x="104" y="76" width="40" height="25" rx="9" fill="#ff3b6b"/><rect x="110" y="79" width="28" height="9" rx="4" fill="#101c30"/><rect x="108" y="91.5" width="32" height="3" rx="1.5" fill="#ff8aa6"/></g>
         </svg></span>
-        <span class="mc-kicker">Трафик</span>
-        <span class="mc-title">Шоссе</span>
-        <span class="mc-desc">Бесконечный поток. Обгоняй впритык выше 80 км/ч, копи комбо до ×5. Догнал машину быстрее неё на 32+ км/ч или ударил в борт на 50+ — авария.</span>
-        <span class="mc-best" id="bestTraffic"></span>
-        <span class="mc-go" id="goTraffic">Поехали</span>
+        <span class="tile-name">Трасса</span>
+        <span class="tile-desc">Шоссе с потоком машин. Обгоняй впритык выше 80 км/ч и копи комбо до ×5.</span>
+        <span class="tile-rec" id="bestTraffic">Рекорд —</span>
       </button>
-      <div class="dens">
-        <span class="lbl" id="densLbl">Плотность</span>
-        <div class="seg" id="densPick" role="group" aria-labelledby="densLbl">
-          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
-          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
-          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
-        </div>
-      </div>
-      </div>
     </div>
-    <div class="status" id="menuNote" role="status"></div>
-    <details class="howto">
-      <summary>Управление</summary>
-      <div class="keys">
-        <kbd>W / ↑</kbd><span>газ</span>
-        <kbd>S / ↓</kbd><span>тормоз и задний ход</span>
-        <kbd>A D / ← →</kbd><span>руль</span>
-        <kbd>Пробел</kbd><span>ручник, срыв в занос</span>
-        <kbd>R</kbd><span>вернуться на дорогу</span>
-        <kbd>P · M</kbd><span>пауза · звук</span>
-      </div>
-      <div class="tip">Занос: дай руль, коротко дёрни ручник и сразу жми газ, угол лови контррулём. На телефоне — кнопки на экране.</div>
-    </details>
-  </div>
+    <p class="screen-note" id="modesNote" hidden>Карточка создаёт комнату с этим режимом. Код комнаты будет в лобби.</p>
+    <form class="join" id="joinForm" hidden>
+      <label for="codeIn">Есть код комнаты?</label>
+      <input id="codeIn" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD" aria-describedby="netStatus">
+      <button class="ghost-btn" id="joinRoom" type="submit">Войти</button>
+    </form>
+    <div class="status" id="netStatus" role="status"></div>
+  </section>
 
   <div class="card" id="pPause" hidden>
     <h1>Пауза</h1>
@@ -473,26 +488,6 @@ body{margin:0}
       <button class="ghost-btn" id="pauseMenu" type="button">В меню</button>
     </div>
     <div class="tip">P или Esc — продолжить.</div>
-  </div>
-
-  <div class="card" id="pOnline" hidden>
-    <button class="back" id="backMain" type="button">← Назад</button>
-    <h1>Заезд <span>с друзьями</span></h1>
-    <p>До 6 игроков в комнате, общий старт. Трасса — 3 круга, кто первый. Шоссе — заезд на время по общему трафику: больше очков — выше место. Машины сталкиваются, можно толкаться.</p>
-    <label class="field"><span class="lbl">Ваше имя</span><input id="nameIn" maxlength="16" autocomplete="nickname" placeholder="Например, Muza"></label>
-    <div class="ways">
-      <div class="way">
-        <b>Новая комната</b>
-        <p>Создайте комнату и отправьте друзьям её код или ссылку.</p>
-        <button class="cta small" id="createRoom" type="button">Создать комнату</button>
-      </div>
-      <div class="way">
-        <b>Есть код?</b>
-        <label class="field"><span class="lbl">Код комнаты</span><input id="codeIn" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
-        <button class="ghost-btn" id="joinRoom" type="button">Войти по коду</button>
-      </div>
-    </div>
-    <div class="status" id="netStatus" role="status"></div>
   </div>
 
   <div class="card" id="pLobby" hidden>
@@ -505,8 +500,8 @@ body{margin:0}
       <div class="cfg-row">
         <span class="lbl">Режим</span>
         <div class="seg" id="cfgMode" role="group" aria-label="Режим">
-          <button type="button" data-mode="track" aria-pressed="true">Трасса</button>
-          <button type="button" data-mode="traffic" aria-pressed="false">Шоссе</button>
+          <button type="button" data-mode="track" aria-pressed="true">Дрифт</button>
+          <button type="button" data-mode="traffic" aria-pressed="false">Трасса</button>
         </div>
       </div>
       <div class="cfg-row" id="rowDur" hidden>
@@ -554,7 +549,7 @@ body{margin:0}
   </div>
 
   <div class="card" id="pOver" hidden>
-    <h1>Авария <span>на шоссе</span></h1>
+    <h1>Авария <span>на трассе</span></h1>
     <div class="over-score">
       <span class="lbl">Очки</span>
       <b class="num" id="overScore">0</b>
