@@ -480,6 +480,57 @@ body{margin:0}
     <div class="status" id="netStatus" role="status"></div>
   </section>
 
+  <!-- The garage: pick a car and its paint on the stand. Solo it comes after the mode card
+       (title = the mode, "!" = the run's settings, "Поехали"); from the lobby it is "Гараж"
+       with "Выбрать". js/ui/garageScreen.js runs it. -->
+  <section class="screen garage" id="pGarage" hidden aria-labelledby="garTitle">
+    <header class="screen-bar">
+      <button type="button" class="icon-btn" id="garBack" aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <h1 id="garTitle">Гараж</h1>
+      <button type="button" class="icon-btn bang" id="garSet" popovertarget="garSetPop" aria-label="Настройки заезда"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v9" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="19" r="1.7" fill="currentColor"/></svg></button>
+      <button type="button" class="pill-btn" id="garPaint" popovertarget="garPaintPop"><span class="swatch" id="garSwatch" aria-hidden="true"></span>Цвет</button>
+    </header>
+    <div class="gar-head">
+      <h2 id="garName">—</h2>
+      <p class="gar-tag"><span class="gar-class" id="garClass"></span><span id="garTag"></span></p>
+    </div>
+    <div class="gar-stage">
+      <button type="button" class="gar-arrow" id="garPrev" aria-label="Предыдущая машина"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="gar-stand" id="garStand"></div>
+      <button type="button" class="gar-arrow" id="garNext" aria-label="Следующая машина"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+    <div class="gar-foot">
+      <div class="gar-stats" id="garStats"></div>
+      <button type="button" class="cta" id="garGo">Поехали</button>
+    </div>
+    <p class="vh" id="garLive" role="status"></p>
+
+    <div class="pop" id="garSetPop" popover aria-labelledby="garSetTitle">
+      <h3 id="garSetTitle">Настройки заезда</h3>
+      <div class="set-laps" id="setLaps">
+        <span class="set-name" id="lapsName">Круги</span>
+        <div class="stepper" role="group" aria-labelledby="lapsName">
+          <button type="button" class="icon-btn" id="lapsDown" aria-label="Меньше кругов"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+          <output id="lapsOut" aria-live="polite">3</output>
+          <button type="button" class="icon-btn" id="lapsUp" aria-label="Больше кругов"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+      <fieldset class="set-dens" id="setDens">
+        <legend class="set-name">Трафик</legend>
+        <div class="seg-radio">
+          <label><input type="radio" name="dens" value="low"><span>Низкий</span></label>
+          <label><input type="radio" name="dens" value="mid"><span>Средний</span></label>
+          <label><input type="radio" name="dens" value="high"><span>Высокий</span></label>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="pop paint-pop" id="garPaintPop" popover aria-labelledby="paintTitle">
+      <h3 id="paintTitle">Цвет: <span id="paintName">Заводской</span></h3>
+      <div class="swatches" id="garSwatches" role="group" aria-labelledby="paintTitle"></div>
+    </div>
+  </section>
+
   <div class="card" id="pPause" hidden>
     <h1>Пауза</h1>
     <div class="row-btns">
@@ -549,9 +600,9 @@ body{margin:0}
   </div>
 
   <div class="card" id="pOver" hidden>
-    <h1>Авария <span>на трассе</span></h1>
+    <h1 id="overTitle">Авария <span>на трассе</span></h1>
     <div class="over-score">
-      <span class="lbl">Очки</span>
+      <span class="lbl" id="overLbl">Очки</span>
       <b class="num" id="overScore">0</b>
       <span class="rec" id="overRecord" hidden>Новый рекорд</span>
       <span class="best" id="overBest"></span>
@@ -559,9 +610,9 @@ body{margin:0}
     <div class="over-stats" id="overStats"></div>
     <div class="row-btns">
       <button class="cta" id="retry" type="button">Ещё раз</button>
-      <button class="ghost-btn" id="overMenu" type="button">В меню</button>
+      <button class="ghost-btn" id="overMenu" type="button">В гараж</button>
     </div>
-    <div class="tip">Пробел или Enter — сразу ещё раз, Esc — в меню.</div>
+    <div class="tip">Пробел или Enter — сразу ещё раз, Esc — в гараж.</div>
   </div>
 </div>
 

@@ -3,7 +3,8 @@
 // of this kind (the player's and the other players') shares them.
 import { scene, glowTex, carEnv } from './render.js';
 import { coupeShape, wheelShape } from './carShapes.js';
-import { setPaint } from './carModels.js';
+import { setPaint, makeModel } from './carModels.js';
+import { paintHex, carById } from './cars.js';
 
 let SHAPE = null;
 function shapes(){
@@ -43,7 +44,63 @@ export function makeCar(color, local){
     root.add(spot, spot.target);
   }
   scene.add(root);
-  return {root, body, wheels, pivots, tailMat, under, paint, lastMark:[null,null], spin:0, roll:0};
+  // the coupe's own parts: its body meshes and its four wheel pivots (not `body` itself)
+  const proc = { parts: [...body.children, ...root.children.filter(o => o.isGroup && o !== body)], wheels, pivots, tailMat, paint };
+  return {root, body, wheels, pivots, tailMat, under, paint, proc, lastMark:[null,null], spin:0, roll:0};
+}
+
+// Put the 3D model of car `carId` (core/cars.js, painted `code`) on a car made by makeCar,
+// in place of the coupe built from shapes. The car keeps its fields: body (roll, pitch),
+// wheels (spin; front-left, front-right, rear-left, rear-right), pivots (steering),
+// tailMat (brake lights), paint. Where a model's wheels are part of its body, there are
+// none to turn; where its tail lights are only painted in the texture, a red glow comes up
+// over them on braking.
+// Loads once per model; a later call wins over one still loading.
+const glowGeo = new THREE.PlaneGeometry(1, 1).rotateY(Math.PI); glowGeo.userData.shared = true;   // faces backwards
+export async function dressCar(m, carId, code){
+  const my = m.dressing = (m.dressing || 0) + 1;
+  let inst;
+  try { inst = await makeModel(carId, code, carEnv); }
+  catch(e){ console.warn('car model failed, the coupe stays', carId, e); return null; }
+  if(my !== m.dressing){ inst.dispose(); return null; }
+  undress(m);
+  inst.root.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  m.body.add(inst.root);
+  for(const o of m.proc.parts) o.visible = false;
+  m.model = inst;
+  m.paint = inst.paint;
+  // the headlight beam starts just in front of the bumper (inside a taller body it lit the car itself)
+  const spot = m.root.children.find(o => o.isSpotLight);
+  if(spot) spot.position.set(0, 0.75, inst.size.z / 2 + 0.25);
+  m.wheels = inst.wheels.length >= 4 ? inst.wheels.slice(0, 4) : [];
+  m.pivots = m.wheels.filter(w => w.userData.wheel.front);
+  if(inst.tails.length){
+    // one number drives every tail-light material of the model
+    m.tailMat = { set emissiveIntensity(v){ for(const t of inst.tails) t.emissiveIntensity = v * 0.5; } };
+  } else {
+    // the lights are painted in the texture: on braking a soft red glow comes up over them
+    const size = inst.size;                       // the model's own size (wheels at y 0, centred)
+    const [y, x, w] = carById(carId).tail || [0.52, 0.3, 0.3];
+    const mat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0xff1a3c, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    for(const side of [1, -1]){
+      const g = new THREE.Mesh(glowGeo, mat);
+      g.scale.set(size.x * w, size.x * w * 0.55, 1);
+      g.position.set(side * size.x * x, size.y * y, -size.z / 2 - 0.04);
+      inst.root.add(g);
+    }
+    inst.strips = mat;
+    // driven like the coupe's tail material: 1.4 is lights on, 4.5 is braking
+    m.tailMat = { set emissiveIntensity(v){ mat.opacity = Math.max(0, Math.min(1, (v - 1.4) / 3.1)) * 0.95; } };
+  }
+  return inst;
+}
+function undress(m){
+  if(!m.model) return;
+  if(m.model.strips) m.model.strips.dispose();
+  m.model.dispose(); m.model = null;
+  for(const o of m.proc.parts) o.visible = true;
+  const spot = m.root.children.find(o => o.isSpotLight); if(spot) spot.position.set(0, 1, 1.9);
+  Object.assign(m, { wheels: m.proc.wheels, pivots: m.proc.pivots, tailMat: m.proc.tailMat, paint: m.proc.paint });
 }
 export function disposeCar(m){
   scene.remove(m.root);

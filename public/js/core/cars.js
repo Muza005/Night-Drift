@@ -21,6 +21,9 @@
 // ones also have "Glass" (the windows). core/carModels.js loads and recolours them.
 // factory: the colour of the model's own Paint material (sRGB), the "Заводской" paint;
 // tests/cars.test.mjs checks it against the file.
+// tail: models whose tail lights are only painted in their texture get a red glow over
+// them on braking: [height, distance from the middle, glow size], as parts of the model's
+// height and width.
 
 export const BASE = Object.freeze({ vmax: 1, acc: 1, brake: 1, grip: 1, slide: 1, turn: 1, dirt: 1 });
 const S = o => Object.freeze({ ...BASE, ...o });
@@ -42,7 +45,7 @@ export const CARS = [
     stats: BASE },
 
   // JDM: the drift cars. Both hold a slide easily; one grips, one is pure drift.
-  { id: 'gtr',    cls: 'jdm',    name: 'Skyline GT-R R32', model: 'models/cars/nissan_gtr_r32.glb', factory: 0x2f2f2f,
+  { id: 'gtr',    cls: 'jdm',    name: 'Skyline GT-R R32', model: 'models/cars/nissan_gtr_r32.glb', factory: 0x2f2f2f, tail: [0.57, 0.27, 0.3],
     tag: 'Полный привод: цепкий и резвый с места, легко идёт в занос, но невысокая максималка',
     stats: S({ vmax: 0.98, acc: 1.03, brake: 1.01, grip: 1.04, slide: 0.95, turn: 1.02 }) },
   { id: 'rx7',    cls: 'jdm',    name: 'Mazda RX-7',   model: 'models/cars/lowpoly_stylized_rx_7_free.glb', factory: 0xfc6d00,
@@ -55,7 +58,7 @@ export const CARS = [
     stats: S({ vmax: 1.02, acc: 1.03, brake: 0.94, grip: 0.94, slide: 0.94, turn: 0.95 }) },
 
   // Super: the fastest car; planted, so a drift dies quickly.
-  { id: 'super',  cls: 'super',  name: 'Lamborghini',  model: 'models/cars/sports_car.glb', factory: 0xe22727,
+  { id: 'super',  cls: 'super',  name: 'Lamborghini',  model: 'models/cars/sports_car.glb', factory: 0xe22727, tail: [0.68, 0.33, 0.3],
     tag: 'Самая высокая максималка, но неохотно поворачивает и не любит занос',
     stats: S({ vmax: 1.05, acc: 1.0, brake: 1.03, grip: 0.92, slide: 1.0, turn: 0.92 }) },
 
@@ -63,12 +66,12 @@ export const CARS = [
   { id: 'sedan',  cls: 'sedan',  name: 'Ford',         model: 'models/cars/generic_sedan_car.glb', factory: 0x656770,
     tag: 'Для новичка: устойчивый, отличные тормоза, прощает ошибки, но неторопливый',
     stats: S({ vmax: 0.98, acc: 0.97, brake: 1.06, grip: 1.05, slide: 1.06, turn: 1.0 }) },
-  { id: 'nexus',  cls: 'sedan',  name: 'Nexus RX',     model: 'models/cars/nexus_rx.glb', factory: 0x4f5471,
+  { id: 'nexus',  cls: 'sedan',  name: 'Nexus RX',     model: 'models/cars/nexus_rx.glb', factory: 0x4f5471, tail: [0.6, 0.36, 0.3],
     tag: 'Электромобиль: лучший разгон с места, но скромная максималка и тяжёлый в повороте',
     stats: S({ vmax: 0.96, acc: 1.08, brake: 1.02, grip: 1.02, slide: 1.03, turn: 0.93 }) },
 
   // Rally: agile, at home off the asphalt, slow at the top.
-  { id: 'rally',  cls: 'rally',  name: 'Rally',        model: 'models/cars/everest.glb', factory: 0x1f5cff,
+  { id: 'rally',  cls: 'rally',  name: 'Rally',        model: 'models/cars/everest.glb', factory: 0x1f5cff, tail: [0.66, 0.4, 0.26],
     tag: 'Вёрткий, уверенно скользит и лучше всех едет по бездорожью, но низкая максималка',
     stats: S({ vmax: 0.95, acc: 1.02, brake: 1.0, grip: 1.03, slide: 0.97, turn: 1.06, dirt: 1.25 }) },
 ];
@@ -118,5 +121,17 @@ export function statBars(stats) {
     ['Поворот', bar(stats.turn)],
     ['Занос', bar(2 - stats.slide)],      // less grip in a slide: an easier, longer drift
     ['Бездорожье', bar(1 + (stats.dirt - 1) / 4)],   // +20 % off-road pull shows as +3
+  ];
+}
+
+// The garage's five bars (the same 0..10 scale): what a player compares between cars.
+// Управление is how fast the nose turns in; Занос, how easily a slide is held.
+export function garageBars(stats){
+  return [
+    ['Скорость', bar(stats.vmax)],
+    ['Разгон', bar(stats.acc)],
+    ['Управление', bar(stats.turn)],
+    ['Сцепление', bar(stats.grip)],
+    ['Занос', bar(2 - stats.slide)],
   ];
 }

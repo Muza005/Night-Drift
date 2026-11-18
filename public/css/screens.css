@@ -254,3 +254,171 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   cursor: grab;
 }
 .stand.grabbing { cursor: grabbing; }
+
+/* visually hidden, still read out */
+.vh { position: absolute !important; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* a pill button with a word (Цвет) */
+.pill-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  min-block-size: var(--btn-h); padding: 0 var(--sp-4) 0 var(--sp-3);
+  border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font: 700 var(--fs-sm) var(--f-body); cursor: pointer;
+  transition: border-color var(--dur-hover) ease, background-color var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
+}
+.pill-btn:active { scale: 0.96; }
+.pill-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.pill-btn .swatch { inline-size: 18px; block-size: 18px; border-radius: 50%; background: var(--swatch, #888); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+@media (hover: hover) and (pointer: fine) {
+  .pill-btn:hover { border-color: var(--action); background: rgba(62, 240, 255, 0.08); }
+}
+.icon-btn[aria-expanded="true"], .pill-btn[aria-expanded="true"] { border-color: var(--action); background: rgba(62, 240, 255, 0.12); }
+
+/* ---------- the garage ----------
+   The bar on top, the car's name, the stand in the middle (it takes what is left), the
+   bars and the main button at the bottom. One screen high: nothing to scroll. */
+#menu:has(#pGarage:not([hidden])) { background: radial-gradient(ellipse at 50% 45%, rgba(7, 8, 15, 0.1), rgba(7, 8, 15, 0.7)); }
+.garage {
+  touch-action: pan-y;            /* a sideways swipe is ours: it flips the cars */
+  inline-size: min(1200px, 100%);
+  flex: 1 0 auto;
+  margin-block: 0;
+  min-block-size: min(100%, 100dvh);
+  grid-template-rows: auto auto minmax(220px, 1fr) auto;
+  gap: var(--sp-3);
+}
+.garage .screen-bar h1 { margin-inline-end: auto; }
+.garage .screen-bar .bang { order: 0; }
+.gar-head { display: grid; justify-items: center; gap: var(--sp-1); text-align: center; }
+.gar-head h2 { margin: 0; font: 800 var(--fs-2xl)/1.05 var(--f-display); letter-spacing: -0.01em; text-wrap: balance; }
+.gar-tag { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--sp-2); max-inline-size: 62ch; color: var(--c-ink-1); font-size: var(--fs-sm); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+.gar-class { padding: 2px 10px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); color: var(--text); font: 800 var(--fs-xs)/1.6 var(--f-display); letter-spacing: 0.06em; background: var(--surface); }
+
+.gar-stage { position: relative; min-block-size: 0; }
+.gar-stand {
+  position: absolute; inset: 0;
+  transition: translate var(--dur-screen) var(--ease-out);
+}
+/* the palette is open: the car makes room for it */
+.garage.painting .gar-stand { translate: -14% 0; }
+.gar-arrow {
+  position: absolute; inset-block-start: 50%; translate: 0 -50%; z-index: 1;
+  display: grid; place-items: center;
+  inline-size: 52px; block-size: 52px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); cursor: pointer;
+  transition: border-color var(--dur-hover) ease, background-color var(--dur-hover) ease, opacity var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
+}
+.gar-arrow svg { inline-size: 26px; block-size: 26px; }
+#garPrev { inset-inline-start: 0; }
+#garNext { inset-inline-end: 0; }
+.gar-arrow:active:not(:disabled) { scale: 0.92; }
+.gar-arrow:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.gar-arrow:disabled { opacity: 0.28; cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .gar-arrow:hover:not(:disabled) { border-color: var(--action); background: rgba(62, 240, 255, 0.1); }
+}
+
+.gar-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--sp-4); }
+.gar-foot .cta { min-inline-size: 11rem; text-align: center; }
+.gar-stats {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--surface); backdrop-filter: var(--blur-panel);
+}
+.stat { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: var(--sp-2) var(--sp-2); }
+.stat-name { font-size: var(--fs-sm); font-weight: 600; color: var(--c-ink-1); }
+.stat-delta { font: 700 var(--fs-xs) var(--f-num); font-variant-numeric: tabular-nums; min-inline-size: 3.2ch; text-align: end; }
+.stat-delta.up { color: var(--better); }
+.stat-delta.down { color: var(--worse); }
+.stat-bar { grid-column: 1 / -1; position: relative; block-size: 6px; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.09); overflow: hidden; }
+/* two layers, both only scaled: under, the longer of the two cars (green: this one is
+   better, dim red: it is worse); over it, the shorter one. The difference is what shows. */
+.stat-bar i { position: absolute; inset: 0; border-radius: inherit; transform-origin: left center; scale: 0 1; transition: scale var(--dur-bars) var(--ease-out), background-color var(--dur-bars) ease; }
+.stat-bar .stat-fill { background: var(--c-ink-1); }
+.stat-bar .stat-diff { background: transparent; }
+.stat-bar .stat-diff.up { background: var(--better); }
+.stat-bar .stat-diff.down { background: var(--worse); opacity: 0.55; }
+
+/* popovers: a small panel under its button */
+.pop {
+  margin: 0; padding: var(--sp-4);
+  inline-size: max-content; max-inline-size: min(360px, calc(100vw - 32px));
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+  background: linear-gradient(160deg, rgba(28, 30, 62, 0.97), rgba(11, 12, 26, 0.98));
+  color: var(--text); box-shadow: var(--shadow-lift);
+  opacity: 0;
+  transition-property: opacity, translate, display, overlay;
+  transition-duration: var(--dur-pop);
+  transition-timing-function: var(--ease-out);
+  transition-behavior: allow-discrete;
+}
+.pop:popover-open {
+  opacity: 1;
+  @starting-style { opacity: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    translate: 0 0;
+    @starting-style { translate: 0 -6px; }
+  }
+}
+@media (prefers-reduced-motion: no-preference) { .pop { translate: 0 -6px; } }
+.pop h3 { margin: 0 0 var(--sp-3); font: 800 var(--fs-md) var(--f-display); }
+@supports (position-area: block-end) {
+  .pop { inset: auto; margin-block-start: var(--sp-2); }
+  #garSetPop { position-area: block-end span-inline-start; position-try-fallbacks: flip-inline; }
+  #garPaintPop { position-area: block-end span-inline-start; position-try-fallbacks: flip-inline; }
+}
+/* no anchor positioning, or a phone: a sheet at the bottom */
+@supports not (position-area: block-end) {
+  .pop { position: fixed; inset: auto 0 0 0; inline-size: auto; max-inline-size: none; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-block-end: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px)); }
+}
+
+.set-laps { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.set-name { font-weight: 700; font-size: var(--fs-sm); color: var(--c-ink-1); padding: 0; }
+.stepper { display: flex; align-items: center; gap: var(--sp-2); }
+.stepper output { min-inline-size: 2ch; text-align: center; font: 800 var(--fs-xl) var(--f-num); font-variant-numeric: tabular-nums; }
+.stepper .icon-btn:disabled { opacity: 0.3; cursor: default; }
+.set-dens { margin: 0; padding: 0; border: 0; display: grid; gap: var(--sp-2); }
+.seg-radio { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: var(--surface-sunk); border: 1px solid var(--line); }
+.seg-radio label { position: relative; flex: 1; }
+.seg-radio input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.seg-radio span { display: block; padding: 10px 14px; border-radius: var(--r-pill); text-align: center; font-weight: 700; font-size: var(--fs-sm); color: var(--text-quiet); border: 1px solid transparent; transition: background-color var(--dur-hover) ease, color var(--dur-hover) ease; }
+.seg-radio input:checked + span { background: rgba(62, 240, 255, 0.16); border-color: var(--action); color: var(--text); }
+.seg-radio input:focus-visible + span { outline: var(--focus-ring); outline-offset: 2px; }
+
+.swatches { display: grid; grid-template-columns: repeat(6, 40px); gap: var(--sp-2); }
+.swatch-btn {
+  inline-size: 40px; block-size: 40px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent; background: var(--swatch) padding-box; background-clip: content-box;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  transition: border-color var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
+}
+.swatch-btn:active { scale: 0.92; }
+.swatch-btn[aria-pressed="true"] { border-color: var(--text); padding: 3px; }
+.swatch-btn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .swatch-btn:hover:not([aria-pressed="true"]) { border-color: var(--line-strong); }
+}
+
+@media (max-width: 760px) {
+  .gar-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .gar-head h2 { font-size: var(--fs-xl); }
+}
+@media (max-width: 560px) {
+  .garage { grid-template-rows: auto auto minmax(200px, 1fr) auto; gap: var(--sp-2); }
+  .gar-foot { grid-template-columns: 1fr; }
+  .gar-foot .cta { justify-self: stretch; }
+  .gar-stats { grid-template-columns: 1fr; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+  .stat { grid-template-columns: 7.5em 1fr 3.2ch; align-items: center; }
+  .stat-bar { grid-column: 2; grid-row: 1; }
+  .gar-arrow { inline-size: 44px; block-size: 44px; }
+  .gar-tag span:not(.gar-class) { display: none; }      /* the long line: on a phone only the class */
+  .garage.painting .gar-stand { translate: none; }      /* the palette is a sheet below: the car stays */
+  .pop, #garSetPop, #garPaintPop { position: fixed; position-area: none; inset: auto 0 0 0; inline-size: auto; max-inline-size: none; margin: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-block-end: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px)); }
+  .swatches { grid-template-columns: repeat(6, minmax(40px, 1fr)); justify-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gar-stand { transition-duration: 0s; }                  /* the car moves aside at once */
+  .stat-bar i { transition-duration: var(--dur-hover); }   /* the bars still change, quickly */
+}

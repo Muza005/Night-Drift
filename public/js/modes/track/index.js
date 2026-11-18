@@ -83,7 +83,7 @@ export const trackMode = {
       NET.standT-=dt; if(NET.standT<=0){ NET.standT=.25; renderStandings();
         const pe=$('ping'); pe.hidden=!NET.rtt; if(NET.rtt){ pe.textContent='Пинг '+Math.round(NET.rtt)+' мс'; pe.classList.toggle('bad',NET.rtt>180); } }
     } else {
-      setT('lapn',String(G.lap)); setT('lapt',fmtT(G.lapT)); setT('best',G.best?'Лучший '+fmtT(G.best):'Лучший —');
+      setT('lapn',G.lap+' / '+G.soloLaps); setT('lapt',fmtT(G.lapT)); setT('best',G.best?'Лучший '+fmtT(G.best):'Лучший —');
     }
     if(G.state==='race'){
       const fx=Math.sin(car.h), fz=Math.cos(car.h);

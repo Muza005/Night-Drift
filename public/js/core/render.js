@@ -105,3 +105,54 @@ export function qualityTick(realDt, racing){
   const fps = Q.frames / Q.t; Q.t = Q.frames = 0;
   if(fps < 45 && Q.level < QUALITY.length - 1){ Q.level++; applyQuality(); }
 }
+
+/* ---------- the menu backdrop ----------
+   Behind the garage and the lobby the track is not drawn every frame: it is drawn once,
+   small, into a texture, and that picture is shown blurred and dimmed behind the stand.
+   captureBackdrop() takes the picture (on opening the screen, and on resize);
+   drawBackdrop() fills the canvas with it, a single cheap pass per frame. */
+let backRT = null;
+const backScene = new THREE.Scene(), backCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const backMat = new THREE.ShaderMaterial({
+  uniforms: { map: { value: null }, texel: { value: new THREE.Vector2() }, dim: { value: 0.62 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  // a 25-tap blur on an eighth-size picture: soft enough to read as "behind", no detail left
+  fragmentShader: `uniform sampler2D map; uniform vec2 texel; uniform float dim; varying vec2 vUv;
+    void main(){
+      vec3 c = texture2D(map, vUv).rgb * .12;
+      for(int i = 0; i < 8; i++){
+        float a = float(i) * .7854 + .39;
+        vec2 o = vec2(cos(a), sin(a)) * texel;
+        c += texture2D(map, vUv + o * 1.3).rgb * .05 + texture2D(map, vUv + o * 2.8).rgb * .036 + texture2D(map, vUv + o * 4.6).rgb * .024;
+      }
+      gl_FragColor = vec4(c * dim, 1.);
+      #include <tonemapping_fragment>
+      #include <encodings_fragment>
+    }`,
+  depthTest: false, depthWrite: false,
+});
+backScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), backMat));
+export function captureBackdrop(){
+  const w = Math.max(48, Math.round(innerWidth / 8)), h = Math.max(48, Math.round(innerHeight / 8));
+  if(!backRT || backRT.width !== w || backRT.height !== h){
+    if(backRT) backRT.dispose();
+    const half = renderer.capabilities.isWebGL2 || renderer.extensions.has('OES_texture_half_float');
+    backRT = new THREE.WebGLRenderTarget(w, h, half ? { type: THREE.HalfFloatType } : {});   // linear light: tone mapping comes on the way out
+  }
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setRenderTarget(backRT); renderer.render(scene, camera); renderer.setRenderTarget(null);
+  backMat.uniforms.map.value = backRT.texture;
+  backMat.uniforms.texel.value.set(1 / w, 1 / h);
+}
+export function drawBackdrop(){
+  if(!backRT) captureBackdrop();
+  renderer.setScissorTest(false);
+  renderer.render(backScene, backCam);
+}
+
+// While a menu screen with a stand is up, fewer pixels (1.5x, 1.25x on a phone): the
+// stand is small and the backdrop is a blur. Back in the race, the quality level's own.
+export function menuPixels(on){
+  const r = on ? Math.min(TOP_RATIO, isTouch ? 1.25 : 1.5) : QUALITY[Q.level].ratio;
+  if(renderer.getPixelRatio() !== r){ renderer.setPixelRatio(r); resize(); }
+}

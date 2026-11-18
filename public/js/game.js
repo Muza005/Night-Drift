@@ -44,6 +44,10 @@ export function finishLap(){
     return;
   }
   let rec=false; if(!G.best||t<G.best){ G.best=t; rec=true; try{localStorage.setItem('nightdrift.best',String(t));}catch(e){} }
+  if(!G.runBest||t<G.runBest) G.runBest=t;
+  if(rec) G.runRecord=true;
+  // solo drift has N laps: after the last one the run ends (main.js shows the finish)
+  if(G.mode && G.mode.id==='track' && G.lap>G.soloLaps){ G.lap=G.soloLaps; bank(); G.runEnd=true; return; }
   flash((rec?'Новый рекорд круга':'Круг '+(G.lap-1)+' пройден'), fmtT(t), 2.6);
 }
 

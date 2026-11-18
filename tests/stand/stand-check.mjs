@@ -126,10 +126,26 @@ try {
   // 6. changing the car twice quickly: one car, the last one asked for
   { const n = await page.evaluate(async () => {
       const s = __stand.big; const p1 = s.setCar('gtr', -1), p2 = s.setCar('rx7', -1); await Promise.all([p1, p2]);
-      const cars = s.scene.children.find(o => o.type === 'Group').children.filter(o => o.type !== 'Mesh');
-      return { id: s.car.carId, cars: cars.length, label: document.getElementById('big').getAttribute('aria-label') };
+      return { id: s.car.carId, podiums: s.podiums.length, label: document.getElementById('big').getAttribute('aria-label') };
     });
-    check('two quick changes: one car on the stand, the last one', n.id === 'rx7' && n.cars === 1, JSON.stringify(n)); }
+    check('two quick changes: one car on the stand, the last one', n.id === 'rx7' && n.podiums === 1, JSON.stringify(n)); }
+
+  // 6b. the slide: the podium leaves, the next comes in, ~0.5 s; quick changes don't pile up
+  { const r = await page.evaluate(async () => {
+      const s = __stand.big; await s.setCar('muscle', -1, +1);
+      const mid = s.podiums;
+      await new Promise(r => setTimeout(r, 700));
+      const end = s.podiums;
+      // three changes in a row, then back: never more than two podiums, the last car wins
+      s.setCar('super', -1, +1); await new Promise(r => setTimeout(r, 60));
+      s.setCar('sedan', -1, +1); await new Promise(r => setTimeout(r, 60));
+      const most = s.podiums.length;
+      s.setCar('super', -1, -1); await new Promise(r => setTimeout(r, 60));
+      await new Promise(r => setTimeout(r, 900));
+      return { mid, end, most, last: s.podiums, car: s.car && s.car.carId };
+    });
+    check('a change slides: two podiums on the way, one after ~0.5 s', r.mid.length === 2 && r.end.length === 1 && Math.abs(r.end[0].x) < 0.02 && r.end[0].carId === 'muscle', JSON.stringify([r.mid.map(p => p.x.toFixed(1)), r.end]));
+    check('quick changes: at most two podiums, back to the leaving one works', r.most <= 2 && r.last.length === 1 && r.car === 'super', JSON.stringify(r.last)); }
 
   // 7. repaint is immediate
   { const ok = await page.evaluate(() => { const s = __stand.big; s.repaint(0x1fa34a); const c = s.car.paint.color.clone().convertLinearToSRGB(); return c.getHex() === 0x1fa34a && /зелёный/.test(document.getElementById('big').getAttribute('aria-label')); });

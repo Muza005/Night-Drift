@@ -16,6 +16,9 @@ import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
 import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
+import { openGarage, garage } from './ui/garageScreen.js';
+import { choice, savePick } from './ui/garage.js';
+import { applyLook } from './player.js';
 
 if (isTouch) document.body.classList.add('touch');
 const LS = {
@@ -92,7 +95,7 @@ function startRace(quick=false){
   audioInit();
   $('menu').hidden=true; canvas.focus();
   G.mode.enter(car,{slot:0});
-  G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
+  G.raceT=0; G.lapT=0; G.lap=1; G.score=0; G.runBest=0; G.runRecord=false; G.runEnd=false; dropDrift(); clearMarks();
   G.state='count';
   if(quick){ G.cd=0.45; G.prevCount=1; $('count').textContent=''; }
   else { G.cd=3; G.prevCount=3; showCount('3'); }
@@ -103,7 +106,9 @@ function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioRe
 function toMenu(){
   if(G.state==='pause') audioResume();
   // back to the mode screen the run was started from, with its records up to date
-  G.state='menu'; G.mode.idle(car); clearMarks(); dropDrift(); $('count').textContent=''; openModes(menuKind,'back');
+  G.state='menu'; G.mode.idle(car); clearMarks(); dropDrift(); $('count').textContent='';
+  // solo: back to the garage the run was started from (one more step back: the mode cards)
+  if(menuKind==='solo') openSoloGarage('back'); else openModes(menuKind,'back');
 }
 // a key press on a focused button also fires its click: act only in the right state
 $('resume').addEventListener('click',()=>{ if(G.state==='pause') resume(); });
@@ -162,7 +167,15 @@ async function pick(id){
     connectRoom('create');
     return;
   }
-  startRace();
+  openSoloGarage('forward');
+}
+// Solo: the mode card leads to the garage; "Поехали" starts the run with the pick, "←"
+// goes back to the mode cards and drops it.
+function openSoloGarage(dir){
+  return openGarage({ kind:'solo', mode:G.mode.id, car:choice.car, paint:choice.paint, dir,
+    onGo(carId, paint){ savePick(carId, paint); applyLook(carId, paint); startRace(); },
+    onBack(){ openModes('solo','back'); },
+  }).then(()=>moveFocus($('garGo')));
 }
 $('mTrack').addEventListener('click',()=>pick('track'));
 $('mTraffic').addEventListener('click',()=>pick('traffic'));
@@ -175,11 +188,30 @@ function showOver(){
   // wreck for a car still doing that speed and drove through it.
   car.vx=car.vz=car.vF=car.vR=0; car.spinV=0; dropDrift();
   const R = G.mode.summary();
+  overTitle('Авария', 'на трассе'); $('overLbl').textContent = 'Очки';
   $('overScore').textContent = fmtN(R.score);
-  $('overRecord').hidden = !R.record;
+  $('overRecord').hidden = !R.record; $('overRecord').textContent = 'Новый рекорд';
   $('overBest').textContent = R.record ? '' : (R.best ? 'Рекорд ' + fmtN(R.best) : '');
   const box=$('overStats'); box.replaceChildren();
   for(const [k,v] of R.stats){
+    const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;
+    const b=document.createElement('b'); b.className='num'; b.textContent=v; d.append(a,b); box.append(d);
+  }
+  showPanel('pOver'); $('retry').focus();
+}
+function overTitle(a, b){ const h=$('overTitle'), sp=document.createElement('span'); sp.textContent=b; h.replaceChildren(a+' ', sp); }
+// Solo drift: the run is N laps (the garage's "!"); after the last one, the finish screen:
+// the drift points big, the run's time, its best lap, a badge for a lap record.
+function showFinish(){
+  G.state='over'; clearInput(); G.runEnd=false;
+  car.vx=car.vz=car.vF=car.vR=0; car.spinV=0;
+  overTitle('Финиш', G.soloLaps+' '+(G.soloLaps===1?'круг':G.soloLaps<5?'круга':'кругов'));
+  $('overLbl').textContent = 'Очки дрифта';
+  $('overScore').textContent = fmtN(G.score);
+  $('overRecord').hidden = !G.runRecord; $('overRecord').textContent = 'Рекорд круга';
+  $('overBest').textContent = G.runRecord ? '' : (G.best ? 'Рекорд круга ' + fmtT(G.best) : '');
+  const box=$('overStats'); box.replaceChildren();
+  for(const [k,v] of [['Время', fmtT(G.raceT)], ['Лучший круг', G.runBest ? fmtT(G.runBest) : '—'], ['Круги', String(G.soloLaps)]]){
     const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;
     const b=document.createElement('b'); b.className='num'; b.textContent=v; d.append(a,b); box.append(d);
   }
@@ -198,6 +230,8 @@ let last=performance.now(), menuA=0;
 function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
+  // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
+  if(garage.open){ garage.frame(now); return; }
   // Below 20 fps the game runs in slow motion; others must predict this car at its real pace.
   NET.pace=(NET.pace||1)*.9+(dt/realDt)*.1;
   qualityTick(realDt, G.state==='race');                      // slow device: fewer pixels, then no shadows
@@ -231,6 +265,7 @@ function frame(now){
       info=scoring(dt);
       if(G.mode.score) G.mode.score(car,dt,info);            // traffic mode: near misses, combo, distance
     }
+    if(G.runEnd) showFinish();                                 // solo drift: the last lap is done
   } else if(G.state==='crash'){
     const h=gdt/2; physics(h); physics(h);
     if(G.crashT>=1.2) showOver();
