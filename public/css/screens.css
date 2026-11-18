@@ -516,7 +516,7 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   button.pl-who:hover .pl-pen { opacity: 1; }
 }
 .pl-empty { background: none; border: 1px dashed var(--line); }
-.pl-empty .pl-ava { background: none; border-style: dashed; border-color: var(--line-strong); color: var(--text-off); }
+.pl-empty .pl-ava { background: none; border-style: dashed; border-color: var(--line-strong); color: var(--text-quiet); }
 .pl-empty .pl-who { color: var(--text-quiet); font-size: var(--fs-sm); }
 
 /* my car */
@@ -689,3 +689,34 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   .cta.armed { animation: none; }
   .pl-ava::after { transition-duration: var(--dur-hover), 0s; }
 }
+
+/* ---------- a phone held sideways (little height): everything tighter ----------
+   The stand keeps what height there is; titles, tags and panels give it up. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .screen { gap: var(--sp-3); }
+  .screen-bar h1 { font-size: var(--fs-xl); }
+  .icon-btn { inline-size: 40px; block-size: 40px; }
+  .pill-btn { min-block-size: 40px; }
+  #pHome .brand h1 { font-size: var(--fs-2xl); }
+  #pHome .tagline { font-size: var(--fs-md); }
+  .tiles-3 .tile-art { aspect-ratio: 21 / 9; }
+  .mode-tile .tile-art { aspect-ratio: 3 / 1; }
+  .tile-name { font-size: var(--fs-lg); margin-block-start: var(--sp-1); }
+
+  .garage { grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: var(--sp-2); }
+  .gar-head h2 { font-size: var(--fs-lg); }
+  .gar-tag { display: none; }
+  .gar-arrow { inline-size: 40px; block-size: 40px; }
+  .gar-stats { padding: var(--sp-2) var(--sp-4); gap: var(--sp-1) var(--sp-4); }
+  .stat-name { font-size: var(--fs-xs); }
+  .gar-foot { gap: var(--sp-3); }
+  .gar-foot .cta { min-inline-size: 9rem; padding-block: 12px; }
+
+  .card { gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); }
+  .card h1 { font-size: var(--fs-xl); }
+  .over-score b { font-size: 40px; }
+  .over-stats div { padding: var(--sp-2) var(--sp-3); }
+  .over-stats b { font-size: var(--fs-lg); }
+}
+/* the key hints (Пробел, Esc) mean nothing on a touch screen */
+body.touch #pOver .tip, body.touch #pPause .tip { display: none; }

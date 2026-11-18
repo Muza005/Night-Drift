@@ -5,6 +5,8 @@
 //   npm run test:sync -- --url http://localhost:8001/index.html   (test another build)
 //   npm run test:sync -- --mode traffic   (the highway: also checks that both players
 //                                           see the server's bots in the same places)
+//   npm run test:sync -- --headed         (two real windows on the GPU instead of software
+//                                           rendering at a few frames a second)
 //
 // What it does:
 // 1. Starts the game server and a proxy that adds ~150 ms of ping with jitter
@@ -35,6 +37,10 @@ const URL_UNDER_TEST = opt('url', `http://localhost:${PORT}/index.html`);
 // Limits. The original game (before stage 0), measured with this script in software
 // rendering at ~6 fps and ~380 ms ping, A at ~65 km/h: mean 0.8–1.35 m, p95 1.8–2.4 m.
 // After stage 0: mean 0.9–1.4 m, p95 1.9–2.6 m (same code, same spread).
+// Since every opponent is drawn with its own car model (UI stage 6), software rendering
+// runs at 4-5 fps and the highway's p95 lands anywhere from 2 to 4.8 m: near this limit,
+// so a run there can fail on the frame rate alone. With --headed (GPU, ~55 fps) the same
+// checks give p95 1.1-1.3 m on both modes.
 // A real GPU at 60 fps gives smaller errors. MIN_BUMP: B has no input, so any speed
 // above zero means the hit reached B; a glancing hit gives ~2 m/s, a square one ~8.
 const LIMIT_MEAN = 2.0, LIMIT_P95 = 4.0, MIN_BUMP = 0.5;
@@ -204,9 +210,13 @@ async function runOnce(browser) {
 
 const server = await startServer();
 const proxy = latencyProxy(PROXY, PORT);
+// --headed: two real windows on the GPU (60 fps, as players have it); by default software
+// rendering, a few frames a second, which is the harder case for the prediction
+const HEADED = args.includes('--headed');
 const browser = await chromium.launch({
+  headless: !HEADED,
   ...(CHROME ? { executablePath: CHROME } : { channel: 'chrome' }),
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  args: HEADED ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 let failed = false;
 try {

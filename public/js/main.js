@@ -4,7 +4,7 @@
 // G.mode.constrain() (the mode's walls and rules). Everything else here is the
 // single-file version's loop, split across modules.
 import { $, G, NET, drift, isTouch, serverNow } from './state.js';
-import { canvas, renderer, scene, camera, moon, qualityTick } from './core/render.js';
+import { canvas, renderer, scene, camera, moon, qualityTick, captureBackdrop, drawBackdrop } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
@@ -237,12 +237,31 @@ function menuView(){
   camera.updateProjectionMatrix();
 }
 G.menuView=menuView;
+// A menu screen with nothing of the race moving (home, the mode cards, the results, the
+// pause and the finish or crash screen): the scene is drawn once, not every frame, and the
+// canvas keeps that picture. Behind home, the cards and the results it is the blurred
+// still the garage uses; behind pause and the finish screen, the race as it stood.
+// Drawn again only when something it shows changes: the mode, my car, the window.
+let stillKey='';
+function stillFrame(){
+  if($('menu').hidden){ stillKey=''; return false; }
+  const s=G.state, frozen=s==='pause'||s==='over';
+  if(!frozen && s!=='menu' && s!=='results' && s!=='lobby') return false;
+  const key=s+'|'+G.mode.id+'|'+(car.model?car.model.carId+':'+car.model.code:'')+'|'+innerWidth+'x'+innerHeight+'@'+renderer.getPixelRatio();
+  if(key!==stillKey){
+    stillKey=key;
+    if(frozen) renderer.render(scene,camera);
+    else { menuView(); captureBackdrop(); drawBackdrop(); }
+  }
+  return true;
+}
 function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
   // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
-  if(garage.open){ garage.frame(now); return; }
-  if(lobby.open){ lobby.frame(now); return; }        // the lobby: the same, with my car
+  if(garage.open){ stillKey=''; garage.frame(now); return; }
+  if(lobby.open){ stillKey=''; lobby.frame(now); return; }        // the lobby: the same, with my car
+  if(stillFrame()) return;
   // Below 20 fps the game runs in slow motion; others must predict this car at its real pace.
   NET.pace=(NET.pace||1)*.9+(dt/realDt)*.1;
   qualityTick(realDt, G.state==='race');                      // slow device: fewer pixels, then no shadows

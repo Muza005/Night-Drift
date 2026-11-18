@@ -14,7 +14,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none}
 .hud{position:fixed;inset:0;pointer-events:none;z-index:2}
 .panel{background:var(--panel);border:1px solid var(--edge);border-radius:var(--r-md);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-.lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700}
+.lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700}
 .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 
 #lapbox{position:absolute;top:var(--top);left:var(--lft);padding:10px 14px;display:grid;gap:2px;min-width:150px}
@@ -202,7 +202,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
 /* results */
 .res{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:14px}
-.res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
+.res th{text-align:left;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
 .res td{padding:11px 12px;background:rgba(255,255,255,.04);border-block:1px solid var(--edge);font-variant-numeric:tabular-nums;white-space:nowrap}
 .res td:first-child{border-left:1px solid var(--edge);border-radius:18px 0 0 18px}
 .res td:last-child{border-right:1px solid var(--edge);border-radius:0 18px 18px 0}
@@ -496,10 +496,10 @@ body{margin:0}
       <button type="button" class="pill-btn" id="lobCar" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>Авто</button>
     </header>
     <div class="lob-body">
-      <section class="lob-players" aria-labelledby="plTitle">
+      <div class="lob-players">
         <h2 id="plTitle">Игроки <span class="pl-count" id="plCount">1 из 6</span></h2>
-        <ol class="plist" id="plist"></ol>
-      </section>
+        <ol class="plist" id="plist" aria-labelledby="plTitle"></ol>
+      </div>
       <div class="lob-car">
         <div class="gar-head">
           <h2 id="lobCarName">—</h2>
@@ -511,7 +511,7 @@ body{margin:0}
     <div class="lob-foot">
       <div class="lob-code">
         <span class="lbl" id="codeLbl">Код</span>
-        <b class="code" id="roomCode" aria-labelledby="codeLbl roomCode">----</b>
+        <b class="code" id="roomCode">----</b>
         <button type="button" class="icon-btn copy-btn" id="copyCode" aria-label="Скопировать код комнаты"><svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 5.5v-.5a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 5v8A1.5 1.5 0 0 0 6 14.5h.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-done" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <span class="copy-tip" id="copyTip" role="status"></span>
       </div>
