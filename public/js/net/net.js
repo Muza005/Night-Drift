@@ -440,12 +440,12 @@ function renderResults(){
     const tr=el('tr',id===me?'me':null);
     const nm=el('td'); const d=el('span','dot'); d.style.color=d.style.background=hex(accent(id)); d.style.display='inline-block'; d.style.marginRight='8px';
     nm.append(d, document.createTextNode(p.name));
-    if(hw) tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
+    if(hw) tr.append(el('td','rank',p.place?String(p.place):'—'), nm,
       el('td',null,fmtN(p.score)),
       el('td',null,(Math.max(0,p.z)/1000).toFixed(2).replace('.',',')+' км'),
       el('td',null,String(p.misses)),
       el('td',null,String(p.wrecks)));
-    else tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
+    else tr.append(el('td','rank',p.place?String(p.place):'—'), nm,
       el('td',null,p.finished?fmtT(p.finishTime/1000):'не доехал'),
       el('td',null,p.bestLap?fmtT(p.bestLap/1000):'—'),
       el('td',null,fmtN(p.score)));

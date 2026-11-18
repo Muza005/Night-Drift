@@ -720,3 +720,10 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 }
 /* the key hints (Пробел, Esc) mean nothing on a touch screen */
 body.touch #pOver .tip, body.touch #pPause .tip { display: none; }
+/* the results on a phone: place, name and the main number; the rest of the columns wait
+   for a wider screen (the table would scroll sideways otherwise) */
+@media (max-width: 560px) {
+  .res th:nth-child(n+5), .res td:nth-child(n+5) { display: none; }
+  .res td:nth-child(4) { border-right: 1px solid var(--edge); border-radius: 0 18px 18px 0; }
+  .res .me td:nth-child(4) { border-color: rgba(62, 240, 255, 0.35); }
+}
