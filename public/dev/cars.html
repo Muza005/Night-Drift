@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Night Drift — машины и краски</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=Manrope:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="../css/tokens.css">
+<style>
+/* A check sheet for the car models (stage 1 of the UI plan): every car, the same size, on
+   the ground, in a few paints. Not part of the game. ?paints=all shows all 11 paints;
+   ?paints=0,4,9 picks rows by index in PAINTS. */
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--f-body); }
+header { padding: var(--sp-4) var(--sp-5) var(--sp-2); display: flex; gap: var(--sp-4); align-items: baseline; flex-wrap: wrap; }
+h1 { margin: 0; font: 800 var(--fs-lg) var(--f-display); }
+#status { color: var(--text-quiet); font-size: var(--fs-sm); }
+#grid { display: grid; grid-template-columns: 120px repeat(8, 1fr); padding: 0 var(--sp-5) var(--sp-5); }
+#grid > div { display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-quiet); text-align: center; min-height: 28px; }
+#grid .cell { aspect-ratio: 4 / 3; border: 1px solid var(--line); border-radius: var(--r-sm); margin: 3px; }
+#grid .row-name { justify-items: start; display: flex; gap: var(--sp-2); align-items: center; }
+#grid .chip { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-strong); }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+</style>
+</head>
+<body>
+<header><h1>Машины и краски</h1><span id="status">Загрузка…</span></header>
+<div id="grid"></div>
+<canvas id="c"></canvas>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script type="module">
+import { CARS, PAINTS, paintCode, paintHex } from '../js/core/cars.js';
+import { makeModel, CAR_LEN } from '../js/core/carModels.js';
+
+const q = new URLSearchParams(location.search).get('paints');
+const rows = q === 'all' ? PAINTS.map((_, i) => i) : (q ? q.split(',').map(Number) : [0, 4, 9]);
+
+// the sheet: a label row, then one row per paint
+const grid = document.getElementById('grid'), cells = [];
+grid.append(document.createElement('div'));
+for (const c of CARS) { const d = document.createElement('div'); d.textContent = c.name; grid.append(d); }
+for (const r of rows) {
+  const p = PAINTS[r], name = document.createElement('div'); name.className = 'row-name';
+  const chip = document.createElement('span'); chip.className = 'chip';
+  chip.style.background = p.hex === null ? 'conic-gradient(#881413, #fc6d00, #1f5cff, #2f2f2f, #881413)' : '#' + p.hex.toString(16).padStart(6, '0');
+  name.append(chip, p.name); grid.append(name);
+  for (const c of CARS) { const d = document.createElement('div'); d.className = 'cell'; grid.append(d); cells.push({ el: d, car: c.id, code: paintCode(p) }); }
+}
+
+// one renderer for the whole sheet, a viewport per cell (as the game will have one renderer)
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;            // ACES at 1.0 lifts a red toward coral
+renderer.setScissorTest(true);
+
+// a soft studio to reflect: a dark room with a few light panels, prefiltered once
+function studioEnv() {
+  const s = new THREE.Scene(), box = new THREE.BoxGeometry(1, 1, 1);
+  const room = new THREE.Mesh(box, new THREE.MeshBasicMaterial({ color: 0x0b0d1a, side: THREE.BackSide }));
+  room.scale.set(30, 14, 30); s.add(room);
+  const panel = (c, x, y, z, w, h, d) => { const m = new THREE.Mesh(box, new THREE.MeshBasicMaterial({ color: c })); m.position.set(x, y, z); m.scale.set(w, h, d); s.add(m); };
+  panel(0xffffff, 0, 6.8, 0, 12, 0.2, 4);        // the long light overhead
+  panel(0x9fdfff, -14, 3, 0, 0.2, 3, 10);        // a cool side light
+  panel(0xffb3c4, 14, 2, -4, 0.2, 2, 6);         // a warm one
+  const pm = new THREE.PMREMGenerator(renderer);
+  const t = pm.fromScene(s, 0.02).texture; pm.dispose(); return t;
+}
+const env = studioEnv();
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x15172a, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(4, 8, 6); scene.add(key);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(3.2, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0c0e1c }));
+scene.add(floor);
+// a thin line at y = 0 shows whether the wheels sit on the ground
+const ground = new THREE.Mesh(new THREE.RingGeometry(3.15, 3.2, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3ef0ff, toneMapped: false }));
+ground.position.y = 0.002; scene.add(ground);
+const camera = new THREE.PerspectiveCamera(30, 4 / 3, 0.1, 100);
+camera.position.set(5.2, 2.6, 6.2); camera.lookAt(0, 0.5, 0);
+
+const status = document.getElementById('status');
+const t0 = performance.now();
+const loaded = await Promise.all(cells.map(async cell => ({ ...cell, inst: await makeModel(cell.car, cell.code, env) })));
+const sizes = CARS.map(c => { const one = loaded.find(l => l.car === c.id).inst; const b = new THREE.Box3().setFromObject(one.root); return `${c.id} ${(b.max.z - b.min.z).toFixed(2)}×${(b.max.x - b.min.x).toFixed(2)}×${(b.max.y - b.min.y).toFixed(2)} м, низ ${b.min.y.toFixed(3)}, колёс ${one.wheels.length}`; });
+status.textContent = `${CARS.length} машин загружено за ${Math.round(performance.now() - t0)} мс · длина ${CAR_LEN} м`;
+window.__sizes = sizes; console.log(sizes.join('\n'));
+
+function draw() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  renderer.setScissor(0, 0, innerWidth, innerHeight); renderer.setClearColor(0x000000, 0); renderer.clear();
+  for (const l of loaded) {
+    const r = l.el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > innerHeight) continue;
+    const y = innerHeight - r.bottom;
+    renderer.setViewport(r.left, y, r.width, r.height); renderer.setScissor(r.left, y, r.width, r.height);
+    camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+    scene.add(l.inst.root); renderer.render(scene, camera); scene.remove(l.inst.root);
+  }
+  document.body.dataset.ready = '1';
+}
+draw();
+addEventListener('resize', draw); addEventListener('scroll', draw, { passive: true });
+</script>
+</body>
+</html>

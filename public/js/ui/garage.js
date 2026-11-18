@@ -1,7 +1,7 @@
 // The garage: pick a car and its paint. One widget, drawn into several places (the main
 // menu, the lobby, the results screen between runs). The pick is remembered in the browser
 // and, online, sent to the room (net.js), which keeps every player's colour different.
-import { CARS, PAINTS, PAINT_HEXES, CAR_IDS, DEFAULT_CAR, DEFAULT_PAINT, carById, classById, statBars } from '../core/cars.js';
+import { CARS, PAINTS, CAR_IDS, DEFAULT_CAR, DEFAULT_PAINT, carById, classById, statBars, isPaint, paintCode, paintHex } from '../core/cars.js';
 import { hex, el } from './hud.js';
 
 const LS = {
@@ -12,11 +12,11 @@ const LS = {
 // What the player picked last time (or the car and colour the game always had).
 export const choice = {
   car: CAR_IDS.includes(LS.get('nightdrift.car')) ? LS.get('nightdrift.car') : DEFAULT_CAR,
-  paint: PAINT_HEXES.includes(Number(LS.get('nightdrift.paint'))) ? Number(LS.get('nightdrift.paint')) : DEFAULT_PAINT,
+  paint: isPaint(Number(LS.get('nightdrift.paint'))) && LS.get('nightdrift.paint') !== null ? Number(LS.get('nightdrift.paint')) : DEFAULT_PAINT,
 };
 export function savePick(car, paint){
   if(CAR_IDS.includes(car)){ choice.car = car; LS.set('nightdrift.car', car); }
-  if(PAINT_HEXES.includes(paint)){ choice.paint = paint; LS.set('nightdrift.paint', String(paint)); }
+  if(isPaint(paint)){ choice.paint = paint; LS.set('nightdrift.paint', String(paint)); }
 }
 
 // Draw the garage into `root`.
@@ -48,14 +48,14 @@ export function renderGarage(root, { car, paint, taken = new Set(), onCar, onPai
 
   const paints = el('div', 'g-paints'); paints.setAttribute('role', 'group'); paints.setAttribute('aria-label', 'Цвет');
   for(const p of PAINTS){
-    const busy = taken.has(p.hex) && p.hex !== paint;
+    const code = paintCode(p), busy = taken.has(code) && code !== paint;
     const b = el('button', 'g-paint'); b.type = 'button';
-    b.style.color = b.style.background = hex(p.hex);
+    b.style.color = b.style.background = hex(paintHex(code, c.id));
     b.title = busy ? p.name + ' — занят' : p.name;
     b.setAttribute('aria-label', b.title);
-    b.setAttribute('aria-pressed', String(p.hex === paint));
+    b.setAttribute('aria-pressed', String(code === paint));
     b.disabled = busy;
-    b.addEventListener('click', () => { if(p.hex !== paint) onPaint(p.hex); });
+    b.addEventListener('click', () => { if(code !== paint) onPaint(code); });
     paints.append(b);
   }
 

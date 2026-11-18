@@ -17,7 +17,7 @@ import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline } from './net/net.js';
 import { setT, fmtN, fmtT, showPanel, netStatus, hex } from './ui/hud.js';
-import { carById } from './core/cars.js';
+import { carById, paintHex } from './core/cars.js';
 
 if (isTouch) document.body.classList.add('touch');
 const LS = {
@@ -140,7 +140,7 @@ function renderMenuGarage(){
     onCar: id => { savePick(id, choice.paint); applyLook(choice.car, choice.paint); renderMenuGarage(); },
     onPaint: c => { savePick(choice.car, c); applyLook(choice.car, choice.paint); renderMenuGarage(); } });
   // folded, the garage's header still says which car and colour are picked
-  const dot=document.createElement('span'); dot.className='dot'; dot.style.color=dot.style.background=hex(choice.paint);
+  const dot=document.createElement('span'); dot.className='dot'; dot.style.color=dot.style.background=hex(paintHex(choice.paint, choice.car));
   $('garageSum').replaceChildren(dot, carById(choice.car).name);
 }
 renderMenuGarage();

@@ -3,6 +3,7 @@
 // of this kind (the player's and the other players') shares them.
 import { scene, glowTex, carEnv } from './render.js';
 import { coupeShape, wheelShape } from './carShapes.js';
+import { setPaint } from './carModels.js';
 
 let SHAPE = null;
 function shapes(){
@@ -16,7 +17,7 @@ function shapes(){
 export function makeCar(color, local){
   const { body: B, wheel: Wh } = shapes();
   const root=new THREE.Group(), body=new THREE.Group(); root.add(body);
-  const paint=new THREE.MeshStandardMaterial({color,metalness:.55,roughness:.26,envMap:carEnv,envMapIntensity:1.1});
+  const paint=new THREE.MeshStandardMaterial({metalness:.55,roughness:.26,envMap:carEnv,envMapIntensity:1.1}); setPaint(paint,color);
   const dark=new THREE.MeshStandardMaterial({color:0x12141c,roughness:.6});
   const glass=new THREE.MeshStandardMaterial({color:0x101c30,metalness:.9,roughness:.08,envMap:carEnv,envMapIntensity:1.5});
   const add=(geo,mat,par=body)=>{ const o=new THREE.Mesh(geo,mat); o.castShadow=true; par.add(o); return o; };

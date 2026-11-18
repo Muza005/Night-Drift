@@ -15,7 +15,8 @@
 import { $, G, NET, serverNow } from '../state.js';
 import { car, applyLook } from '../player.js';
 import { choice, savePick, renderGarage } from '../ui/garage.js';
-import { carById } from '../core/cars.js';
+import { carById, paintHex } from '../core/cars.js';
+import { setPaint } from '../core/carModels.js';
 import { canvas, cv, tex, scene } from '../core/render.js';
 import { wake, stepDraft } from '../core/draft.js';
 import { createWake, updateWake, disposeWake } from '../core/draftfx.js';
@@ -179,6 +180,9 @@ export async function leaveOnline(msg){
   try{ if(r) await r.leave(true); }catch(e){}
 }
 
+// The colour a player shows: their paint on their car ("Заводской" is the car's own colour).
+const look = p => paintHex(p.color, p.car);
+
 /* ghosts */
 function makeLabel(name,color){
   const [c,g]=cv(256,64); let fs=30;
@@ -192,7 +196,7 @@ function makeLabel(name,color){
 }
 function addGhost(id,p){
   if(NET.ghosts.has(id)) return;
-  const m=makeCar(p.color,false), label=makeLabel(p.name,p.color); m.root.add(label); m.root.visible=false;
+  const m=makeCar(look(p),false), label=makeLabel(p.name,look(p)); m.root.add(label); m.root.visible=false;
   const fx=createWake(); scene.add(fx.root);              // its slipstream lines (core/draftfx.js)
   NET.ghosts.set(id,{id,p,m,fx,label,color:p.color,car:p.car,buf:[],x:0,z:0});
 }
@@ -201,9 +205,9 @@ function addGhost(id,p){
 function ghostLook(g,p){
   if(g.color===p.color && g.car===p.car) return;
   g.color=p.color; g.car=p.car;
-  g.m.paint.color.setHex(p.color);
+  setPaint(g.m.paint, look(p));
   g.m.root.remove(g.label); g.label.material.map.dispose(); g.label.material.dispose();
-  g.label=makeLabel(p.name,p.color); g.m.root.add(g.label);
+  g.label=makeLabel(p.name,look(p)); g.m.root.add(g.label);
 }
 function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
@@ -370,7 +374,7 @@ function renderLobby(){
   $('roomCode').textContent=NET.room.roomId;
   const ul=$('plist'); ul.replaceChildren();
   s.players.forEach((p,id)=>{
-    const li=el('li'); const d=el('span','ava'); d.style.color=hex(p.color); d.style.background=hex(p.color);
+    const li=el('li'); const d=el('span','ava'); d.style.color=d.style.background=hex(look(p));
     d.append(el('i',null,(p.name.trim()[0]||'?').toUpperCase()));
     const who=el('span','pn'); who.append(el('b',null,p.name+(id===me?' (вы)':'')), el('small',null,carById(p.car).name));
     li.append(d, who);
@@ -400,11 +404,11 @@ export function renderStandings(){
   if(NET.room.state.mode==='traffic'){
     // highway: by score (ours live, others' as last reported)
     NET.room.state.players.forEach((p,id)=>{ const mine=id===me, sc=mine?G.score:p.score;
-      rows.push({name:p.name,color:p.color,mine,key:sc,tag:fmtN(sc)}); });
+      rows.push({name:p.name,color:look(p),mine,key:sc,tag:fmtN(sc)}); });
   } else
   NET.room.state.players.forEach((p,id)=>{
     const mine=id===me, laps=mine?Math.min(G.lap-1,NET.laps):p.lap, prog=mine?car.prog:p.prog;
-    rows.push({name:p.name,color:p.color,mine,fin:p.finished,
+    rows.push({name:p.name,color:look(p),mine,fin:p.finished,
       key:p.finished?1e7-p.place:laps*1000+prog,
       tag:p.finished?'финиш':Math.min(laps+1,NET.laps)+'/'+NET.laps});
   });
@@ -422,7 +426,7 @@ function renderResults(){
   $('resHead').replaceChildren(...(hw ? ['#','Гонщик','Очки','Дистанция','Обгоны','Аварии'] : ['#','Гонщик','Время','Лучший круг','Дрифт']).map(t=>el('th',null,t)));
   [...s.players.entries()].sort((a,b)=>(a[1].place||99)-(b[1].place||99)).forEach(([id,p])=>{
     const tr=el('tr',id===me?'me':null);
-    const nm=el('td'); const d=el('span','dot'); d.style.color=hex(p.color); d.style.background=hex(p.color); d.style.display='inline-block'; d.style.marginRight='8px';
+    const nm=el('td'); const d=el('span','dot'); d.style.color=d.style.background=hex(look(p)); d.style.display='inline-block'; d.style.marginRight='8px';
     nm.append(d, document.createTextNode(p.name));
     if(hw) tr.append(el('td','pl',p.place?String(p.place):'—'), nm,
       el('td',null,fmtN(p.score)),

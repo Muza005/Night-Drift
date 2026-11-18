@@ -1,0 +1,145 @@
+/* Night Drift — design tokens.
+ *
+ * Every screen (menus, lobby, garage, HUD) takes its colours, spacing, corners, glows and
+ * motion from here. Three tiers: raw values, then what they mean, then the few
+ * component-level knobs. Screens use tiers 2 and 3 only.
+ *
+ * Direction: a city at night seen from a car. Deep blue-black asphalt, glass panels that
+ * pick up the street light, and two neon tubes: cyan for "go" (actions, focus) and rose
+ * for the brand and for drift. Amber is the timing board (records, laps). One loud thing
+ * per screen: the car on its lit stand; the panels around it stay quiet.
+ */
+:root {
+  /* ---------- tier 1: raw values ---------- */
+  --c-night-0: #050610;          /* the sky behind everything */
+  --c-night-1: #07080f;
+  --c-night-2: #0d0f1f;
+  --c-night-3: #151833;
+  --c-night-4: #1e2246;
+  --c-ink-0: #eef0ff;            /* text */
+  --c-ink-1: #b9bede;
+  --c-ink-2: #8d93b8;            /* quiet text: 6.6:1 on night-1, 5.4:1 on a panel */
+  --c-ink-3: #5a6088;            /* only for things that are switched off */
+  --c-cyan: #3ef0ff;
+  --c-cyan-hi: #8af7ff;
+  --c-rose: #ff3b6b;
+  --c-rose-hi: #ff7a98;
+  --c-amber: #ffc23d;
+  --c-green: #3dff8a;            /* ready */
+  --c-red: #ff4d5e;              /* worse / error */
+
+  /* the six seats of a room: a player's own colour in lists, standings and name tags
+     (car paints may repeat, these never do in one room) */
+  --seat-1: #3ef0ff;
+  --seat-2: #ff3b6b;
+  --seat-3: #ffc23d;
+  --seat-4: #a77bff;
+  --seat-5: #3dff8a;
+  --seat-6: #ff8a3d;
+
+  /* spacing: a 4 px base, steps that roughly double */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* corners: small parts are tighter than the panels that hold them */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* type */
+  --f-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --f-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-num: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: clamp(22px, 3.2vw, 28px);
+  --fs-2xl: clamp(28px, 5vw, 44px);
+  --fs-3xl: clamp(36px, 7.4vw, 60px);
+
+  /* motion. Exits and entrances ease out (fast start, soft landing); things that move
+     on their own and come back ease in and out. Times by what moves. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --dur-press: 100ms;            /* a button pressed down */
+  --dur-hover: 170ms;            /* hover in and out */
+  --dur-pop: 190ms;              /* popovers, the colour panel */
+  --dur-screen: 320ms;           /* one screen to the next */
+  --dur-bars: 400ms;             /* stat bars flowing to a new car */
+  --dur-swap: 500ms;             /* one car leaves the stand, the next arrives */
+
+  /* layers */
+  --z-scene: 0;
+  --z-hud: 2;
+  --z-menu: 5;
+  --z-pop: 8;
+  --z-toast: 10;
+
+  /* ---------- tier 2: meaning ---------- */
+  --bg: var(--c-night-1);
+  --text: var(--c-ink-0);
+  --text-quiet: var(--c-ink-2);
+  --text-off: var(--c-ink-3);
+  --action: var(--c-cyan);
+  --action-hi: var(--c-cyan-hi);
+  --on-action: var(--c-night-1);
+  --brand: var(--c-rose);
+  --record: var(--c-amber);
+  --ready: var(--c-green);
+  --better: var(--c-green);
+  --worse: var(--c-red);
+  --focus: var(--c-cyan);
+
+  --surface: rgba(10, 12, 24, 0.66);                 /* a panel over the scene */
+  --surface-raised: linear-gradient(160deg, rgba(28, 30, 62, 0.86), rgba(11, 12, 26, 0.9));
+  --surface-sunk: rgba(5, 6, 16, 0.6);               /* a well inside a panel */
+  --line: rgba(120, 140, 255, 0.22);
+  --line-strong: rgba(150, 160, 255, 0.34);
+  --veil: radial-gradient(ellipse at 50% 55%, rgba(7, 8, 15, 0.45), rgba(7, 8, 15, 0.9));
+
+  /* depth: a panel floats over the street; a glow is light, not a shadow */
+  --shadow-panel: 0 30px 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-lift: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --glow-action: 0 8px 30px rgba(62, 240, 255, 0.38);
+  --glow-brand: 0 12px 40px rgba(255, 59, 107, 0.26);
+  --glow-ready: 0 0 0 2px var(--c-green), 0 0 18px rgba(61, 255, 138, 0.45);
+  --blur-panel: blur(10px);
+
+  /* ---------- tier 3: components ---------- */
+  --btn-h: 44px;                 /* the smallest thing a thumb has to hit */
+  --focus-ring: 2px solid var(--focus);
+  --focus-gap: 3px;
+  --card-lift: -5px;             /* how far a card rises on hover */
+  --card-zoom: 1.04;             /* how far its picture comes closer */
+  --stand-ring: var(--c-cyan);   /* the neon edge of the car stand */
+
+  /* safe areas: phones with notches and home bars */
+  --top: calc(14px + env(safe-area-inset-top, 0px));
+  --bot: calc(14px + env(safe-area-inset-bottom, 0px));
+  --lft: max(16px, env(safe-area-inset-left, 0px));
+  --rgt: max(16px, env(safe-area-inset-right, 0px));
+
+  /* the names the game's styles always used, kept so nothing breaks while the screens move
+     over to the names above */
+  --night: var(--bg);
+  --ink: var(--text);
+  --dim: var(--text-quiet);
+  --cyan: var(--c-cyan);
+  --rose: var(--c-rose);
+  --amber: var(--c-amber);
+  --panel: var(--surface);
+  --edge: var(--line);
+
+  color-scheme: dark;
+}

@@ -15,7 +15,7 @@ import { run } from './harness.mjs';
 globalThis.THREE = createRequire(import.meta.url)('three');
 const { stepCar } = await import('../public/js/core/physics.js');
 const T = await import('../public/js/modes/track/geometry.js');
-const { CARS, CAR_IDS, CLASSES, BASE, DEFAULT_CAR, PAINTS, PAINT_HEXES, DEFAULT_PAINT, statBars } = await import('../public/js/core/cars.js');
+const { CARS, CAR_IDS, CLASSES, BASE, DEFAULT_CAR, PAINTS, PAINT_CODES, DEFAULT_PAINT, FACTORY, paintHex, statBars } = await import('../public/js/core/cars.js');
 
 const golden = JSON.parse(readFileSync(new URL('./fixtures/physics-golden-v2.json', import.meta.url), 'utf8'));
 const STATS = Object.keys(BASE);
@@ -23,9 +23,6 @@ const STATS = Object.keys(BASE);
 test('the catalogue is well formed', () => {
   assert.equal(new Set(CAR_IDS).size, CARS.length, 'car ids are unique');
   assert.ok(CAR_IDS.includes(DEFAULT_CAR));
-  assert.equal(new Set(PAINT_HEXES).size, PAINTS.length, 'paints are unique');
-  assert.equal(DEFAULT_PAINT, 0xff3b6b, 'the first paint is the colour the player always had');
-  assert.ok(PAINTS.length >= 6, 'enough paints for a full room of 6');
   for (const k of CLASSES) assert.ok(CARS.some(c => c.cls === k.id), `class ${k.id} has a car`);
   for (const c of CARS) {
     assert.deepEqual(Object.keys(c.stats).sort(), [...STATS].sort(), `${c.id}: every stat is set`);
@@ -42,10 +39,42 @@ test('the catalogue is well formed', () => {
     const paint = (json.materials || []).find(m => m.name === 'Paint');
     assert.ok(paint, `${c.id}: has a Paint material`);
     assert.ok(!paint.pbrMetallicRoughness?.baseColorTexture, `${c.id}: Paint has no texture`);
+    const toSrgb = v => Math.round(255 * Math.min(1, v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
+    const [r, g, bl] = (paint.pbrMetallicRoughness?.baseColorFactor || [1, 1, 1]).map(toSrgb);
+    assert.equal(c.factory, (r << 16) | (g << 8) | bl, `${c.id}: factory is the model's own Paint colour`);
     const glass = (json.materials || []).find(m => m.name === 'Glass');
     if (glass) assert.notEqual(glass.alphaMode, 'BLEND', `${c.id}: the windows are opaque`);
     for (const [, v] of statBars(c.stats)) assert.ok(v >= 1 && v <= 10);
   }
+});
+
+test('the paints: "Заводской" first, then ten strong colours, no pink', () => {
+  assert.equal(PAINTS.length, 11);
+  assert.equal(PAINTS[0].hex, null, 'the first paint is the car\'s own colour');
+  assert.equal(PAINT_CODES[0], FACTORY);
+  assert.equal(DEFAULT_PAINT, FACTORY, 'a new player drives the car as it came');
+  assert.equal(new Set(PAINT_CODES).size, PAINTS.length, 'paints are unique');
+  assert.equal(new Set(PAINTS.map(p => p.name)).size, PAINTS.length, 'and so are their names');
+  for (const p of PAINTS.slice(1)) {
+    assert.ok(Number.isInteger(p.hex) && p.hex >= 0 && p.hex <= 0xffffff, `${p.name}: a colour`);
+    const [r, g, b] = [p.hex >> 16, (p.hex >> 8) & 255, p.hex & 255].map(v => v / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d) h = mx === r ? 60 * (((g - b) / d) % 6) : mx === g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4);
+    h = (h + 360) % 360;
+    if (d > 0.1) {                                    // white, black and silver are neutral: no hue to judge
+      // a pastel is light and washed out (the old lavender: l 0.74, the mint: l 0.65)
+      assert.ok(s >= 0.5 && l <= 0.62, `${p.name}: strong, not pastel (s=${s.toFixed(2)}, l=${l.toFixed(2)})`);
+      assert.ok(!(h >= 290 && h <= 350), `${p.name}: not pink (hue ${h.toFixed(0)}°)`);
+      assert.ok(!(h > 350 || h < 10) || l < 0.55, `${p.name}: a red is red, not a rose (l=${l.toFixed(2)})`);
+    }
+  }
+  for (const c of CARS) {
+    assert.equal(paintHex(FACTORY, c.id), c.factory, `${c.id}: "Заводской" is its own colour`);
+    assert.equal(paintHex(0xd3202a, c.id), 0xd3202a, 'any other paint is itself');
+  }
+  assert.equal(paintHex(12345, 'coupe'), CARS[0].factory, 'an unknown code falls back to the factory colour');
 });
 
 test('the base car with its spec set drives the version 2 recording bit for bit', () => {

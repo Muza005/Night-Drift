@@ -6,27 +6,9 @@
 <title>Night Drift</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="css/tokens.css">
 <style>
 /* Layout: full-bleed 3D canvas, HUD pinned to the four corners, drift meter top-centre. Single deliberate night theme. */
-:root{
-  --night:#07080f;
-  --ink:#eef0ff;
-  --dim:#8d93b8;
-  --cyan:#3ef0ff;
-  --rose:#ff3b6b;
-  --amber:#ffc23d;
-  --panel:rgba(10,12,24,.66);
-  --edge:rgba(120,140,255,.22);
-  --r-md:16px;--r-lg:22px;--r-xl:28px;
-  --f-display:"Unbounded","Arial Black",system-ui,sans-serif;
-  --f-body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --f-num:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
-  --top:calc(14px + env(safe-area-inset-top,0px));
-  --bot:calc(14px + env(safe-area-inset-bottom,0px));
-  --lft:max(16px, env(safe-area-inset-left,0px));
-  --rgt:max(16px, env(safe-area-inset-right,0px));
-  color-scheme:dark;
-}
 html,body{height:100%;background:var(--night);color:var(--ink);overflow:hidden}
 body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-select:none}
 #c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none}
@@ -589,6 +571,7 @@ body{margin:0}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://unpkg.com/colyseus.js@0.15.27/dist/colyseus.js"></script>
 <script src="config.js"></script>
 <script type="module" src="js/main.js"></script>

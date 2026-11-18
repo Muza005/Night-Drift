@@ -7,12 +7,14 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
-import { PAINTS } from '../public/js/core/cars.js';
+import { PAINTS, PAINT_CODES } from '../public/js/core/cars.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 2593;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const [ROSE, CYAN, , , , , WHITE, , , RED] = PAINTS.map(p => p.hex);
+const paint = name => PAINTS.find(p => p.name === name).hex;
+const RED = paint('Красный'), BLUE = paint('Синий'), YELLOW = paint('Жёлтый');
+const SEAT1 = PAINT_CODES[1];       // the colour of the second seat
 let server;
 
 before(async () => {
@@ -34,18 +36,18 @@ test('car and paint picks: kept, changeable in the lobby, colours never shared',
     assert.equal(P(A.sessionId).car, 'gtr');
     assert.equal(P(A.sessionId).color, RED, 'the first player gets the colour they asked for');
     assert.equal(P(B.sessionId).car, 'muscle');
-    assert.equal(P(B.sessionId).color, CYAN, 'a taken colour gives way to the seat colour');
+    assert.equal(P(B.sessionId).color, SEAT1, 'a taken colour gives way to the seat colour');
     assert.equal(P(C.sessionId).car, 'coupe', 'an unknown car is the coupe');
-    assert.ok(PAINTS.some(p => p.hex === P(C.sessionId).color), 'an unknown paint is a real paint');
+    assert.ok(PAINT_CODES.includes(P(C.sessionId).color), 'an unknown paint is a real paint');
 
     // in the lobby: a free colour is fine, a taken one is refused, a car can change
-    B.send('pick', { car: 'super', paint: WHITE }); await sleep(200);
+    B.send('pick', { car: 'super', paint: BLUE }); await sleep(200);
     assert.equal(P(B.sessionId).car, 'super');
-    assert.equal(P(B.sessionId).color, WHITE);
-    C.send('pick', { car: 'coupe', paint: WHITE }); await sleep(200);
-    assert.notEqual(P(C.sessionId).color, WHITE, 'cannot take a colour another player has');
-    A.send('pick', { paint: ROSE }); await sleep(200);
-    assert.equal(P(A.sessionId).color, ROSE, 'paint alone');
+    assert.equal(P(B.sessionId).color, BLUE);
+    C.send('pick', { car: 'coupe', paint: BLUE }); await sleep(200);
+    assert.notEqual(P(C.sessionId).color, BLUE, 'cannot take a colour another player has');
+    A.send('pick', { paint: YELLOW }); await sleep(200);
+    assert.equal(P(A.sessionId).color, YELLOW, 'paint alone');
     assert.equal(P(A.sessionId).car, 'gtr', 'and the car stays');
 
     const colours = [...A.state.players.values()].map(p => p.color);
