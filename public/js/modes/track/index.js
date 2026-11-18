@@ -17,7 +17,6 @@ import { $, G, NET, isTouch } from '../../state.js';
 import { camera } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
-import { paintHex } from '../../core/cars.js';
 import { renderStandings } from '../../net/net.js';
 import { P, TG, START, placeAt, placeGrid, constrainToTrack, keepInWalls } from './geometry.js';
 import { group } from './scene.js';
@@ -35,7 +34,7 @@ function drawMap(car){
   const s=P[START]; mg.fillStyle='#ffc23d'; mg.beginPath(); mg.arc(mx(s.x),mz(s.z),6,0,7); mg.fill();
   const cx=mx(car.x), cz=mz(car.z);
   for(const g of NET.ghosts.values()){ if(!g.m.root.visible) continue;
-    mg.fillStyle=hex(paintHex(g.p.color,g.p.car)); mg.beginPath(); mg.arc(mx(g.x),mz(g.z),7,0,7); mg.fill(); }
+    mg.fillStyle=hex(g.accent); mg.beginPath(); mg.arc(mx(g.x),mz(g.z),7,0,7); mg.fill(); }
   mg.save(); mg.translate(cx,cz); mg.rotate(car.h); mg.fillStyle='#ff3b6b'; mg.shadowColor='#ff3b6b'; mg.shadowBlur=12;
   mg.beginPath(); mg.moveTo(0,12); mg.lineTo(8,-8); mg.lineTo(-8,-8); mg.closePath(); mg.fill(); mg.restore();
 }

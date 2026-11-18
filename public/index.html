@@ -199,62 +199,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 .status{font-size:14px;color:var(--amber);min-height:1.4em}
 .status:empty{min-height:0}
 .status.err{color:var(--rose)}
-/* lobby */
-.lobby-head{display:flex;align-items:end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap}
-.code-big{display:grid;gap:8px}
-.code-big .code{font-family:var(--f-num);font-weight:700;font-size:38px;line-height:58px;height:58px;width:254px;letter-spacing:41px;padding-left:17px;white-space:nowrap;overflow:hidden;color:var(--cyan);text-shadow:0 0 18px rgba(62,240,255,.55);
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='58'%3E%3Crect x='.5' y='.5' width='55' height='57' rx='16' fill='%23090a16' fill-opacity='.7' stroke='%233ef0ff' stroke-opacity='.4'/%3E%3C/svg%3E") 0 0/64px 58px repeat-x}
-#lobbyHint{font-size:14px}
-.lobby-cfg{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
-.cfg-row{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap}
-.cfg-row .seg{padding:3px}
-.cfg-row .seg button{min-height:38px;padding:8px 15px;font-size:13px}
-.lobby-cfg .seg button:disabled{cursor:default}
-.lobby-cfg .seg button:disabled:not([aria-pressed="true"]){opacity:.5}
-.cfg-note{font-size:13px;color:var(--dim);line-height:1.5}
-.cfg-note:empty{display:none}
-.plist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:0;list-style:none}
-.plist li{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 14px 8px 8px;border:1px solid var(--edge);border-radius:999px;background:rgba(255,255,255,.04);font-size:15px;font-weight:600}
-.plist li .pn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.plist li.empty{color:var(--dim);font-weight:400;border-style:dashed;background:none;padding-left:8px}
-.plist li.empty::before{content:'+';display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;border:1px dashed var(--edge);font:500 18px var(--f-num);color:var(--dim)}
-.ava{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;font:800 14px var(--f-display);color:#0a0b16;box-shadow:0 0 16px currentColor,inset 0 -3px 0 rgba(0,0,0,.18),inset 0 2px 0 rgba(255,255,255,.35)}
-.ava i{font-style:normal;color:#0a0b16}
 .dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 10px currentColor}
-.badge{margin-left:auto;flex:none;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700;border:1px solid var(--edge);border-radius:999px;padding:3px 8px}
-.badge.host{color:var(--amber);border-color:rgba(255,194,61,.4);background:rgba(255,194,61,.08)}
-/* garage: car and paint */
-.garage{display:grid;gap:12px}
-.g-cars{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.g-cars button{font:700 13px var(--f-body);color:var(--ink);background:rgba(255,255,255,.04);border:1px solid var(--edge);border-radius:999px;padding:9px 6px;cursor:pointer;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .12s,background .12s}
-.g-cars button:hover{border-color:rgba(62,240,255,.45)}
-.g-cars button[aria-pressed="true"]{background:rgba(62,240,255,.14);border-color:var(--cyan);color:#fff;box-shadow:0 0 14px rgba(62,240,255,.25)}
-.g-cars button:focus-visible,.g-paint:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-.g-info{display:grid;gap:8px}
-.g-tag{font-size:13px;color:var(--dim)}
-.g-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
-.g-stat{display:grid;grid-template-columns:7.2em 1fr;align-items:center;gap:8px}
-.g-stat .lbl{font-size:10px}
-.g-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
-.g-bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--cyan),#9b7bff);transition:width .25s}
-.g-paints{display:flex;flex-wrap:wrap;gap:8px}
-.g-paint{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.18);cursor:pointer;padding:0;box-shadow:inset 0 -3px 0 rgba(0,0,0,.2),inset 0 2px 0 rgba(255,255,255,.3);transition:transform .12s}
-.g-paint:hover:not(:disabled){transform:scale(1.1)}
-.g-paint[aria-pressed="true"]{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.18),0 0 14px currentColor}
-.g-paint:disabled{opacity:.25;cursor:not-allowed;background-image:linear-gradient(135deg,transparent 45%,rgba(10,11,22,.9) 45%,rgba(10,11,22,.9) 55%,transparent 55%)!important}
-.garage-box{border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45);padding:0 16px}
-.garage-box>summary{display:flex;align-items:center;gap:10px;padding:12px 0;cursor:pointer;list-style:none;font-size:14px;font-weight:600}
-.garage-box>summary::-webkit-details-marker{display:none}
-.garage-box>summary::after{content:'▾';margin-left:auto;color:var(--dim);transition:transform .15s}
-.garage-box[open]>summary::after{transform:rotate(180deg)}
-.garage-box[open]{padding-bottom:14px}
-#garageSum{display:flex;align-items:center;gap:8px}
-#garageSum .dot{width:12px;height:12px}
-.lobby-garage{display:grid;gap:10px;padding:14px 16px;border:1px solid var(--edge);border-radius:var(--r-lg);background:rgba(8,9,20,.45)}
-.plist li .pn{display:grid;line-height:1.2}
-.plist li .pn b,.plist li .pn small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.plist li .pn small{font-size:11.5px;font-weight:500;color:var(--dim)}
-@media (max-width:620px){.g-cars{grid-template-columns:repeat(2,1fr)}.g-stats{grid-template-columns:1fr}}
 /* results */
 .res{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:14px}
 .res th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:2px 12px}
@@ -541,59 +486,85 @@ body{margin:0}
     <div class="tip">P или Esc — продолжить.</div>
   </div>
 
-  <div class="card" id="pLobby" hidden>
-    <div class="lobby-head">
-      <div class="code-big"><span class="lbl">Код комнаты</span><span class="code" id="roomCode">----</span></div>
-      <button class="ghost-btn" id="copyLink" type="button">Скопировать ссылку</button>
-    </div>
-    <p id="lobbyHint">Отправьте код или ссылку друзьям. Они открывают игру, выбирают «С друзьями» и вводят код.</p>
-    <div class="lobby-cfg">
-      <div class="cfg-row">
-        <span class="lbl">Режим</span>
-        <div class="seg" id="cfgMode" role="group" aria-label="Режим">
-          <button type="button" data-mode="track" aria-pressed="true">Дрифт</button>
-          <button type="button" data-mode="traffic" aria-pressed="false">Трасса</button>
+  <!-- The lobby: the players (the host first, with the crown), my car on its stand, the
+       room's code, the run's settings (the host changes them, everyone sees them) and the
+       main button: «Старт» for the host, «Готово» for the others. js/ui/lobbyScreen.js. -->
+  <section class="screen lobby" id="pLobby" hidden aria-labelledby="lobTitle">
+    <header class="screen-bar">
+      <button type="button" class="pill-btn" id="leaveLobby"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Выйти</button>
+      <h1 id="lobTitle">Лобби <span class="lob-mode" id="lobMode">Дрифт</span></h1>
+      <button type="button" class="pill-btn" id="lobCar" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>Авто</button>
+    </header>
+    <div class="lob-body">
+      <section class="lob-players" aria-labelledby="plTitle">
+        <h2 id="plTitle">Игроки <span class="pl-count" id="plCount">1 из 6</span></h2>
+        <ol class="plist" id="plist"></ol>
+      </section>
+      <div class="lob-car">
+        <div class="gar-head">
+          <h2 id="lobCarName">—</h2>
+          <p class="gar-tag"><span class="gar-class" id="lobCarClass"></span><span id="lobPaint"></span></p>
         </div>
+        <div class="lob-stand" id="lobStand"></div>
       </div>
-      <div class="cfg-row" id="rowDur" hidden>
-        <span class="lbl">Заезд</span>
-        <div class="seg" id="cfgDur" role="group" aria-label="Длительность заезда">
-          <button type="button" data-dur="120" aria-pressed="false">2 мин</button>
-          <button type="button" data-dur="180" aria-pressed="true">3 мин</button>
-          <button type="button" data-dur="300" aria-pressed="false">5 мин</button>
+    </div>
+    <div class="lob-foot">
+      <div class="lob-code">
+        <span class="lbl" id="codeLbl">Код</span>
+        <b class="code" id="roomCode" aria-labelledby="codeLbl roomCode">----</b>
+        <button type="button" class="icon-btn copy-btn" id="copyCode" aria-label="Скопировать код комнаты"><svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 5.5v-.5a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 5v8A1.5 1.5 0 0 0 6 14.5h.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-done" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <span class="copy-tip" id="copyTip" role="status"></span>
+      </div>
+      <div class="lob-cfg" id="lobCfg" role="group" aria-labelledby="cfgTitle">
+        <h3 class="cfg-title" id="cfgTitle">Заезд <small id="cfgWho">меняет хост</small></h3>
+        <fieldset class="cfg-mode" id="cfgMode">
+          <legend class="vh">Режим</legend>
+          <div class="seg-radio">
+            <label><input type="radio" name="lobMode" value="track"><span>Дрифт</span></label>
+            <label><input type="radio" name="lobMode" value="traffic"><span>Трасса</span></label>
+          </div>
+        </fieldset>
+        <div class="cfg-row" id="rowLaps">
+          <span class="set-name" id="cfgLapsName">Круги</span>
+          <div class="stepper" role="group" aria-labelledby="cfgLapsName">
+            <button type="button" class="icon-btn" id="cfgLapsDown" aria-label="Меньше кругов"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+            <output id="cfgLaps" aria-live="polite">3</output>
+            <button type="button" class="icon-btn" id="cfgLapsUp" aria-label="Больше кругов"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+          </div>
         </div>
-      </div>
-      <div class="cfg-row" id="rowDens" hidden>
-        <span class="lbl">Трафик</span>
-        <div class="seg" id="cfgDens" role="group" aria-label="Плотность трафика">
-          <button type="button" data-dens="low" aria-pressed="false">Низкий</button>
-          <button type="button" data-dens="mid" aria-pressed="true">Средний</button>
-          <button type="button" data-dens="high" aria-pressed="false">Высокий</button>
+        <div class="cfg-row" id="rowMins" hidden>
+          <span class="set-name" id="cfgMinsName">Минуты</span>
+          <div class="stepper" role="group" aria-labelledby="cfgMinsName">
+            <button type="button" class="icon-btn" id="cfgMinsDown" aria-label="Меньше минут"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+            <output id="cfgMins" aria-live="polite">3</output>
+            <button type="button" class="icon-btn" id="cfgMinsUp" aria-label="Больше минут"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+          </div>
         </div>
+        <fieldset class="cfg-dens" id="cfgDens" hidden>
+          <legend class="set-name">Трафик</legend>
+          <div class="seg-radio">
+            <label><input type="radio" name="lobDens" value="low"><span>Низкий</span></label>
+            <label><input type="radio" name="lobDens" value="mid"><span>Средний</span></label>
+            <label><input type="radio" name="lobDens" value="high"><span>Высокий</span></label>
+          </div>
+        </fieldset>
       </div>
-      <div class="cfg-note" id="cfgNote"></div>
+      <button type="button" class="cta" id="startRace">Старт</button>
     </div>
-    <div class="lobby-garage">
-      <span class="lbl">Ваша машина</span>
-      <div class="garage" id="garageLobby"></div>
+    <p class="status" id="lobbyStatus" role="status"></p>
+
+    <div class="pop kick-pop" id="kickPop" popover aria-labelledby="kickQ">
+      <p id="kickQ">Выгнать игрока?</p>
+      <button type="button" class="cta small danger" id="kickYes">Да</button>
     </div>
-    <ul class="plist" id="plist"></ul>
-    <div class="row-btns">
-      <button class="cta small" id="startRace" type="button">Старт</button>
-      <button class="ghost-btn" id="leaveLobby" type="button">Выйти</button>
-    </div>
-    <div class="status" id="lobbyStatus" role="status"></div>
-  </div>
+  </section>
 
   <div class="card" id="pResults" hidden>
     <h1>Итоги <span>заезда</span></h1>
     <div class="res-wrap"><table class="res"><thead><tr id="resHead"><th>#</th><th>Гонщик</th><th>Время</th><th>Лучший круг</th><th>Дрифт</th></tr></thead><tbody id="resBody"></tbody></table></div>
-    <details class="garage-box">
-      <summary><span class="lbl">Сменить машину или цвет</span></summary>
-      <div class="garage" id="garageRes"></div>
-    </details>
     <div class="row-btns">
       <button class="cta small" id="again" type="button">Ещё заезд</button>
+      <button class="pill-btn" id="resCar" type="button" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>Авто</button>
       <button class="ghost-btn" id="leaveRes" type="button">Выйти в меню</button>
     </div>
     <div class="status" id="resStatus" role="status"></div>
@@ -614,6 +585,11 @@ body{margin:0}
     </div>
     <div class="tip">Пробел или Enter — сразу ещё раз, Esc — в гараж.</div>
   </div>
+</div>
+<!-- A note that outlives the screen it came from (e.g. "you were sent out of the room"). -->
+<div class="note-toast" id="noteToast" popover="manual">
+  <p id="noteText"></p>
+  <button type="button" class="icon-btn" popovertarget="noteToast" popovertargetaction="hide" aria-label="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

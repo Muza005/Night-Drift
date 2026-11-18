@@ -29,12 +29,13 @@
   --c-red: #ff4d5e;              /* worse / error */
 
   /* the six seats of a room: a player's own colour in lists, standings and name tags
-     (car paints may repeat, these never do in one room) */
+     (car paints may repeat, these never do in one room). None of them is the green of
+     "Готово", which rings an avatar on top of its seat colour. js/ui/seats.js has the same. */
   --seat-1: #3ef0ff;
   --seat-2: #ff3b6b;
   --seat-3: #ffc23d;
   --seat-4: #a77bff;
-  --seat-5: #3dff8a;
+  --seat-5: #5b8cff;
   --seat-6: #ff8a3d;
 
   /* spacing: a 4 px base, steps that roughly double */

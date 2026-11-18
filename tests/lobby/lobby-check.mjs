@@ -1,0 +1,173 @@
+// The lobby with three players in three real browsers (the game itself).
+//
+//   npm run test:lobby                (needs `npm install` in server/ and Chrome)
+//   npm run test:lobby -- --headed    (three real windows)
+//
+// The stage's "done" list: everyone sees the same order (the host first, with the crown,
+// then by who came in); the host's «Старт» lights only after the two others press
+// «Готово»; the host's settings reach everyone, and only the host has the controls; «Авто»
+// opens the garage and «Выбрать» brings the pick back; a rename reaches the others; the
+// host sends one player out: that player sees the note and cannot come back; in the race
+// every car is its player's model and paint, and every player has their seat's colour.
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { chromium } from 'playwright-core';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const HEADED = process.argv.includes('--headed');
+const PORT = 2598;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function startServer() {
+  const proc = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
+  for (let i = 0; i < 50; i++) {
+    try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) return proc; } catch {}
+    await sleep(200);
+  }
+  proc.kill(); throw new Error('server did not start (did you run npm install in server/?)');
+}
+const results = [];
+const check = (name, ok, info = '') => { results.push({ name, ok }); console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${info ? '  (' + info + ')' : ''}`); };
+
+const server = await startServer();
+const browser = await chromium.launch({
+  headless: !HEADED,
+  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
+  args: HEADED ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+});
+const errors = [];
+async function player(name, x) {
+  // (software rendering draws three games on the CPU: smaller windows, more patience)
+  const ctx = await browser.newContext({ viewport: HEADED ? { width: 1280, height: 800 } : { width: 900, height: 600 } });
+  ctx.setDefaultTimeout(HEADED ? 30000 : 120000);
+  await ctx.route(/three\.min\.js/, r => r.fulfill({ path: path.join(ROOT, 'node_modules/three/build/three.min.js'), contentType: 'text/javascript' }));
+  await ctx.route(/GLTFLoader\.js/, r => r.fulfill({ path: path.join(ROOT, 'node_modules/three/examples/js/loaders/GLTFLoader.js'), contentType: 'text/javascript' }));
+  await ctx.route(/unpkg\.com\/colyseus\.js/, r => r.fulfill({ path: path.join(ROOT, 'node_modules/colyseus.js/dist/colyseus.js'), contentType: 'text/javascript' }));
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  await ctx.addInitScript(n => { try { if (!sessionStorage.getItem('seeded')) { localStorage.clear(); localStorage.setItem('nightdrift.name', n); sessionStorage.setItem('seeded', '1'); } } catch {} }, name);
+  const page = await ctx.newPage();
+  page.on('pageerror', e => errors.push(name + ': ' + e.message));
+  page.on('console', m => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(name + ': ' + m.text()); });
+  await page.goto(`http://localhost:${PORT}/?debug&server=ws://localhost:${PORT}`);   // its own server, not one left on 2567
+  try { await page.waitForFunction(() => window.__nd, null, { timeout: 120000 }); }
+  catch (e) { throw new Error(name + ': the game did not start: ' + errors.join(' | ')); }
+  return page;
+}
+// what a page shows in its list: [number, name, host?, ready?]
+const listOf = p => p.$$eval('#plist .pl:not(.pl-empty)', rows => rows.map(r => [r.querySelector('.pl-num').textContent, r.querySelector('.pl-name').textContent.replace(' (вы)', ''), r.hasAttribute('data-host'), r.hasAttribute('data-ready')]));
+const startOff = p => p.$eval('#startRace', b => b.getAttribute('aria-disabled') === 'true');
+
+try {
+  const [A, B, C] = [await player('Ann'), await player('Bob'), await player('Cid')];
+  const CARS = await A.evaluate(async () => (await import('/js/core/cars.js')).CARS.map(c => [c.id, c.name]));
+
+  // A makes a room from the Дрифт card; B and C come in by its code
+  await A.click('#goOnline'); await sleep(400); await A.click('#mTrack');
+  await A.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('roomCode').textContent !== '----');
+  const code = (await A.innerText('#roomCode')).trim();
+  for (const p of [B, C]) {
+    await p.click('#goOnline'); await sleep(400); await p.fill('#codeIn', code); await p.click('#joinRoom');
+    await p.waitForFunction(() => !document.getElementById('pLobby').hidden);
+    await sleep(300);                               // B is in before C: the order is by who came in
+  }
+  for (const p of [A, B, C]) await p.waitForFunction(() => document.querySelectorAll('#plist .pl:not(.pl-empty)').length === 3);
+  const lists = await Promise.all([A, B, C].map(listOf));
+  const want = JSON.stringify([['1', 'Ann', true, false], ['2', 'Bob', false, false], ['3', 'Cid', false, false]]);
+  check('all three see the same list: host first with the crown, then by order', lists.every(l => JSON.stringify(l) === want), JSON.stringify(lists[1]));
+  check('three free seats are left', await A.$$eval('#plist .pl-empty', e => e.length) === 3);
+  check('the host has «Старт», the others «Готово»', await A.innerText('#startRace') === 'Старт' && await B.innerText('#startRace') === 'Готово' && await C.innerText('#startRace') === 'Готово');
+
+  // «Старт» lights only after both others are ready
+  check('«Старт» is off while nobody is ready', await startOff(A));
+  await B.click('#startRace');
+  await A.waitForFunction(() => document.querySelector('#plist .pl:nth-child(2)').hasAttribute('data-ready'));
+  check('one ready: the green ring on that player, «Старт» still off', await startOff(A) && (await listOf(C))[1][3] === true);
+  await A.click('#startRace', { force: true }); await sleep(300);
+  check('a press on the off «Старт» starts nothing, it says why', await A.evaluate(() => __nd.NET.room.state.phase) === 'lobby' && /Готово/.test(await A.innerText('#lobbyStatus')));
+  await C.click('#startRace');
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
+  check('both ready: «Старт» lights, with its one flash', await A.$eval('#startRace', b => b.classList.contains('armed')));
+  await C.click('#startRace');                    // C takes it back…
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  check('«Готово» pressed again takes it back: «Старт» goes off', await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false');
+  await C.click('#startRace');                    // …and presses it again
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
+
+  // the settings: the host's steppers, the others only see the value
+  await A.click('#cfgLapsUp'); await A.click('#cfgLapsUp');
+  await B.waitForFunction(() => document.getElementById('cfgLaps').textContent === '5');
+  check('the host sets 5 laps, the others see 5', await C.innerText('#cfgLaps') === '5');
+  check('only the host has the controls', await B.$eval('#cfgLapsUp', b => b.hidden) && await B.$eval('#cfgMode input', i => i.disabled) && !(await A.$eval('#cfgLapsUp', b => b.hidden)));
+
+  // «Авто» → the garage → «Выбрать»: back in the lobby with the pick
+  await B.click('#lobCar');
+  await B.waitForFunction(() => !document.getElementById('pGarage').hidden);
+  check('«Авто» opens the garage: «Гараж», «Выбрать», no "!"', await B.innerText('#garTitle') === 'Гараж' && await B.innerText('#garGo') === 'Выбрать' && await B.$eval('#garSet', b => b.hidden));
+  for (let i = 0; i < 2; i++) { await B.keyboard.press('ArrowRight'); await sleep(150); }
+  await B.click('#garPaint'); await B.click('#garSwatches button[aria-label="Красный"]'); await B.keyboard.press('Escape');
+  await B.click('#garGo');
+  await B.waitForFunction(() => !document.getElementById('pLobby').hidden);
+  const bCar = CARS[2];
+  await B.waitForFunction(n => document.getElementById('lobCarName').textContent === n, bCar[1]);
+  await A.waitForFunction(n => document.querySelector('#plist .pl:nth-child(2) .pl-sub').textContent.includes(n), bCar[1]);
+  check('«Выбрать»: back in the lobby with that car, and the others see it', await B.innerText('#lobPaint') === 'Цвет: красный');
+  // «←» in the garage changes nothing
+  await C.click('#lobCar'); await C.waitForFunction(() => !document.getElementById('pGarage').hidden);
+  await C.keyboard.press('ArrowRight'); await sleep(150); await C.click('#garBack');
+  await C.waitForFunction(() => !document.getElementById('pLobby').hidden);
+  check('«←» in the garage: back with nothing changed', await C.innerText('#lobCarName') === CARS[0][1]);
+  await C.click('#lobCar'); await C.waitForFunction(() => !document.getElementById('pGarage').hidden);
+  for (let i = 0; i < 4; i++) { await C.keyboard.press('ArrowRight'); await sleep(150); }
+  await C.click('#garGo'); await C.waitForFunction(() => !document.getElementById('pLobby').hidden);
+  const cCar = CARS[4];
+
+  // a rename: my own row, Enter
+  await C.click('#plist .pl[data-me] .pl-who');
+  await C.fill('#plist .pl-input', 'Cat'); await C.keyboard.press('Enter');
+  await A.waitForFunction(() => document.querySelector('#plist .pl:nth-child(3) .pl-name').textContent === 'Cat');
+  check('a click on my row renames me; the others see it', (await listOf(B))[2][1] === 'Cat' && await C.evaluate(() => localStorage.getItem('nightdrift.name')) === 'Cat');
+
+  // the host sends C out: ✕, «Выгнать Cat?», «Да»
+  await A.hover('#plist .pl:nth-child(3)');
+  check('the host has a ✕ on the others, none on itself', await A.$$eval('#plist .pl', rows => rows.slice(0, 3).map(r => { const k = r.querySelector('.pl-kick'); return k ? String(!k.hidden) : 'none'; }).join()) === 'none,true,true');
+  check('the others have no ✕', await B.$$eval('#plist .pl-kick', ks => ks.every(k => k.hidden)));
+  await A.click('#plist .pl:nth-child(3) .pl-kick');
+  await A.waitForFunction(() => document.getElementById('kickPop').matches(':popover-open'));
+  check('✕ asks first: «Выгнать Cat?»', await A.innerText('#kickQ') === 'Выгнать Cat?');
+  await A.keyboard.press('Escape'); await sleep(250);
+  check('Esc cancels: nobody leaves, the host stays in the lobby', !(await A.evaluate(() => document.getElementById('kickPop').matches(':popover-open'))) && await A.evaluate(() => __nd.NET.room.state.players.size) === 3 && !(await A.$eval('#pLobby', e => e.hidden)));
+  await A.click('#plist .pl:nth-child(3) .pl-kick');
+  await A.click('#kickYes');
+  await C.waitForFunction(() => !document.getElementById('pModes').hidden && document.getElementById('noteToast').matches(':popover-open'), null, { timeout: 10000 });
+  check('the kicked player is back on the online cards, with the note', /исключили/.test(await C.innerText('#noteText')));
+  await A.waitForFunction(() => __nd.NET.room.state.players.size === 2);
+  check('the host and Bob now see two players', (await listOf(B)).length === 2);
+  await C.fill('#codeIn', code); await C.click('#joinRoom');
+  await C.waitForFunction(() => document.getElementById('netStatus').textContent.length > 0 && document.getElementById('pModes').getAttribute('aria-busy') !== 'true', null, { timeout: 10000 });
+  await sleep(500);
+  check('…and cannot come back, and is told why', !(await C.evaluate(() => __nd.NET.online)) && await A.evaluate(() => __nd.NET.room.state.players.size) === 2 && /исключил/.test(await C.innerText('#netStatus')), await C.innerText('#netStatus'));
+
+  // the race: every car is its player's model and paint; seat colours on the tags
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
+  await A.click('#startRace');
+  for (const p of [A, B]) await p.waitForFunction(() => ['countdown', 'race'].includes(__nd.NET.room.state.phase), null, { timeout: 15000 });
+  const bId = await B.evaluate(() => __nd.NET.room.sessionId), aId = await A.evaluate(() => __nd.NET.room.sessionId);
+  await A.waitForFunction(id => { const g = __nd.NET.ghosts.get(id); return g && g.m.model; }, bId, { timeout: 30000 });
+  await B.waitForFunction(id => { const g = __nd.NET.ghosts.get(id); return g && g.m.model; }, aId, { timeout: 30000 });
+  const seenByA = await A.evaluate(id => { const g = __nd.NET.ghosts.get(id); return { car: g.m.model.carId, paint: g.m.model.code, accent: g.accent }; }, bId);
+  const seenByB = await B.evaluate(id => { const g = __nd.NET.ghosts.get(id); return { car: g.m.model.carId, accent: g.accent }; }, aId);
+  check('in the race the host sees Bob\'s model and paint', seenByA.car === bCar[0] && seenByA.paint === 0xd3202a, JSON.stringify(seenByA));
+  check('…and Bob sees the host\'s', seenByB.car === CARS[0][0], JSON.stringify(seenByB));
+  check('seat colours: the host cyan, the second rose', seenByB.accent === 0x3ef0ff && seenByA.accent === 0xff3b6b);
+  check('the lobby is gone in the race (no menu, no stand drawing)', await A.evaluate(() => document.getElementById('menu').hidden));
+  void cCar;
+
+  check('no errors in the pages', errors.length === 0, errors.slice(0, 3).join(' | '));
+} finally {
+  await browser.close();
+  server.kill();
+}
+const bad = results.filter(r => !r.ok);
+console.log(bad.length ? `\n${bad.length} of ${results.length} checks failed` : `\nall ${results.length} checks passed`);
+process.exit(bad.length ? 1 : 0);

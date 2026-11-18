@@ -26,6 +26,7 @@ export function showPanel(id, dir){
   if(document.startViewTransition){
     from.style.viewTransitionName='screen-out';
     const vt=document.startViewTransition(()=>{ from.style.viewTransitionName=''; swap(); to.style.viewTransitionName='screen-in'; });
+    vt.ready.catch(()=>{});              // skipped (a resize, a phone turned): the swap still happened
     vt.finished.finally(()=>{ to.style.viewTransitionName=''; }).catch(()=>{});
     return vt.updateCallbackDone.catch(()=>{});
   } else {
@@ -37,3 +38,17 @@ export function showPanel(id, dir){
   }
 }
 export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s.classList.toggle('err',!!err); }
+
+// A note at the top of the page that outlives the screen it came from ("you were sent out
+// of the room"). It stays 6 s (longer while the focus is on its close button). What it says
+// is also on the screen below it (a status line there reads it out), so it says nothing
+// itself: a second voice would only repeat it.
+let noteTimer=0;
+export function note(text){
+  const t=$('noteToast'); if(!t) return;
+  $('noteText').textContent=text;
+  if(!t.matches(':popover-open')) t.showPopover();
+  clearTimeout(noteTimer);
+  const later=()=>{ noteTimer=setTimeout(()=>{ if(t.contains(document.activeElement)) later(); else if(t.matches(':popover-open')) t.hidePopover(); },6000); };
+  later();
+}

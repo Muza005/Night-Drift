@@ -190,6 +190,7 @@ addEventListener('keydown', e => {
 export const garage = {
   get open(){ return S.open && !$('pGarage').hidden; },
   frame(now){ drawBackdrop(); stand.frame(now); },
+  close(){ if(S.open) leave(); },          // a run starts (online) or the room is gone: no callback
   stand,
   get pick(){ return { car: CARS[S.idx].id, paint: S.paint }; },
 };

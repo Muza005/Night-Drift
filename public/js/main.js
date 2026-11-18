@@ -17,6 +17,7 @@ import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
 import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
 import { openGarage, garage } from './ui/garageScreen.js';
+import { lobby } from './ui/lobbyScreen.js';
 import { choice, savePick } from './ui/garage.js';
 import { applyLook } from './player.js';
 
@@ -227,11 +228,21 @@ G.mode.idle(car);
 
 /* ---------- loop ---------- */
 let last=performance.now(), menuA=0;
+// The camera behind a menu screen: circling the car. The lobby and the garage take one
+// still picture from here (G.menuView, then core/render.js captureBackdrop).
+function menuView(){
+  rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
+  camera.position.copy(rig.pos); rig.look.set(car.x,.9,car.z); camera.lookAt(rig.look); rig.init=false;
+  camera.fov=58; if(camera.view && camera.view.enabled) camera.clearViewOffset();
+  camera.updateProjectionMatrix();
+}
+G.menuView=menuView;
 function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
   // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
   if(garage.open){ garage.frame(now); return; }
+  if(lobby.open){ lobby.frame(now); return; }        // the lobby: the same, with my car
   // Below 20 fps the game runs in slow motion; others must predict this car at its real pace.
   NET.pace=(NET.pace||1)*.9+(dt/realDt)*.1;
   qualityTick(realDt, G.state==='race');                      // slow device: fewer pixels, then no shadows
@@ -297,9 +308,7 @@ function frame(now){
 
   // camera
   if(G.state==='menu'||G.state==='lobby'||G.state==='results'){
-    menuA+=dt*.22; rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
-    camera.position.copy(rig.pos); rig.look.set(car.x,.9,car.z); camera.lookAt(rig.look); rig.init=false;
-    camera.fov=58; if(camera.view && camera.view.enabled) camera.clearViewOffset();
+    menuA+=dt*.22; menuView();
   } else {
     G.mode.camera(car,dt);
   }

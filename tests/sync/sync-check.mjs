@@ -124,7 +124,7 @@ async function runOnce(browser) {
     step = 'B joins'; await B.evaluate(() => localStorage.setItem('nightdrift.name', 'B')); await B.click('#goOnline'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
-    step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => !document.getElementById('startRace').disabled); await A.click('#startRace');   // B: «Готово», then A: «Старт»
+    step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false'); await A.click('#startRace');   // B: «Готово», then A: «Старт»
     for (const p of [A, B]) await p.waitForFunction(() => window.__nd.NET.room.state.phase === 'race', null, { timeout: 20000 });
     await A.bringToFront(); await A.click('#c'); await sleep(600);
 
@@ -133,7 +133,10 @@ async function runOnce(browser) {
     await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z); });
     await A.keyboard.down('w');
     let bump = 0;
-    for (let i = 0; i < 30; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); }
+    // Software rendering runs a few frames a second, and below 20 fps the game runs in slow
+    // motion: A may need many seconds to cover the few metres. Drive until the hit lands
+    // (or 12 s have passed), then a moment more for it to reach B.
+    for (let i = 0; i < 120; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); if (bump > MIN_BUMP) break; }
     await A.keyboard.up('w'); await sleep(1000); await A.keyboard.press('r'); await sleep(500);
 
     step = 'prediction drive';

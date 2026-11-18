@@ -6,7 +6,8 @@
     "test": "node --test tests/*.test.mjs",
     "test:sync": "node tests/sync/sync-check.mjs",
     "test:stand": "node tests/stand/stand-check.mjs",
-    "test:garage": "node tests/garage/garage-check.mjs"
+    "test:garage": "node tests/garage/garage-check.mjs",
+    "test:lobby": "node tests/lobby/lobby-check.mjs"
   },
   "repository": {
     "type": "git",
