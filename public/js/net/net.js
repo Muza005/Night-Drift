@@ -373,9 +373,10 @@ export function updateGhosts(dt){
     g.x=s.x; g.z=s.z; g.h=s.h;
     m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
     // a name tag right at the camera (that car is just behind ours) would fill the screen:
-    // it fades out closer than 8 m and is gone by 4 m
+    // it fades out closer than 16 m and is gone by 8 m (the tags are for cars further off;
+    // the cars around ours are named in the standings)
     { const d=Math.hypot(camera.position.x-s.x, camera.position.y-2.8, camera.position.z-s.z);
-      g.label.material.opacity=Math.max(0,Math.min(1,(d-4)/4)); }
+      g.label.material.opacity=Math.max(0,Math.min(1,(d-8)/8)); }
     // its pocket, seen from our car: the white lines show when we are close behind it
     const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished) ? wake(car,g) : null;
     if(wk && wk.inside) inPocket=true;
