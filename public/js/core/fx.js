@@ -9,11 +9,11 @@ const marks=new THREE.InstancedMesh(new THREE.PlaneGeometry(.34,1).rotateX(-Math
 marks.count=0; marks.frustumCulled=false; scene.add(marks);
 let markI=0, markTotal=0;
 const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(), _v=new THREE.Vector3(), _s=new THREE.Vector3();
-export function addMark(holder,k,x,z){
+export function addMark(holder,k,x,z,y=0){   // y: the road's height there (maps with heights)
   const L=holder.lastMark[k]; if(!L){ holder.lastMark[k]={x,z}; return; }
   const dx=x-L.x, dz=z-L.z, d=Math.hypot(dx,dz); if(d<.45) return;
   if(d>4){ holder.lastMark[k]={x,z}; return; }
-  _v.set((x+L.x)/2,.04,(z+L.z)/2); _e.set(0,Math.atan2(dx,dz),0); _q.setFromEuler(_e); _s.set(1,1,d+.05);
+  _v.set((x+L.x)/2,.04+y,(z+L.z)/2); _e.set(0,Math.atan2(dx,dz),0); _q.setFromEuler(_e); _s.set(1,1,d+.05);
   _m.compose(_v,_q,_s); marks.setMatrixAt(markI,_m); markI=(markI+1)%MARKS; markTotal++;
   marks.count=Math.min(markTotal,MARKS); marks.instanceMatrix.needsUpdate=true; holder.lastMark[k]={x,z};
 }
@@ -27,9 +27,9 @@ smokeGeo.setAttribute('color',new THREE.BufferAttribute(smokeCol,3));
 const smokePts=new THREE.Points(smokeGeo,new THREE.PointsMaterial({size:2.55,map:glowTex,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true}));
 smokePts.frustumCulled=false; scene.add(smokePts);
 let smokeI=0;
-export function emitSmoke(x,z,vx,vz,amt){
+export function emitSmoke(x,z,vx,vz,amt,y=0){
   const p=smoke[smokeI]; smokeI=(smokeI+1)%SMOKE;
-  p.x=x+(Math.random()-.5)*.6; p.y=.4; p.z=z+(Math.random()-.5)*.6;
+  p.x=x+(Math.random()-.5)*.6; p.y=.4+y; p.z=z+(Math.random()-.5)*.6;
   p.vx=vx*.25+(Math.random()-.5)*2; p.vy=1+Math.random()*1.5; p.vz=vz*.25+(Math.random()-.5)*2;
   p.max=p.life=.9+Math.random()*.8*amt;
 }

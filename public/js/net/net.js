@@ -78,7 +78,7 @@ export async function connectRoom(kind){
   netStatus('netStatus', kind==='create' ? 'Создаю комнату…' : 'Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',map:G.soloMap||'neon',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     try{ bindRoom(room); }
     catch(e){ console.error('joining the room failed', e); try{ room.leave(true); }catch(_){} leaveOnline('Не получилось войти в комнату. Обновите страницу.'); }
@@ -138,6 +138,8 @@ function bindRoom(room){
   room.state.listen('hostId',()=>{ relabel(); renderLobby(); renderResults(); });
   // between runs the scene behind the lobby follows the mode the host picked
   room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m).catch(e=>console.error('mode failed to load', m, e)); renderLobby(); });
+  // the room's drift map: everyone in the room drives the same one (not mid-run)
+  room.state.listen('map',id=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMap && G.setMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } renderLobby(); });
   room.state.listen('duration',()=>renderLobby());
   room.state.listen('density',()=>renderLobby());
   room.state.listen('laps',()=>renderLobby());
@@ -162,7 +164,8 @@ function onPhase(ph){
       if(p==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); }
       else { G.state='count'; G.prevCount=99; }
     };
-    // the room's mode decides the scene (the highway module may still need to load)
+    // the room's map and mode decide the scene (the highway module may still need to load)
+    if(G.setMap) G.setMap(s.map);
     if(G.mode.id!==s.mode && G.setMode) G.setMode(s.mode).then(go, e=>{ console.error('mode failed to load', s.mode, e); leaveOnline('Не загрузился режим «Трасса». Обновите страницу.'); });
     else go();
   }
@@ -202,6 +205,7 @@ export async function leaveOnline(msg){
   applyLook(choice.car,choice.paint); $('standings').hidden=true;
   // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
   $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
+  if(G.setMap) G.setMap(null);           // back to the solo map
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
   if(G.openModes) G.openModes('online','back'); else showPanel('pModes');
   netStatus('netStatus',msg||'',!!msg);
@@ -256,7 +260,7 @@ function pushSnap(g,p){
   const b=g.buf, l=b[b.length-1];
   if(!p.t || (l && p.t<=l.t)) return;      // nothing new, or an out-of-date update
   // t is the sender's clock (synced to the server) at the moment this position was true.
-  b.push({t:p.t,x:p.x,z:p.z,h:p.h,vx:p.vx,vz:p.vz,vf:p.vf,steer:p.steer,slide:p.slide});
+  b.push({t:p.t,x:p.x,z:p.z,h:p.h,vx:p.vx,vz:p.vz,vf:p.vf,steer:p.steer,slide:p.slide,y:p.y||0,vy:p.vy||0,idx:p.idx});
   if(b.length>2) b.shift();
 }
 // Where a car is at server time nowS: its last reported position moved forward by its
@@ -292,6 +296,7 @@ export function collideGhosts(){
     if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
     if(nowS < g.p.ghostUntil) continue;                     // their car crashed and is blinking
     if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
+    if(Math.abs((g.y||0)-(car.y||0))>3) continue;          // one on a bridge, the other under it
     let best=null;
     for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
       const dx=a[0]-b[0], dz=a[1]-b[1], d=Math.hypot(dx,dz);
@@ -368,26 +373,30 @@ export function updateGhosts(dt){
       g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; }
     if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
     const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
-    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
+    // height: their reported height carried on by their vertical speed (in a jump it is the
+    // flight; vy is 0 on the road), the track mode keeps it on or above the road
+    const age=Math.min(.5,Math.max(0,(nowS-s1.t)/1000));
+    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide,
+      y:s1.vy?s1.y+s1.vy*age-4.905*age*age:s1.y, idx:s1.idx};
     if(G.mode.ghostBounds) G.mode.ghostBounds(s,g);        // never through a wall or a rail (the prediction does not know them)
-    g.x=s.x; g.z=s.z; g.h=s.h;
-    m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
+    g.x=s.x; g.z=s.z; g.h=s.h; g.y=s.y||0;
+    m.root.position.set(s.x,g.y,s.z); m.root.rotation.y=s.h;
     // a name tag right at the camera (that car is just behind ours) would fill the screen:
     // it fades out closer than 16 m and is gone by 8 m (the tags are for cars further off;
     // the cars around ours are named in the standings)
     { const d=Math.hypot(camera.position.x-s.x, camera.position.y-2.8, camera.position.z-s.z);
       g.label.material.opacity=Math.max(0,Math.min(1,(d-8)/8)); }
     // its pocket, seen from our car: the white lines show when we are close behind it
-    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished) ? wake(car,g) : null;
+    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=3) ? wake(car,g) : null;   // not across a bridge
     if(wk && wk.inside) inPocket=true;
-    updateWake(g.fx,wk,s.x,s.z,dt);
+    updateWake(g.fx,wk,s.x,s.z,dt,g.y);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
     m.under.material.opacity=.4+s.slide*.35;
     const fx=Math.sin(s.h), fz=Math.cos(s.h), rx=Math.cos(s.h), rz=-Math.sin(s.h);
     for(const [k,lx] of [[0,.95],[1,-.95]]){
       const wx=s.x+rx*lx-fx*1.35, wz=s.z+rz*lx-fz*1.35;
-      if(s.slide>.12 && s.vf>5){ addMark(m,k,wx,wz); if(Math.random()<.3) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3); }
+      if(s.slide>.12 && s.vf>5 && !(s1.vy)){ addMark(m,k,wx,wz,g.y); if(Math.random()<.3) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3,g.y); }
       else m.lastMark[k]=null;
     }
   }
@@ -400,7 +409,7 @@ export function sendState(dt,slide){
   if(NET.online && NET.room && (G.state==='race'||G.state==='count')){
     NET.sendT+=dt;
     if(NET.sendT>=.033){ NET.sendT=0;
-      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow(),
+      NET.room.send('state',{x:car.x,z:car.z,h:car.h,y:car.y||0,vy:car.air?car.vy:0,idx:car.idx||0,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow(),
         ...(G.mode.stats ? { misses: G.mode.stats().misses } : {})}); }
   }
 }
@@ -420,7 +429,7 @@ export function renderStandings(){
   NET.room.state.players.forEach((p,id)=>{
     const mine=id===me, laps=mine?Math.min(G.lap-1,NET.laps):p.lap, prog=mine?car.prog:p.prog;
     rows.push({name:p.name,color:accent(id),mine,fin:p.finished,
-      key:p.finished?1e7-p.place:laps*1000+prog,
+      key:p.finished?1e9-p.place:laps*1e5+prog,
       tag:p.finished?'финиш':Math.min(laps+1,NET.laps)+'/'+NET.laps});
   });
   rows.sort((a,b)=>b.key-a.key);

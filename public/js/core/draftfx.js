@@ -44,14 +44,14 @@ export function createWake() {
 }
 
 // w: the result of wake() for this car (or null); x, z: the car; dt: frame time.
-export function updateWake(fx, w, x, z, dt) {
+export function updateWake(fx, w, x, z, dt, y = 0) {   // y: the car's height (maps with heights)
   const target = w ? w.show : 0;
   fx.a += (target - fx.a) * Math.min(1, dt * 6);
   fx.root.visible = fx.a > .02;
   if (!fx.root.visible) return;
   if (w) { fx.len = w.len; fx.v = w.speed; fx.inside = w.inside; fx.root.rotation.y = Math.atan2(w.dirX, w.dirZ); }
   const len = fx.len || 20;
-  fx.root.position.set(x, 0, z);
+  fx.root.position.set(x, y, z);
   for (const m of fx.lines) {
     const { s, dx, y } = m.userData;
     const x0 = s * (.95 + dx), x1 = s * (pocketHalf(len) + dx);

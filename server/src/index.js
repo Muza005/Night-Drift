@@ -24,7 +24,12 @@ const PORT = Number(process.env.PORT) || 2567;
 const MAX_PLAYERS = 6;
 const LAPS = 3, MIN_LAPS = 1, MAX_LAPS = 10;            // drift track: laps the host can pick
 const COUNTDOWN_MS = 4000;      // time from "start" to green light
-const MIN_LAP_MS = Number(process.env.MIN_LAP_MS) || 20000;       // no lap on this track can be faster than this
+// No lap can be faster than this: by default per map (public/js/modes/track/maps/meta.js
+// minLapMs: the lap at 80 m/s); MIN_LAP_MS overrides it for tests.
+const MIN_LAP_MS = Number(process.env.MIN_LAP_MS) || 0;
+// Hidden maps (test maps such as _testhill) can be picked only on a server started with
+// ALLOW_HIDDEN_MAPS=1.
+const ALLOW_HIDDEN_MAPS = process.env.ALLOW_HIDDEN_MAPS === '1';
 const FINISH_GRACE_MS = Number(process.env.FINISH_GRACE_MS) || 45000;  // after the winner finishes, others get this long
 const MODES = ['track', 'traffic'];
 // Traffic run lengths the host can pick: 1 to 10 minutes, whole minutes. EXTRA_DURATION
@@ -47,6 +52,13 @@ async function trafficLib() {
   }
   return T;
 }
+// The drift maps' ids, lap lengths and hidden flags: public/js/modes/track/maps/meta.js
+// (plain data, shared with the game; the geometry itself stays in the browser).
+let MAPS = null;
+async function mapsLib() {
+  if (!MAPS) MAPS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'modes', 'track', 'maps', 'meta.js')).href);
+  return MAPS;
+}
 // The cars and paints players can pick: public/js/core/cars.js, shared with the game.
 // Players may share a paint: the interface marks a player by their seat, not by colour.
 let CARS = null;
@@ -68,11 +80,13 @@ class Player extends Schema {
     this.ready = false;      // pressed "Готово" in the lobby (the host does not need to)
     this.connected = true;
     this.x = 0; this.z = 0; this.h = 0;
+    this.y = 0; this.vy = 0;   // height and, in a jump, vertical speed (track maps with heights)
+    this.idx = 0;            // the sender's nearest track point (finds the right road at a bridge)
     this.vf = 0; this.steer = 0; this.slide = 0;
     this.vx = 0; this.vz = 0;
     this.t = 0;              // sender's synced clock (server ms) when this position was true
     this.lap = 0;            // completed laps
-    this.prog = 0;           // progress along the current lap, 0..900
+    this.prog = 0;           // progress along the current lap, 0..track points (900 on «Ночной город»)
     this.score = 0;
     this.bestLap = 0;        // ms, measured by the server
     this.finished = false;
@@ -87,7 +101,7 @@ class Player extends Schema {
 }
 defineTypes(Player, {
   name: 'string', color: 'number', car: 'string', slot: 'uint8', order: 'uint16', ready: 'boolean', connected: 'boolean',
-  x: 'float32', z: 'float32', h: 'float32',
+  x: 'float32', z: 'float32', h: 'float32', y: 'float32', vy: 'float32', idx: 'uint16',
   vf: 'float32', steer: 'float32', slide: 'float32',
   vx: 'float32', vz: 'float32', t: 'float64',
   lap: 'uint8', prog: 'int16', score: 'uint32', bestLap: 'number',
@@ -103,6 +117,7 @@ class RaceState extends Schema {
     this.laps = LAPS;        // drift track: laps in a race (1..10)
     this.startAt = 0;        // server clock (ms) of the green light
     this.mode = 'track';     // track | traffic, picked by the host in the lobby
+    this.map = 'neon';       // drift map id (public/js/modes/track/maps/), picked by the host in the lobby
     this.duration = 180;     // traffic: run length, s (60..600, whole minutes)
     this.density = 'mid';    // traffic: low | mid | high
     this.endAt = 0;          // traffic: server clock (ms) when the run ends
@@ -112,7 +127,7 @@ class RaceState extends Schema {
 }
 defineTypes(RaceState, {
   phase: 'string', hostId: 'string', laps: 'uint8', startAt: 'number',
-  mode: 'string', duration: 'uint16', density: 'string', endAt: 'float64', seed: 'uint32',
+  mode: 'string', map: 'string', duration: 'uint16', density: 'string', endAt: 'float64', seed: 'uint32',
   players: { map: Player },
 });
 
@@ -139,9 +154,11 @@ class RaceRoom extends Room {
   async onCreate(options) {
     this.maxClients = MAX_PLAYERS;
     this.cars = await carsLib();
+    this.maps = await mapsLib();
     this.roomId = await freeCode();
     this.setState(new RaceState());
     if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
+    if (options && this.maps.mapAllowed(options.map, ALLOW_HIDDEN_MAPS)) this.state.map = options.map;
     if (options && DENSITIES.includes(options.density)) this.state.density = options.density;
     this.nextOrder = 1;          // the next player's order
     this.banned = new Set();     // sessionIds and player ids the host kicked out: never back in
@@ -198,11 +215,12 @@ class RaceRoom extends Room {
       p.name = cleanName(m.name);
     });
 
-    // Host only, between runs: the mode, laps (track), run length and density (traffic).
+    // Host only, between runs: the mode, map and laps (track), run length and density (traffic).
     // A value out of range is ignored, the rest of the message still counts.
     this.onMessage('config', (client, m) => {
       if (client.sessionId !== this.state.hostId || !isObj(m) || !this.betweenRuns()) return;
       if (MODES.includes(m.mode)) this.state.mode = m.mode;
+      if (this.maps.mapAllowed(m.map, ALLOW_HIDDEN_MAPS)) this.state.map = m.map;   // an unknown or hidden id is ignored
       if (Number.isInteger(m.laps) && m.laps >= MIN_LAPS && m.laps <= MAX_LAPS) this.state.laps = m.laps;
       if (okDuration(m.duration)) this.state.duration = m.duration;
       if (DENSITIES.includes(m.density)) this.state.density = m.density;
@@ -243,13 +261,16 @@ class RaceRoom extends Room {
       this.lastState.set(client.sessionId, { t: now, x, z });
       p.x = x; p.z = z;
       p.h = finite(m.h, -1e4, 1e4, p.h);
+      p.y = hw ? 0 : finite(m.y, -50, 200, 0);     // a map's roads stay within this; a jump's peak too
+      p.vy = hw ? 0 : finite(m.vy, -60, 60, 0);
+      p.idx = Math.round(finite(m.idx, 0, 65535, 0));
       p.vf = finite(m.vf, -20, 80);          // forward speed: 72.3 m/s flat out, a little more in a slipstream
       p.steer = finite(m.steer, -1, 1);
       p.slide = finite(m.slide, 0, 1);
       p.vx = finite(m.vx, -80, 80); p.vz = finite(m.vz, -80, 80);   // the fastest car in a slipstream: ~72 m/s
       // Trust the sender's timestamp only within a sane window around the server clock.
       p.t = finite(m.t, now - 1500, now, now);
-      p.prog = Math.round(finite(m.prog, -50, 900));
+      p.prog = Math.round(finite(m.prog, -50, 8000));   // track points into the lap: 900 on «Ночной город», more on longer maps
       if (!p.finished) p.score = this.acceptScore(p, finite(m.score, 0, 1e8, p.score), now);
       if (hw) p.misses = Math.round(finite(m.misses, p.misses, 65535, p.misses));
     });
@@ -290,7 +311,7 @@ class RaceRoom extends Room {
       if (!p || p.finished || this.state.phase !== 'race' || this.state.mode !== 'track') return;
       const now = Date.now();
       const lapMs = now - (this.lapStamp.get(client.sessionId) || this.state.startAt);
-      if (lapMs < MIN_LAP_MS) return;           // impossible lap: ignore
+      if (lapMs < (MIN_LAP_MS || this.maps.minLapMs(this.state.map))) return;   // impossible lap: ignore
       this.lapStamp.set(client.sessionId, now);
       p.lap += 1;
       if (!p.bestLap || lapMs < p.bestLap) p.bestLap = lapMs;
@@ -503,7 +524,7 @@ class RaceRoom extends Room {
     }
     // Unfinished players are ranked by distance covered.
     const rest = [...this.state.players.values()].filter(p => !p.finished)
-      .sort((a, b) => (b.lap * 1000 + b.prog) - (a.lap * 1000 + a.prog));
+      .sort((a, b) => (b.lap * 1e5 + b.prog) - (a.lap * 1e5 + a.prog));   // prog: up to a few thousand track points
     let place = [...this.state.players.values()].filter(p => p.finished).length;
     rest.forEach(p => { p.place = ++place; });
     this.state.phase = 'results';

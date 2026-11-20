@@ -1,54 +1,222 @@
-// Drift track geometry and the track's rules for a car: walls, off-track slowdown, laps.
-// No rendering and no DOM here, so the physics test can run this file in Node.
-// Everything below is the single-file version's code, unchanged except that the car
-// is passed in instead of read from a global.
+// Drift track geometry and the track's rules for a car: walls, off-track slowdown, laps,
+// and (track engine v2) heights, slopes, banking, jumps and bridges.
+// No rendering and no DOM here, so the Node tests can run this file.
+//
+// The track comes from a map (maps/*.js: control points [x, z, height, bank], width,
+// start, bridges). setMap(id) builds every array below from it; they are filled in place
+// (and N, START, ... are live bindings), so scene.js, index.js and net.js always read the
+// active map. Listeners from onMapChange() run after a switch (the scenery, the minimap).
+//
+// On a flat map («Ночной город») everything new here is skipped: constrainToTrack does
+// exactly what version 2 did, so the physics golden test matches bit for bit.
 import { wallKeep, wallAlign } from '../../core/physics.js';
+import { closedCurve } from './curve.js';
+import { MAPS, DEFAULT_MAP } from './maps/index.js';
 
-const RAW=[[0,0],[80,-20],[150,10],[170,80],[120,130],[60,110],[20,160],[-60,170],[-130,120],[-120,50],[-60,40],[-90,-30],[-50,-80]];
-export const SC=1.45;
-const curve = new THREE.CatmullRomCurve3(RAW.map(([x,z])=>new THREE.Vector3(x*SC,0,z*SC)), true, 'centripetal');
-export const N=900, ROAD=16, HALF=ROAD/2, CURB=1.4, WALL=HALF+6;
-export const P=[], TG=[], NM=[], DIST=[];
-for(let i=0;i<N;i++){ const u=i/N; P.push(curve.getPointAt(u)); const t=curve.getTangentAt(u); t.y=0; t.normalize(); TG.push(t); NM.push(new THREE.Vector3(t.z,0,-t.x)); }
-export const TRACK_LEN = (() => { let L=0; for(let i=0;i<N;i++){ DIST.push(L); L+=P[i].distanceTo(P[(i+1)%N]); } return L; })();
-export const START=12;
+export const CURB = 1.4, GRAV = 9.81;
+export let MAP = null, N = 0, ROAD = 16, HALF = 8, WALL = 14, START = 0, TRACK_LEN = 0, SC = 1, FLAT = true;
+// per track point: position (y = road height), horizontal tangent and normal (NM points to
+// the driver's left), distance along the lap
+export const P = [], TG = [], NM = [], DIST = [];
+// per track point: height (= P[i].y), grade dY/ds, bank (radians, > 0 lifts the left/+NM
+// edge) and its tangent, horizontal length to the next point, signed radius of the
+// centre line (> 0: a right-hand turn, the centre of the turn on the -NM side), whether
+// it is part of a bridge, and its control-point coordinate (maps' `bridges`, `start`)
+export const Y = [], GR = [], BANK = [], TB = [], HL = [], RAD = [], BRIDGE = [], CP = [];
+
+const listeners = [];
+export function onMapChange(fn){ listeners.push(fn); }
+
+export function setMap(id){
+  const map = MAPS[typeof id==='string' && Object.hasOwn(MAPS, id) ? id : DEFAULT_MAP];
+  if(MAP === map) return MAP;
+  MAP = map;
+  SC = map.scale || 1;
+  ROAD = map.width || 16; HALF = ROAD / 2; WALL = HALF + (map.verge || 6);
+  const curve = closedCurve(map.points.map(([x, z, h = 0, b = 0]) => ({ x: x * SC, y: h, z: z * SC, w: b * Math.PI / 180 })));
+  N = map.samples || Math.max(300, Math.round(curve.length / 1.6));
+  for(const a of [P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP]) a.length = 0;
+  const l = map.points.length;
+  for(let i=0;i<N;i++){ const u=i/N;
+    const c=curve.getPointAt(u); P.push(new THREE.Vector3(c.x, c.y, c.z));
+    const g=curve.getTangentAt(u), t=new THREE.Vector3(g.x, g.y, g.z); t.y=0; t.normalize(); TG.push(t); NM.push(new THREE.Vector3(t.z,0,-t.x));
+    BANK.push(c.w); TB.push(Math.tan(c.w)); Y.push(c.y); CP.push(curve.uToT(u) * l);
+  }
+  // Heights: the spline through the control points bends in steps at every control point
+  // (it is only C1), which a fast car would feel as bumps and false take-offs. The profile
+  // is smoothed along the track (12 passes of [1 2 1]/4: σ ≈ 2.4 points ≈ 4 m).
+  if(Y.some(y => y !== 0)){
+    let a=Float64Array.from(Y), b=new Float64Array(N);
+    for(let k=0;k<12;k++){ for(let i=0;i<N;i++) b[i]=(a[(i-1+N)%N]+2*a[i]+a[(i+1)%N])/4; [a,b]=[b,a]; }
+    for(let i=0;i<N;i++){ Y[i]=a[i]; P[i].y=a[i]; }
+  }
+  TRACK_LEN = (() => { let L=0; for(let i=0;i<N;i++){ DIST.push(L); L+=P[i].distanceTo(P[(i+1)%N]); } return L; })();
+  FLAT = Y.every(y => y === 0) && BANK.every(b => b === 0);
+  for(let i=0;i<N;i++){ const j=(i+1)%N; HL.push(Math.hypot(P[j].x-P[i].x, P[j].z-P[i].z)); }
+  // grades: the slopes of the periodic cubic spline through the heights (C2: the road's
+  // curvature over a crest changes smoothly, see surface()), by Gauss-Seidel
+  for(let i=0;i<N;i++){ const a=(i-1+N)%N, b=(i+1)%N; GR.push((Y[b]-Y[a])/(HL[a]+HL[i])); }
+  if(Y.some(y => y !== 0)) for(let it=0;it<300;it++) for(let i=0;i<N;i++){ const a=(i-1+N)%N, b=(i+1)%N, h0=HL[a], h1=HL[i];
+    GR[i]=(3*(h1*(Y[i]-Y[a])/h0+h0*(Y[b]-Y[i])/h1)-h1*GR[a]-h0*GR[b])/(2*(h0+h1)); }
+  // signed radius from the turn of the tangent over ±1 point
+  for(let i=0;i<N;i++){ const a=TG[(i-1+N)%N], b=TG[(i+1)%N];
+    let s=0; for(let k=-1;k<1;k++) s+=HL[(i+k+N)%N];
+    const turn=Math.asin(Math.max(-1,Math.min(1,a.x*b.z-a.z*b.x)));
+    RAD.push(Math.abs(turn)<1e-9 ? 1e9 : s/turn); }
+  const inSpan = (k, f, t) => f <= t ? (k >= f && k <= t) : (k >= f || k <= t);
+  for(let i=0;i<N;i++) BRIDGE.push((map.bridges||[]).some(b => inSpan(CP[i], b.from, b.to)) ? 1 : 0);
+  START = map.start && map.start.sample !== undefined ? map.start.sample : sampleAt(map.start ? map.start.at : 0);
+  for(const fn of listeners) fn(MAP);
+  return MAP;
+}
+// the track point at control-point coordinate k
+export function sampleAt(k){
+  const l=MAP.points.length; k=((k%l)+l)%l;
+  let best=0, bd=1e9; for(let i=0;i<N;i++){ let d=Math.abs(CP[i]-k); d=Math.min(d, l-d); if(d<bd){bd=d;best=i;} }
+  return best;
+}
+setMap(DEFAULT_MAP);
+
+// Offset curves that never fold (curbs, run-off, walls, scenery): offset `off` (m, > 0 to
+// the left/+NM) for every track point, limited on the inside of a turn to 0.9 × the local
+// radius. The limit is a running minimum over ±W points, then a running average over ±W/2
+// (both keep it under 0.9·R everywhere), so a curb narrows smoothly instead of breaking.
+export function safeOffsets(off, W=8){
+  const lim=new Float64Array(N);
+  for(let i=0;i<N;i++){ const r=RAD[i]; lim[i] = (off*r<0) ? 0.9*Math.abs(r) : 1e9; }
+  const m=new Float64Array(N);
+  for(let i=0;i<N;i++){ let v=1e9; for(let k=-W;k<=W;k++) v=Math.min(v, lim[(i+k+N)%N]); m[i]=v; }
+  const out=new Float64Array(N), h=W>>1, a=Math.abs(off);
+  for(let i=0;i<N;i++){ let s=0; for(let k=-h;k<=h;k++) s+=Math.min(a, m[(i+k+N)%N]); out[i]=Math.sign(off)*s/(2*h+1); }
+  return out;
+}
 
 export function placeAt(car,i){
   const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.vF=car.vR=0; car.steer=0; car.spinV=0; car.idx=i;
   car.lastMark=[null,null];
+  car.y=Y[i]; car.vy=0; car.air=false; car.yawRate=0; car.hPrev=car.h; car.squash=0;
 }
 // Starting grid: two columns behind the start line, 7 m between rows.
 export function placeGrid(car,slot){
   const row=Math.floor(slot/2), side=slot%2?-1:1, back=7+row*7;
   let i=START, d=0; while(d<back){ const j=(i-1+N)%N; d+=P[j].distanceTo(P[i]); i=j; }
   placeAt(car,i); car.x+=NM[i].x*side*3.6; car.z+=NM[i].z*side*3.6;
+  if(!FLAT) car.y=surface(car).y;
   car.prog=-((START-i+N)%N);
 }
+// The nearest track point. Local (±36 points from car.idx) every substep, so at a
+// crossing the car never jumps to the other road. A full search (after a jump to a new
+// place) also weighs the height difference when the car's height is known, so a car on a
+// bridge finds the bridge and not the road below it.
 export function nearest(car,full){
   let bi=car.idx, bd=1e12; const from=full?0:-36, to=full?N:36;
-  for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, d=dx*dx+dz*dz; if(d<bd){bd=d;bi=j;} }
+  if(FLAT || car.y===undefined){
+    for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, d=dx*dx+dz*dz; if(d<bd){bd=d;bi=j;} }
+    return bi;
+  }
+  for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, dy=(Y[j]-car.y)*4, d=dx*dx+dz*dz+dy*dy; if(d<bd){bd=d;bi=j;} }
   return bi;
+}
+
+// The road surface under (x, z) near track point car.idx: height, grade along the track
+// and its rate of change (d²y/ds²), and the horizontal gradient of the surface (gx, gz:
+// dy/dx, dy/dz). Height between two track points is a cubic Hermite of their heights and
+// grades, so it is smooth (C1) and a car's vertical speed has no steps. The position is
+// measured along the chord between the two points, so whichever of them is car.idx the
+// answer is the same. The bank tilts the surface across the road.
+const SURF = { y:0, gx:0, gz:0, grade:0, curv:0, bank:0, lat:0 };
+export function surface(car, out=SURF){
+  const i=car.idx, p=P[i], t=TG[i];
+  let a, b;
+  if((car.x-p.x)*t.x+(car.z-p.z)*t.z>=0){ a=i; b=(i+1)%N; } else { a=(i-1+N)%N; b=i; }
+  const L=HL[a], cx=(P[b].x-P[a].x)/L, cz=(P[b].z-P[a].z)/L, rx=car.x-P[a].x, rz=car.z-P[a].z;
+  const f=Math.max(0,Math.min(1,(rx*cx+rz*cz)/L)), lat=rx*cz-rz*cx;     // lat: to the left (+NM)
+  const f2=f*f, f3=f2*f;
+  const y=(2*f3-3*f2+1)*Y[a]+(f3-2*f2+f)*L*GR[a]+(-2*f3+3*f2)*Y[b]+(f3-f2)*L*GR[b];
+  const grade=((6*f2-6*f)*Y[a]+(3*f2-4*f+1)*L*GR[a]+(-6*f2+6*f)*Y[b]+(3*f2-2*f)*L*GR[b])/L;
+  const curv=((12*f-6)*Y[a]+(6*f-4)*L*GR[a]+(6-12*f)*Y[b]+(6*f-2)*L*GR[b])/(L*L);
+  const tb=TB[a]+(TB[b]-TB[a])*f;
+  out.y=y+lat*tb; out.grade=grade; out.curv=curv; out.bank=Math.atan(tb); out.lat=lat;
+  out.gx=grade*cx+tb*cz; out.gz=grade*cz-tb*cx;
+  out.tx=cx; out.tz=cz;
+  return out;
 }
 
 // Another player's predicted car must not be drawn through the walls (see keepOnRoad in
 // modes/traffic/geometry.js): a prediction past a wall is bounced back off it. `memo`
-// keeps the last track point found for this car, so the search stays local.
+// keeps the last track point found for this car, so the search stays local. p.idx, when
+// set, is the track point the other player reported (their own local search): a fresh
+// search starts there. p.y, when set, is their height (bridges: see nearest()).
 export function keepInWalls(p, memo){
-  let i=nearest({x:p.x,z:p.z,idx:memo.idx||0}, memo.idx===undefined);
+  if(p.idx!==undefined && memo.sent!==p.idx){ memo.sent=p.idx; if(p.idx>=0 && p.idx<N) memo.idx=p.idx; }
+  const q0={x:p.x,z:p.z,idx:memo.idx||0}; if(!FLAT && p.y!==undefined) q0.y=p.y;
+  let i=nearest(q0, memo.idx===undefined);
   // The local search looks 36 points each way from the last one. When the car jumped (a new
   // run puts it back on the grid) the point it finds is on a far piece of track, and the
   // car would be "bounced" off that piece's walls. A car is never this far from its own
   // piece of track: search the whole track again.
-  { const dx=P[i].x-p.x, dz=P[i].z-p.z, far=WALL+12; if(dx*dx+dz*dz>far*far) i=nearest({x:p.x,z:p.z,idx:i}, true); }
+  { const dx=P[i].x-p.x, dz=P[i].z-p.z, far=WALL+12; if(dx*dx+dz*dz>far*far){ q0.idx=i; i=nearest(q0, true); } }
   memo.idx=i;
   const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
   if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
+  if(!FLAT){
+    // drawn height: their reported flight (ballistic), never below the road
+    const ys=surface({x:p.x,z:p.z,idx:i}).y;
+    p.y = p.y===undefined ? ys : Math.max(ys, p.y);
+  }
   return p;
 }
 
-// Runs right after stepCar() in the same substep. hooks.onWall(power) is the old
-// crash(power) call, hooks.onLap() the old finishLap() call.
+// Vertical motion (maps with heights only). Grounded, the car follows the road; it takes
+// off where the road falls away faster than gravity can bend the car's path down (a
+// crest taken fast), flies (main.js does not call stepCar while car.air), and lands.
+export const AIR = {
+  MARGIN: 0.5,       // m/s²: the road must bend down this much harder than gravity to lift the car
+  HARD: 3,           // m/s into the road: a landing harder than this costs speed and shakes
+  LOSS: .02,         // speed lost per m/s over HARD (at most 12 %)
+};
+// Flight: no grip, steering or throttle. The car keeps its velocity and its turn rate.
+function fly(car,dt){
+  car.h+=car.yawRate*dt;                        // (the turn rate measured on the ground includes any spin from a hit)
+  car.spinV*=Math.exp(-2.5*dt);
+  car.x+=car.vx*dt; car.z+=car.vz*dt;
+  const fx=Math.sin(car.h), fz=Math.cos(car.h);
+  car.vF=car.vx*fx+car.vz*fz; car.vR=car.vx*Math.cos(car.h)-car.vz*Math.sin(car.h);
+}
+function vertical(car,dt,hooks){
+  const S=surface(car);
+  const vyRoad=car.vx*S.gx+car.vz*S.gz;                      // the road's vertical speed under the moving car
+  if(car.air){
+    car.y+=car.vy*dt-.5*GRAV*dt*dt; car.vy-=GRAV*dt;
+    if(car.y<=S.y){
+      const vn=vyRoad-car.vy;                                 // how hard it hits the road
+      car.y=S.y; car.vy=vyRoad; car.air=false;
+      car.squash=Math.min(.16, vn*.02);
+      if(vn>AIR.HARD){ const k=1-Math.min(.12,(vn-AIR.HARD)*AIR.LOSS); car.vx*=k; car.vz*=k; car.vF*=k; car.vR*=k; }
+      if(hooks.onLand) hooks.onLand(vn);
+    }
+  } else {
+    // to stay on the road the car would have to be pulled down at v²·(d²y/ds²); gravity
+    // gives at most g. Over a crest taken faster than that, the wheels leave the road.
+    const vt=car.vx*S.tx+car.vz*S.tz;
+    car.y=S.y; car.vy=vyRoad;
+    if(vt*vt*S.curv < -(GRAV+AIR.MARGIN)){ car.air=true; if(hooks.onTakeoff) hooks.onTakeoff(); }
+    else {
+      // gravity along the slope (uphill slower, downhill faster) and across a bank (the
+      // banked road pushes the car into the turn): the part of g that lies in the road
+      const cg=1/Math.sqrt(1+S.gx*S.gx+S.gz*S.gz), k=-GRAV*cg*dt;
+      car.vx+=S.gx*k; car.vz+=S.gz*k;
+    }
+    car.yawRate=car.hPrev===undefined?0:Math.atan2(Math.sin(car.h-car.hPrev),Math.cos(car.h-car.hPrev))/dt;
+  }
+  car.hPrev=car.h;
+}
+
+// Runs right after stepCar() in the same substep (or instead of it while the car is in
+// the air). hooks.onWall(power) is the old crash(power) call, hooks.onLap() the old
+// finishLap() call, hooks.onLand(power) a landing after a jump.
 export function constrainToTrack(car,dt,hooks){
+  if(!FLAT && car.air) fly(car,dt);
   // track
   const ni=nearest(car,false);
   let d=ni-car.idx; if(d>N/2) d-=N; if(d<-N/2) d+=N; car.prog+=d; car.idx=ni;
@@ -61,8 +229,26 @@ export function constrainToTrack(car,dt,hooks){
     if(vn>0){ const k=wallKeep(vn); car.vx-=n.x*s*vn*1.45; car.vz-=n.z*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
   }
   car.off=Math.abs(lat)>HALF+CURB;
-  if(car.off){ const k=Math.exp(-.45*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: half the drag it had before
+  if(car.off && !car.air){ const k=Math.exp(-.45*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: half the drag it had before
+  if(!FLAT) vertical(car,dt,hooks);
 
   // laps
   if(car.prog>=N){ car.prog-=N; hooks.onLap(); }
+}
+
+// How to draw a car on the road: its height, and pitch and roll (radians, for a
+// rotation order 'YXZ' with rotation.y = car.h) from the road under it. In the air the
+// body keeps the attitude it left the road with, the nose dropping slowly.
+export function carPose(car, dt, out){
+  out = out || { y:0, pitch:0, roll:0, squash:0 };
+  if(FLAT || car.idx===undefined){ out.y=0; out.pitch=0; out.roll=0; out.squash=0; return out; }
+  const fx=Math.sin(car.h), fz=Math.cos(car.h), rx=Math.cos(car.h), rz=-Math.sin(car.h);
+  let pitch, roll;
+  if(car.air){ pitch=out.pitch+(.12-out.pitch)*Math.min(1,dt*.8); roll=out.roll*(1-Math.min(1,dt*2)); }
+  else { const S=surface(car); pitch=-Math.atan(S.gx*fx+S.gz*fz); roll=Math.atan(S.gx*rx+S.gz*rz); }
+  const k=Math.min(1,dt*12);
+  out.pitch+=(pitch-out.pitch)*(car.air?1:k); out.roll+=(roll-out.roll)*(car.air?1:k);
+  out.y=car.y===undefined?0:car.y;
+  car.squash=(car.squash||0)*Math.exp(-6*dt); out.squash=car.squash;
+  return out;
 }

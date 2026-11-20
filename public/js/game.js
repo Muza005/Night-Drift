@@ -27,6 +27,9 @@ export function scoring(dt){
   // the shoulder (a slide there earns no points and no ×2 on near misses).
   const drifting=speed>9 && car.vF>3 && ang>10 && !car.off && !(NET.online && NET.finished);
   drift.ang=ang;
+  // in the air after a crest (maps with heights) nothing scores, and a drift under way
+  // waits for the landing instead of running out of grace
+  if(car.air) return {drifting:false,ang,speed};
   if(drifting){
     drift.active=true; drift.grace=.75; drift.time+=dt;
     drift.pts+=(Math.min(ang,65)-6)*speed*.22*dt;
@@ -64,5 +67,13 @@ function onTrafficHit(hit){
   if(G.mode.breakCombo) G.mode.breakCombo();
 }
 
-// What the physics step reports back to the game: wall hits, completed laps, traffic hits.
-export const physicsHooks = { onWall: crash, onLap: finishLap, onTrafficHit };
+// Landing after a jump (maps with heights, modes/track/geometry.js): power is how fast
+// the car hit the road (m/s). A soft one is only the suspension; a hard one shakes the
+// camera and thumps (the speed it costs is taken in geometry.js). The drift carries on.
+function onLand(power){
+  if(power<3) return;
+  G.shake=Math.max(G.shake||0, Math.min(.8,(power-2)/10)); thud(power*1.2);
+}
+
+// What the physics step reports back to the game: wall hits, completed laps, traffic hits, landings.
+export const physicsHooks = { onWall: crash, onLap: finishLap, onTrafficHit, onLand };

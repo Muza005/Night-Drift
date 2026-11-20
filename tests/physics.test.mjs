@@ -3,6 +3,14 @@
 // tests/tools/make-golden-v2.mjs. Version 1 — the original single-file game, commit
 // 06ee674 — is kept in fixtures/physics-golden.json (tests/tools/make-golden.mjs).
 // If the golden test fails, the car no longer drives the same.
+// Re-recorded once in track engine v2 (stage 4), physics unchanged: the old recording had
+// been made with Node 20, whose Math.pow gave 4 of the track's 13 centripetal knot
+// spacings one ulp off; Node 24+ round them differently, so every track point moved by
+// ~1e-15 m and the test failed from second 0. The track curve now computes (d²)^0.25
+// correctly rounded (modes/track/curve.js), the same bits on any engine. Proof that the
+// car drives the same: the Node 20 track points fed to today's code reproduce the old
+// recording exactly on Node 20, 24 and 26; the new recording ends 5e-12 m from the old
+// one after 3 minutes, with the same laps and wall hits.
 // The tests after it check what version 2 changed on purpose.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

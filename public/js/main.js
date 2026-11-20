@@ -57,7 +57,9 @@ G.setMode = setMode;            // net.js switches to the room's mode
 /* ---------- physics step ---------- */
 function physics(dt){
   const I=((NET.online&&NET.finished)||G.state==='crash'||(G.mode.inputBlocked&&G.mode.inputBlocked()))?NOINPUT:input;
-  stepCar(car,I,dt);
+  // in the air after a crest (maps with heights): no grip, steering or throttle; the
+  // track mode flies the car in constrain() instead (modes/track/geometry.js)
+  if(!(car.air && G.mode.id==='track')) stepCar(car,I,dt);
   G.mode.constrain(car,dt,physicsHooks);
   if(G.mode.collide) G.mode.collide(car,physicsHooks);   // traffic mode: hits with bots
 }
@@ -246,9 +248,9 @@ function menuView(){
 // city the garage uses; behind pause and the finish screen, the race as it stood.
 // Drawn again only when something it shows changes: the mode, my car, the window.
 let stillKey='', audioIdle=false;
+canvas.addEventListener('webglcontextrestored',()=>{ stillKey=''; });   // the still picture is gone with the context: draw it again
 function stillFrame(){
   if($('menu').hidden){ stillKey=''; return false; }
-canvas.addEventListener('webglcontextrestored',()=>{ stillKey=''; });   // the still picture is gone with the context: draw it again
   const s=G.state, frozen=s==='pause'||s==='over';
   if(!frozen && s!=='menu' && s!=='results' && s!=='lobby') return false;
   const key=s+'|'+G.mode.id+'|'+(car.model?car.model.carId+':'+car.model.code:'')+'|'+innerWidth+'x'+innerHeight+'@'+renderer.getPixelRatio();
@@ -312,7 +314,13 @@ function frame(now){
 
   /* visuals */
   const fx=Math.sin(car.h), fz=Math.cos(car.h), rx=Math.cos(car.h), rz=-Math.sin(car.h);
-  car.root.position.set(car.x,0,car.z); car.root.rotation.y=car.h;
+  // on a map with heights: the car's height, and pitch and roll from the road under it
+  const pose=G.mode.pose?G.mode.pose(car,dt):null, cy=pose?pose.y:0;
+  car.root.position.set(car.x,cy,car.z);
+  // a landing squashes the body toward the road (scaled from the ground up, so the wheels
+  // never sink into it)
+  if(pose){ car.root.rotation.set(pose.pitch,car.h,pose.roll,'YXZ'); car.body.scale.y=1-pose.squash*.5; }
+  else { car.root.rotation.set(0,car.h,0); car.body.scale.y=1; }
   // No body roll in a slide: the 3D models' wheels are part of the body, so leaning it
   // pushed the tyres on one side into the road.
   car.pitch+=(((input.down&&car.vF>1)?.035:input.up?-.02:0)-car.pitch)*Math.min(1,dt*5);
@@ -326,7 +334,7 @@ function frame(now){
   const smokeOn=G.state==='race' && info.speed>5 && (Math.abs(car.vR)>4.5 || (input.hb&&info.speed>8));
   for(const [k,lx] of [[0,.95],[1,-.95]]){
     const wx=car.x+rx*lx+fx*-1.35, wz=car.z+rz*lx+fz*-1.35;
-    if(smokeOn){ addMark(car,k,wx,wz); if(Math.random()<.425) emitSmoke(wx,wz,car.vx,car.vz,slide+.3); }
+    if(smokeOn && !car.air){ addMark(car,k,wx,wz,cy); if(Math.random()<.425) emitSmoke(wx,wz,car.vx,car.vz,slide+.3,cy); }
     else car.lastMark[k]=null;
   }
   sendState(dt,slide);
@@ -341,7 +349,7 @@ function frame(now){
     G.mode.camera(car,dt);
   }
   camera.updateProjectionMatrix();
-  moon.position.set(car.x+30,60,car.z+20); moon.target.position.set(car.x,0,car.z);
+  moon.position.set(car.x+30,60+cy,car.z+20); moon.target.position.set(car.x,cy,car.z);
 
   // audio
   const spd=Math.abs(car.vF);
