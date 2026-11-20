@@ -11,12 +11,17 @@
 //
 //   const stand = createStand({ renderer, el });
 //   stand.setCar('rx7', paintCode, dir)  shows a car (loads its model once, see carModels.js);
-//                                    dir ±1 slides the podium out and the next one in
+//                                    dir ±1 slides the podium out and the next one in. While a
+//                                    model is still loading, its podium shows a neon outline
+//                                    of a car, breathing softly; if it fails to load, the game's
+//                                    own coupe stands there in the chosen paint, with a note:
+//                                    never an empty podium
 //   stand.repaint(paintCode)         recolours it at once
 //   stand.frame(now)                 draws one frame (now: rAF time, ms); false if not drawn
 //   stand.dispose()
-import { CARS, carById, paintByCode } from '../core/cars.js';
-import { makeModel, preload } from '../core/carModels.js';
+import { CARS, carById, paintByCode, paintHex } from '../core/cars.js';
+import { makeModel, preload, setPaint, PAINT_FINISH } from '../core/carModels.js';
+import { coupeShape, wheelShape } from '../core/carShapes.js';
 
 const TAU = Math.PI * 2;
 const DISC_R = 3.0;
@@ -68,6 +73,34 @@ function studioEnv(renderer){
   return env;
 }
 
+// The stand-in while a model loads: the outline of the game's own coupe (core/carShapes.js,
+// the same 4.3 m as every model), its edges only, and four wheels. Built once, shared.
+let OUTLINE = null;
+function outlineGeometry(){
+  if(OUTLINE) return OUTLINE;
+  const B = coupeShape('low'), parts = [];
+  for(const g of [B.paint, B.glass]) parts.push(new THREE.EdgesGeometry(g, 28));
+  // a wheel: its two rims, nothing more (a drum: the side's facets are under the angle)
+  const drum = new THREE.CylinderGeometry(0.38, 0.38, 0.26, 28, 1, true).rotateZ(Math.PI / 2), tyre = new THREE.EdgesGeometry(drum, 30);
+  for(const x of [B.wheelX, -B.wheelX]) for(const z of B.wheelZ) parts.push(tyre.clone().translate(x, 0.38, z));
+  for(const g of [drum, tyre, B.paint, B.glass, B.dark, B.stripes, B.heads, B.tails, ...B.flares]) g.dispose();
+  OUTLINE = parts;
+  return OUTLINE;
+}
+
+// When a model can't be loaded: the game's own coupe (core/carShapes.js, the car drawn
+// before there were models), built once and shared, its paint the stand's own per car.
+let COUPE = null;
+function coupeParts(){
+  if(COUPE) return COUPE;
+  const B = coupeShape('high'), W = wheelShape();
+  const wheels = [];
+  for(const x of [B.wheelX, -B.wheelX]) for(const z of B.wheelZ) wheels.push([x, 0.38, z]);
+  COUPE = { paint: B.paint, glass: B.glass, dark: [B.dark, ...B.flares], lights: [B.heads], tails: B.tails, tyre: W.tyre, rim: W.rim, wheels };
+  B.stripes.dispose();
+  return COUPE;
+}
+
 export function createStand({ renderer, el }){
   const scene = new THREE.Scene();
   const env = studioEnv(renderer);
@@ -98,6 +131,41 @@ export function createStand({ renderer, el }){
   const flatGeo = keep(new THREE.PlaneGeometry(1, 1));
   const underMat = keep(new THREE.MeshBasicMaterial({ map: keep(spotTexture(0.5)), color: 0x000000, transparent: true, opacity: 0.7, depthWrite: false }));
   const blobMat = keep(new THREE.MeshBasicMaterial({ map: keep(spotTexture(0.6)), color: 0x000000, transparent: true, opacity: 0.85, depthWrite: false }));
+  // the stand-in coupe's parts other than its paint
+  const coupeMats = {
+    glass: keep(new THREE.MeshStandardMaterial({ color: 0x101c30, metalness: 0.9, roughness: 0.08, envMap: env, envMapIntensity: 1.5 })),
+    dark: keep(new THREE.MeshStandardMaterial({ color: 0x12141c, roughness: 0.6 })),
+    lights: keep(new THREE.MeshBasicMaterial({ color: 0xf4f8ff, toneMapped: false })),
+    tails: keep(new THREE.MeshStandardMaterial({ color: 0x330008, emissive: 0xff1a3c, emissiveIntensity: 0.6 })),
+    tyre: keep(new THREE.MeshStandardMaterial({ color: 0x0b0b0f, roughness: 0.9 })),
+    rim: keep(new THREE.MeshStandardMaterial({ color: 0xb8bccc, metalness: 0.9, roughness: 0.3, envMap: env })),
+  };
+  // A car the stand can show like a model (repaint, dispose, size), flagged `fallback`.
+  function standInCoupe(carId, code){
+    const P = coupeParts(), root = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({ envMap: env, ...PAINT_FINISH });
+    const add = (g, m) => { const o = new THREE.Mesh(g, m); root.add(o); return o; };
+    add(P.paint, paint); add(P.glass, coupeMats.glass); add(P.tails, coupeMats.tails);
+    for(const g of P.dark) add(g, coupeMats.dark);
+    for(const g of P.lights) add(g, coupeMats.lights);
+    for(const [x, y, z] of P.wheels){ add(P.tyre, coupeMats.tyre).position.set(x, y, z); add(P.rim, coupeMats.rim).position.set(x, y, z); }
+    const inst = {
+      carId, root, paint, fallback: true, size: new THREE.Vector3(1.98, 1.3, 4.3),
+      repaint(c){ setPaint(paint, paintHex(c, carId)); inst.code = c; },
+      dispose(){ if(root.parent) root.parent.remove(root); paint.dispose(); },
+    };
+    inst.repaint(code);
+    return inst;
+  }
+  // the note under a stand-in: visible, small (the label says it to a screen reader)
+  const note = document.createElement('p');
+  note.className = 'stand-note'; note.textContent = 'Модель не загрузилась';
+  note.hidden = true; note.setAttribute('aria-hidden', 'true');
+  el.append(note);
+  const showNote = () => { note.hidden = !(cur.inst && cur.inst.fallback); };
+
+  // the loading outline: brand cyan, added light, breathing in frame()
+  const outlineMat = keep(new THREE.LineBasicMaterial({ color: 0x3ef0ff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
 
   function makeSlot(){
     const group = new THREE.Group(), turn = new THREE.Group();
@@ -106,9 +174,11 @@ export function createStand({ renderer, el }){
     const halo = new THREE.Mesh(haloGeo, haloMat); halo.rotation.x = -Math.PI / 2; halo.position.y = -DISC_H + 0.01;
     const under = new THREE.Mesh(flatGeo, underMat); under.rotation.x = -Math.PI / 2; under.position.y = -DISC_H - 0.01; under.scale.set(DISC_R * 2.9, DISC_R * 2.9, 1);
     const blob = new THREE.Mesh(flatGeo, blobMat); blob.rotation.x = -Math.PI / 2; blob.position.y = 0.004; blob.visible = false;
-    turn.add(blob); group.add(disc, edge, halo, under, turn); scene.add(group);
+    const outline = new THREE.Group(); outline.visible = false;
+    for(const g of outlineGeometry()) outline.add(new THREE.LineSegments(g, outlineMat));
+    turn.add(blob, outline); group.add(disc, edge, halo, under, turn); scene.add(group);
     // x, v, target: where it is across the stand, its speed, where it is going
-    return { group, turn, blob, inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0 };
+    return { group, turn, blob, outline, inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0 };
   }
 
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
@@ -120,10 +190,17 @@ export function createStand({ renderer, el }){
   function fill(slot, id, code){
     const my = ++slot.token;
     slot.carId = id;
+    // nothing on this podium yet: the outline stands in until the model is there (a car
+    // already standing here stays instead, until the new one replaces it)
+    if(!slot.inst){
+      slot.outline.visible = true;
+      if(slot === cur){ el.setAttribute('aria-label', carById(id).name + ': загружается'); showNote(); }
+    }
     return makeModel(id, code, env).then(inst => {
       if(my !== slot.token || !slot.alive || disposed){ inst.dispose(); return null; }   // another car was asked for meanwhile
       if(slot.inst) slot.inst.dispose();
       slot.inst = inst;
+      slot.outline.visible = false;
       if(slot === cur && wanted.code !== inst.code) inst.repaint(wanted.code);
       slot.turn.add(inst.root);
       slot.blob.scale.set(inst.size.x * 1.55, inst.size.z * 1.22, 1);
@@ -131,13 +208,17 @@ export function createStand({ renderer, el }){
       if(slot === cur) describe();
       return inst;
     }).catch(e => {
-      if(my !== slot.token) return null;
-      console.error('stand: model failed', id, e);
-      // no other car left standing under this one's name: an empty podium, and it says so
-      if(slot.inst){ slot.inst.dispose(); slot.inst = null; }
-      slot.blob.visible = false;
-      if(slot === cur) el.setAttribute('aria-label', carById(id).name + ': модель не загрузилась');
-      return null;
+      if(my !== slot.token || !slot.alive || disposed) return null;
+      console.error('stand: the model of ' + id + ' did not load: ' + (e && e.message || e));
+      // never an empty podium: the game's own coupe stands in, in the paint asked for
+      if(slot.inst) slot.inst.dispose();
+      const inst = slot.inst = standInCoupe(id, slot === cur ? wanted.code : code);
+      slot.outline.visible = false;
+      slot.turn.add(inst.root);
+      slot.blob.scale.set(inst.size.x * 1.55, inst.size.z * 1.22, 1);
+      slot.blob.visible = true;
+      if(slot === cur) describe();
+      return inst;
     });
   }
   function drop(slot){
@@ -158,6 +239,7 @@ export function createStand({ renderer, el }){
     if(dir && !reduced.matches && cur.carId){
       if(gone && gone.carId === id){                  // back to the car that is leaving: it turns round
         [cur, gone] = [gone, cur];
+        if(cur.inst) describe(); else { el.setAttribute('aria-label', carById(id).name + ': загружается'); showNote(); }
       } else {
         if(gone) drop(gone);
         gone = cur;
@@ -179,8 +261,10 @@ export function createStand({ renderer, el }){
     if(cur.inst && cur.inst.code !== code){ cur.inst.repaint(code); describe(); }
   }
   function describe(){
+    showNote();
     if(!cur.inst) return;
-    el.setAttribute('aria-label', carById(cur.inst.carId).name + ', цвет ' + paintByCode(cur.inst.code).name.toLowerCase());
+    el.setAttribute('aria-label', carById(cur.inst.carId).name + ', цвет ' + paintByCode(cur.inst.code).name.toLowerCase()
+      + (cur.inst.fallback ? '; модель не загрузилась' : ''));
   }
   // The slide: a critically damped spring (no overshoot) that keeps its speed when the
   // target changes mid-way. RESPONSE: about how long it takes, in seconds.
@@ -267,6 +351,8 @@ export function createStand({ renderer, el }){
     if(el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return false;   // in a hidden screen
     step(dt);
     for(const slot of [cur, gone]) if(slot){ slide(slot, dt); slot.turn.rotation.y = spin.angle; }
+    // the outline breathes (1.6 s), or holds still for reduced motion
+    outlineMat.opacity = reduced.matches ? 0.6 : 0.42 + 0.3 * (0.5 + 0.5 * Math.sin(now / 1000 * TAU / 1.6));
     if(gone && Math.abs(gone.x) > span - 0.2){ drop(gone); gone = null; }   // out of the box: gone
 
     if(r.width !== box.w || r.height !== box.h){
@@ -302,6 +388,7 @@ export function createStand({ renderer, el }){
     disposed = true;                 // (drop() below retires each slot's pending load)
     off.abort();
     drop(cur); if(gone) drop(gone);
+    note.remove();
     for(const x of own) x.dispose();
   }
 
@@ -309,7 +396,7 @@ export function createStand({ renderer, el }){
     setCar, repaint, frame, dispose, scene, camera,
     get car(){ return cur.inst; },
     get sliding(){ return !!gone || cur.x !== cur.target; },
-    get podiums(){ return [cur, gone].filter(Boolean).map(s => ({ carId: s.carId, x: s.x, loaded: !!s.inst })); },
+    get podiums(){ return [cur, gone].filter(Boolean).map(s => ({ carId: s.carId, x: s.x, loaded: !!s.inst && !s.inst.fallback, fallback: !!(s.inst && s.inst.fallback), outline: s.outline.visible })); },
     get spin(){ return { angle: spin.angle, vel: spin.vel, idle: spin.idle, held: spin.grab !== null }; },
   };
 }

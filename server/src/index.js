@@ -514,7 +514,17 @@ class RaceRoom extends Room {
 const app = express();
 trafficLib().catch(e => console.error('traffic simulation failed to load:', e));
 // The same server also hands out the game itself, so one link is enough to play.
-app.use(express.static(path.join(__dirname, '..', '..', 'public')));
+// The car models: the game asks for each with its content hash in the URL
+// (models/cars/x.glb?v=<hash>, written by tools/prep-car-model.mjs), so such a URL never
+// changes content and the browser keeps it a year without asking again. A changed model
+// gets a new hash, a new URL. Without ?v= (and for everything else) express's default
+// stands: max-age=0, checked with its ETag on every visit.
+const PUBLIC = path.join(__dirname, '..', '..', 'public');
+app.use(express.static(PUBLIC, {
+  setHeaders(res, file){
+    if(res.req.query.v && /^models[\\/]/.test(path.relative(PUBLIC, file))) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  },
+}));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 // The server clock, for the game's clock sync (net/clock-worker.js). Any origin may ask:
 // the game may be hosted elsewhere (Netlify, Vercel) and talk to this server.

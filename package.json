@@ -19,8 +19,13 @@
   },
   "homepage": "https://github.com/Muza005/Night-Drift#readme",
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "colyseus.js": "^0.15.27",
+    "meshoptimizer": "^1.3.0",
     "playwright-core": "^1.49.1",
+    "sharp": "^0.35.5",
     "three": "^0.128.0"
   },
   "private": true,

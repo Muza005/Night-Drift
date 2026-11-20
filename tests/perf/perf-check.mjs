@@ -69,7 +69,7 @@ try {
 
   // 2. the garage: the stand and the still only
   await page.click('#mTrack');
-  await page.waitForFunction(() => !document.getElementById('pGarage').hidden && document.getElementById('garStand').getAttribute('aria-label'));
+  await page.waitForFunction(() => !document.getElementById('pGarage').hidden && /, цвет /.test(document.getElementById('garStand').getAttribute('aria-label')));
   // every model once, as a player browsing would (loading is not what is measured)
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowRight'); await sleep(450); }
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowLeft'); await sleep(450); }

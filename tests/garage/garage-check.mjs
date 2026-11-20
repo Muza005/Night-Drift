@@ -51,7 +51,7 @@ try {
   // to the garage: Одиночная → Дрифт
   await page.click('#goSolo'); await sleep(450); await page.click('#mTrack');
   await page.waitForFunction(() => !document.getElementById('pGarage').hidden);
-  await page.waitForFunction(() => __nd && document.getElementById('garStand').getAttribute('aria-label'), null, { timeout: 30000 });
+  await page.waitForFunction(() => __nd && /, цвет /.test(document.getElementById('garStand').getAttribute('aria-label')), null, { timeout: 30000 });
   check('the garage opens with the first car, factory paint', await $('#garName', e => e.textContent) === 'Aston Martin' && await $('#paintName', e => e.textContent) === 'Заводской');
   check('first car: «‹» is off', await $('#garPrev', e => e.disabled) && !(await $('#garNext', e => e.disabled)));
   check('the title is the mode, the button «Поехали»', await $('#garTitle', e => e.textContent) === 'Дрифт' && await $('#garGo', e => e.textContent) === 'Поехали');

@@ -144,6 +144,45 @@ try {
     check('a change slides: two podiums on the way, one after ~0.5 s', r.mid.length === 2 && r.end.length === 1 && Math.abs(r.end[0].x) < 0.02 && r.end[0].carId === 'muscle', JSON.stringify([r.mid.map(p => p.x.toFixed(1)), r.end]));
     check('quick changes: at most two podiums, back to the leaving one works', r.most <= 2 && r.last.length === 1 && r.car === 'super', JSON.stringify(r.last)); }
 
+  // 6c. a model still on its way: its podium shows the neon outline at once, never an
+  // empty one, and the car takes its place when it arrives (a page of its own, the Nexus
+  // held back 3 s on the way)
+  { const lctx = await newContext(browser);
+    await lctx.route(/nexus_rx\.glb/, async r => { await sleep(3000); await r.continue(); });
+    const p = await openStand(lctx, errors);
+    const r = await p.evaluate(async () => {
+      const s = __stand.big, label = () => document.getElementById('big').getAttribute('aria-label');
+      const done = s.setCar('nexus', -1, +1);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const loading = { podium: s.podiums.find(p => p.carId === 'nexus'), label: label() };
+      await done;
+      await new Promise(r => setTimeout(r, 700));
+      return { loading, after: s.podiums, label: label() };
+    });
+    check('loading: the outline stands in, at once', r.loading.podium && r.loading.podium.outline && !r.loading.podium.loaded && /загружается/.test(r.loading.label), JSON.stringify(r.loading));
+    check('…and the car replaces it when it is in', r.after.length === 1 && r.after[0].loaded && !r.after[0].outline && /^Nexus RX, цвет/.test(r.label), JSON.stringify(r.after));
+    await lctx.close(); }
+
+  // 6d. a model that fails (404): the game's coupe stands in, in the paint asked for, with
+  // a visible note; the console says which URL and what came back
+  { const fctx = await newContext(browser), ferr = [];
+    await fctx.route(/generic_sedan_car\.glb/, r => r.fulfill({ status: 404, body: 'gone' }));
+    const p = await openStand(fctx, ferr);
+    const r = await p.evaluate(async () => {
+      const s = __stand.big; await s.setCar('sedan', 0xd3202a, +1);
+      await new Promise(r => setTimeout(r, 700));
+      const note = document.querySelector('#big .stand-note');
+      return { podiums: s.podiums, label: document.getElementById('big').getAttribute('aria-label'), note: note && !note.hidden && note.getBoundingClientRect().height > 0 ? note.textContent : null,
+        paint: s.car && s.car.paint.color.clone().convertLinearToSRGB().getHex() };
+    });
+    check('a model that fails: the coupe stands in, painted, with a note', r.podiums.length === 1 && r.podiums[0].fallback && !r.podiums[0].outline && r.paint === 0xd3202a && r.note === 'Модель не загрузилась' && /модель не загрузилась/.test(r.label), JSON.stringify(r));
+    const logged = ferr.find(e => /did not load/.test(e)) || '';
+    check('…and the console says the URL and the status', /generic_sedan_car\.glb\?v=\w+: HTTP 404/.test(logged), logged);
+    // flipping on from it works: the next car loads as usual, the note goes
+    const n = await p.evaluate(async () => { const s = __stand.big; await s.setCar('nexus', -1, +1); await new Promise(r => setTimeout(r, 700)); const note = document.querySelector('#big .stand-note'); return { loaded: s.podiums.map(x => x.loaded), note: note.hidden }; });
+    check('…and the next car replaces it, the note gone', n.loaded.join() === 'true' && n.note, JSON.stringify(n));
+    await fctx.close(); }
+
   // 7. repaint is immediate
   { const ok = await page.evaluate(() => { const s = __stand.big; s.repaint(0x1fa34a); const c = s.car.paint.color.clone().convertLinearToSRGB(); return c.getHex() === 0x1fa34a && /зелёный/.test(document.getElementById('big').getAttribute('aria-label')); });
     check('repaint: at once, and the label says the colour', ok); }

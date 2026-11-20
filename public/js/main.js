@@ -20,6 +20,7 @@ import { openGarage, garage } from './ui/garageScreen.js';
 import { lobby } from './ui/lobbyScreen.js';
 import { choice, savePick } from './ui/garage.js';
 import { applyLook } from './player.js';
+import { preloadAll } from './core/carModels.js';
 
 if (isTouch) document.body.classList.add('touch');
 const LS = {
@@ -367,4 +368,8 @@ function frame(now){
 }
 if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,scene,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
 requestAnimationFrame(frame);
+// The other cars' models load in the background once the first menu frame is up, one by
+// one, nearest to the picked car first (that one started at once: player.js asks for it,
+// and index.html already preloads its file). Held while a race runs (crash included).
+requestAnimationFrame(()=>setTimeout(()=>preloadAll(choice.car,()=>G.state==='race'||G.state==='count'||G.state==='crash'),0));
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });

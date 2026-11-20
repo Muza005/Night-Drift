@@ -1,3 +1,17 @@
 # Netlify: serve the game from the public/ folder, no build step.
 [build]
   publish = "public"
+
+# Every dependency in the root package.json is for tests and tools (gltf-transform, sharp,
+# Playwright): the site has no build, so none of them is installed on deploy.
+[build.environment]
+  NPM_FLAGS = "--omit=dev"
+
+# The car models: the game asks for each with its content hash (?v=, written by
+# tools/prep-car-model.mjs), so a URL never changes content: kept a year. (Netlify can't
+# match the query here; every model URL the game uses has one, and a deploy replaces the
+# files at the edge.)
+[[headers]]
+  for = "/models/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
