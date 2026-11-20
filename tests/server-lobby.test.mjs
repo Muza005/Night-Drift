@@ -3,23 +3,22 @@
 // Starts server/src/index.js on its own port (needs `npm install` in server/).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
+import { startServer } from './server-start.mjs';
 import { roster } from '../public/js/ui/seats.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 2594;
+let PORT;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let server;
 
 before(async () => {
-  server = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT), EXTRA_DURATION: '2', MIN_LAP_MS: '50' }, stdio: 'ignore' });   // (a 2 s highway run and quick laps: tests 3.11, 3.12)
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) return; } catch {} await sleep(200); }
-  throw new Error('server did not start');
+  server = await startServer({ EXTRA_DURATION: '2', MIN_LAP_MS: '50' });   // (a 2 s highway run and quick laps: tests 3.11, 3.12)
+  PORT = server.port;
 });
-after(() => new Promise(r => { server.once('exit', r); server.kill(); }));
+after(() => server && server.stop());
 
 const client = () => new Colyseus.Client(`ws://localhost:${PORT}`);
 const quiet = room => { for (const t of ['pong', 'event', 'lapTime', 'kicked']) room.onMessage(t, () => {}); return room; };

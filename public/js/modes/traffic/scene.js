@@ -35,6 +35,16 @@ const checkerTex = (() => {
   const [c,g]=cv(256,32); for(let x=0;x<16;x++) for(let y=0;y<2;y++){ g.fillStyle=(x+y)%2?'#111':'#f2f2f2'; g.fillRect(x*16,y*16,16,16);} return tex(c,false);
 })();
 
+// Rumble strip along the outer edge of the lanes, on the shoulder: pale ridges across the
+// strip, one every 0.8 m (250 per chunk, so they line up across chunk joints). The
+// shoulder brakes the car (constrainToHighway sets car.off); the strip shows where it starts.
+const RUMBLE_W = .6, RUMBLE_STEP = .8;
+const rumbleTex = (() => {
+  const [c,g]=cv(8,32); g.fillStyle='#17142a'; g.fillRect(0,0,8,32);
+  g.fillStyle='#4a4d63'; g.fillRect(0,0,8,14);
+  const t=tex(c,true); t.repeat.set(1,CHUNK/RUMBLE_STEP); return t;
+})();
+
 /* ground: one big plane that follows the car in whole tiles, so its grid never slides */
 export const ground = new THREE.Mesh(new THREE.PlaneGeometry(GROUND,GROUND).rotateX(-Math.PI/2), new THREE.MeshStandardMaterial({map:groundTex, roughness:.95}));
 ground.receiveShadow = true; group.add(ground);
@@ -48,6 +58,8 @@ const neonL=new THREE.MeshBasicMaterial({color:0x3ef0ff, toneMapped:false});   /
 const neonR=new THREE.MeshBasicMaterial({color:0xff3b6b, toneMapped:false});   // right rail (-X): rose
 const roadG=new THREE.PlaneGeometry(2*HALF,CHUNK).rotateX(-Math.PI/2).translate(0,.04,CHUNK/2);
 const shoulderG=new THREE.PlaneGeometry(SHOULDER+.3,CHUNK).rotateX(-Math.PI/2).translate(0,.03,CHUNK/2);
+const rumbleMat=new THREE.MeshStandardMaterial({map:rumbleTex, roughness:.9});
+const rumbleG=new THREE.PlaneGeometry(RUMBLE_W,CHUNK).rotateX(-Math.PI/2).translate(0,.04,CHUNK/2);   // level with the road (they do not overlap): 1 cm above the shoulder
 const railG=new THREE.BoxGeometry(.3,.95,CHUNK).translate(0,.475,CHUNK/2);
 const stripG=new THREE.BoxGeometry(.05,.17,CHUNK).translate(0,.865,CHUNK/2);
 const capG=new THREE.BoxGeometry(.34,.05,CHUNK).translate(0,.975,CHUNK/2);   // neon on top: what the top-down camera sees
@@ -71,6 +83,7 @@ function makeChunk(){
   const road=new THREE.Mesh(roadG,roadMat); road.receiveShadow=true; g.add(road);
   for(const s of [-1,1]){
     const sh=new THREE.Mesh(shoulderG,shoulderMat); sh.position.x=s*(HALF+SHOULDER/2+.15); sh.receiveShadow=true; g.add(sh);
+    const rumble=new THREE.Mesh(rumbleG,rumbleMat); rumble.position.x=s*(HALF+.08+RUMBLE_W/2); rumble.receiveShadow=true; g.add(rumble);
     const rail=new THREE.Mesh(railG,wallMat); rail.position.x=s*(RAIL+.15); rail.castShadow=true; g.add(rail);
     const strip=new THREE.Mesh(stripG,s>0?neonL:neonR); strip.position.x=s*(RAIL-.02); g.add(strip);
     const cap=new THREE.Mesh(capG,s>0?neonL:neonR); cap.position.x=s*(RAIL+.15); g.add(cap);

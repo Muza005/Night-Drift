@@ -58,7 +58,8 @@ export const trackMode = {
     const sp=Math.hypot(car.vx,car.vz);
     let dx=fx, dz=fz;
     if(sp>3 && car.vF>0){ dx=fx*.55+car.vx/sp*.45; dz=fz*.55+car.vz/sp*.45; const l=Math.hypot(dx,dz); dx/=l; dz/=l; }
-    const back=7.6+sp*.03, up=3.1+sp*.012;
+    // pulls back a little with speed (0.8 m and 11° more at 200 km/h); on touch screens a bit closer
+    const near=isTouch?.9:1, back=(7.6+sp*.016)*near, up=(3.1+sp*.0064)*near;
     const tx=car.x-dx*back, tz=car.z-dz*back;
     const camPos=rig.pos, camLook=rig.look;
     const k=rig.init?1-Math.exp(-5.5*dt):1; rig.init=true;
@@ -70,7 +71,7 @@ export const trackMode = {
     if(isTouch && innerWidth<innerHeight) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight*0.1, innerWidth, innerHeight); else if(camera.view && camera.view.enabled) camera.clearViewOffset();
     if(G.shake>0){ camera.position.x+=(Math.random()-.5)*G.shake*.8; camera.position.y+=(Math.random()-.5)*G.shake*.5; G.shake=Math.max(0,G.shake-dt*2.5); }
     camera.lookAt(camLook);
-    camera.fov=62+Math.min(20,sp*.38);
+    camera.fov=62+Math.min(11,sp*.2);
   },
 
   hud(car, dt, info){

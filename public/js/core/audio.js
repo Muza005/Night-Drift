@@ -18,7 +18,15 @@ export function audioInit(){
     const ws=ctx.createBufferSource(); ws.buffer=buf; ws.loop=true; ws.playbackRate.value=.7;
     const hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
     const wg=ctx.createGain(); wg.gain.value=0; ws.connect(hp); hp.connect(wg); wg.connect(master); ws.start();
-    A={ctx,master,o1,o2,lp,eg,sg,bp,buf,wg,hp,hornAt:0,draftWas:0};
+    // shoulder rumble: low noise, chopped by a square wave at the rate the tyres cross the
+    // strip's ridges (audioRumble)
+    const rs=ctx.createBufferSource(); rs.buffer=buf; rs.loop=true; rs.playbackRate.value=.5;
+    const rl=ctx.createBiquadFilter(); rl.type='lowpass'; rl.frequency.value=220;
+    const rc=ctx.createGain(); rc.gain.value=.5;                 // .5 ± .5 from the chopper
+    const ro=ctx.createOscillator(); ro.type='square'; ro.frequency.value=20;
+    const rd=ctx.createGain(); rd.gain.value=.5; ro.connect(rd); rd.connect(rc.gain);
+    const rg=ctx.createGain(); rg.gain.value=0; rs.connect(rl); rl.connect(rc); rc.connect(rg); rg.connect(master); rs.start(); ro.start();
+    A={ctx,master,o1,o2,lp,eg,sg,bp,buf,wg,hp,rg,ro,hornAt:0,draftWas:0};
   }catch(e){ A=null; }
 }
 export function audioUpdate(rpm,thr,slide){
@@ -65,6 +73,13 @@ export function audioDraft(level){
   A.wg.gain.setTargetAtTime(level*.09,t,.12); A.hp.frequency.setTargetAtTime(900+level*900,t,.2);
   if(level>.05 && A.draftWas<=.05) whoosh(0,.9);
   A.draftWas=level;
+}
+// Driving on the highway shoulder: a light rumble, louder and faster with speed (m/s);
+// 0 when on the road.
+export function audioRumble(speed){
+  if(!A) return; const t=A.ctx.currentTime;
+  A.rg.gain.setTargetAtTime(speed>1?.05+.07*Math.min(1,speed/25):0,t,.06);
+  A.ro.frequency.setTargetAtTime(Math.max(4,speed/.8),t,.1);   // ridges 0.8 m apart (traffic/scene.js)
 }
 export function toggleSound(){ muted=!muted; $('bSound').textContent='Звук: '+(muted?'выкл':'вкл'); if(A) A.master.gain.setTargetAtTime(muted?0:.5,A.ctx.currentTime,.05); }
 export function audioSuspend(){ if(A) A.ctx.suspend(); }

@@ -133,7 +133,7 @@ function chasePose(car, dt, out){
   out.look.set(chaseX * .5 + car.x * .5 + Math.sin(car.h) * 3, 0, car.z + ahead);
   // narrow (phone) screens: widen the view so it still spans at least 64° across
   const fitW = 2 * Math.atan(Math.tan(32 * Math.PI / 180) / camera.aspect) * 180 / Math.PI;
-  out.fov = Math.min(90, Math.max(58 + 10 * s, fitW));
+  out.fov = Math.min(90, Math.max(58 + 6 * s, fitW));
 }
 
 // Back on the road after an online crash: the nearest lane with no bot within 30 m,

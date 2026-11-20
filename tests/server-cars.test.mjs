@@ -3,25 +3,24 @@
 // server/src/index.js on its own port (needs `npm install` in server/).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
+import { startServer } from './server-start.mjs';
 import { PAINTS, CARS, FACTORY } from '../public/js/core/cars.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 2593;
+let PORT;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const paint = name => PAINTS.find(p => p.name === name).hex;
 const RED = paint('Красный'), BLUE = paint('Синий'), YELLOW = paint('Жёлтый');
 let server;
 
 before(async () => {
-  server = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) return; } catch {} await sleep(200); }
-  throw new Error('server did not start');
+  server = await startServer({});
+  PORT = server.port;
 });
-after(() => new Promise(r => { server.once('exit', r); server.kill(); }));
+after(() => server && server.stop());
 
 test('car and paint picks: kept, changeable in the lobby, colours may be shared', { timeout: 30000 }, async () => {
   const quiet = room => { for (const t of ['pong', 'event', 'lapTime']) room.onMessage(t, () => {}); return room; };

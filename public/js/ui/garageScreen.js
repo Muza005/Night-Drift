@@ -1,13 +1,13 @@
 // The garage screen (#pGarage): the car on the stand, ‹ › through the cars (no wrapping),
 // its five bars compared with the car you came with, the paint palette and, solo, the
-// run's settings ("!") and "Поехали". From the lobby it is "Гараж" with "Выбрать".
+// run's settings (the gear) and "Поехали". From the lobby it is "Гараж" with "Выбрать".
 //
 //   openGarage({ kind: 'solo' | 'lobby', mode, car, paint, dir, onGo(car, paint), onBack() })
 //   garage.open        is it on screen
 //   garage.frame(now)  the main loop calls this instead of drawing the track while it is open
 //
 // The car and paint are not saved here: onGo gets the pick and the caller keeps it; onBack
-// drops it. The "!" settings (laps, density) are saved as soon as they change.
+// drops it. The gear settings (laps, density) are saved as soon as they change.
 import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
 import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
@@ -19,7 +19,7 @@ const LS = {
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
 export const MIN_LAPS = 1, MAX_LAPS = 10, DEFAULT_LAPS = 3;
-// Solo drift: how many laps a run has (the "!" settings), remembered.
+// Solo drift: how many laps a run has (the gear settings), remembered.
 { const n = parseInt(LS.get('nightdrift.laps'), 10); G.soloLaps = n >= MIN_LAPS && n <= MAX_LAPS ? n : DEFAULT_LAPS; }
 
 const stand = createStand({ renderer, el: $('garStand') });
@@ -104,7 +104,7 @@ for(const [pop, btn] of [['garPaintPop', 'garPaint'], ['garSetPop', 'garSet']]){
   $(btn).setAttribute('aria-expanded', 'false');
 }
 
-/* ---------- the run's settings ("!", solo) ---------- */
+/* ---------- the run's settings (the gear, solo) ---------- */
 function drawSettings(){
   $('setLaps').hidden = S.mode !== 'track';
   $('setDens').hidden = S.mode !== 'traffic';

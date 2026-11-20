@@ -388,7 +388,7 @@ export function updateGhosts(dt){
     const fx=Math.sin(s.h), fz=Math.cos(s.h), rx=Math.cos(s.h), rz=-Math.sin(s.h);
     for(const [k,lx] of [[0,.95],[1,-.95]]){
       const wx=s.x+rx*lx-fx*1.35, wz=s.z+rz*lx-fz*1.35;
-      if(s.slide>.12 && s.vf>5){ addMark(m,k,wx,wz); if(Math.random()<.6) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3); }
+      if(s.slide>.12 && s.vf>5){ addMark(m,k,wx,wz); if(Math.random()<.3) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3); }
       else m.lastMark[k]=null;
     }
   }

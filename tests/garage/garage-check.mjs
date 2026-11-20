@@ -7,7 +7,7 @@
 // task over 50 ms once a model is loaded; frame times on a GPU), no wrapping at the ends,
 // the palette opens and closes on a click elsewhere, a repaint is immediate, the bars
 // compare with the car you came with, keys (← → Esc Enter), and the solo run starting
-// with the picked car, its model and the "!" settings; drift ends after its laps.
+// with the picked car, its model and the gear settings; drift ends after its laps.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -94,7 +94,7 @@ try {
   const closed = await page.evaluate(() => ({ open: document.getElementById('garPaintPop').matches(':popover-open'), aside: document.getElementById('pGarage').classList.contains('painting') }));
   check('a click elsewhere closes it, the car comes back', !closed.open && !closed.aside);
 
-  // "!": laps 1..10, remembered; Esc closes it and stays in the garage
+  // the gear: laps 1..10, remembered; Esc closes it and stays in the garage
   await page.click('#garSet'); await sleep(250);
   for (let i = 0; i < 12; i++) await page.click('#lapsUp', { force: true });
   const top = await $('#lapsOut', e => e.textContent);

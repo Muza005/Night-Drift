@@ -2,11 +2,16 @@
 import { scene, cv, tex, glowTex, winTex } from '../../core/render.js';
 import { P, NM, TG, DIST, N, SC, ROAD, HALF, CURB, WALL, START } from './geometry.js';
 
+// Road texture: 512 px across the 16 m road (32 px/m), one tile = ROAD_TILE m along it.
+// Edge lines 5 px = 0.156 m, 0.5 m in from the asphalt edge; centre line 4 px = 0.125 m,
+// dashed 3 m with a 6 m gap (two 9 m periods per 18 m tile). Anisotropy and mipmaps come from tex().
+const ROAD_TILE = 18;
 const roadTex = (() => {
-  const [c,g]=cv(256,512); g.fillStyle='#24262f'; g.fillRect(0,0,256,512);
-  const id=g.getImageData(0,0,256,512); for(let k=0;k<id.data.length;k+=4){const n=(Math.random()-.5)*26; id.data[k]+=n; id.data[k+1]+=n; id.data[k+2]+=n;} g.putImageData(id,0,0);
-  g.fillStyle='rgba(235,240,255,.85)'; g.fillRect(8,0,6,512); g.fillRect(242,0,6,512);
-  g.fillStyle='rgba(255,194,61,.9)'; g.fillRect(125,0,6,220);
+  const W=512, H=1024, pxV=H/ROAD_TILE;
+  const [c,g]=cv(W,H); g.fillStyle='#24262f'; g.fillRect(0,0,W,H);
+  const id=g.getImageData(0,0,W,H); for(let k=0;k<id.data.length;k+=4){const n=(Math.random()-.5)*26; id.data[k]+=n; id.data[k+1]+=n; id.data[k+2]+=n;} g.putImageData(id,0,0);
+  g.fillStyle='rgba(235,240,255,.85)'; g.fillRect(16,0,5,H); g.fillRect(W-21,0,5,H);
+  g.fillStyle='rgba(255,194,61,.9)'; for(let m=0;m<ROAD_TILE;m+=9) g.fillRect(W/2-2,Math.round(m*pxV),4,Math.round(3*pxV));
   return tex(c,true);
 })();
 const groundTex = (() => {
@@ -53,7 +58,7 @@ ground.receiveShadow = true; group.add(ground);
 const runoffMat = new THREE.MeshStandardMaterial({color:0x17142a, roughness:1});
 for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10), runoffMat); m.receiveShadow=true; m.material.side=THREE.DoubleSide; group.add(m); }
 
-const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, 32), new THREE.MeshStandardMaterial({map:roadTex, roughness:.82, metalness:.05, side:THREE.DoubleSide}));
+const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE), new THREE.MeshStandardMaterial({map:roadTex, roughness:.82, metalness:.05, side:THREE.DoubleSide}));
 road.receiveShadow = true; group.add(road);
 
 const cRed=new THREE.Color(0xff2e5a), cWhite=new THREE.Color(0xf0f0f6);

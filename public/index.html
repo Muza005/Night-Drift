@@ -426,13 +426,13 @@ body{margin:0}
   </section>
 
   <!-- The garage: pick a car and its paint on the stand. Solo it comes after the mode card
-       (title = the mode, "!" = the run's settings, "Поехали"); from the lobby it is "Гараж"
+       (title = the mode, the gear = the run's settings, "Поехали"); from the lobby it is "Гараж"
        with "Выбрать". js/ui/garageScreen.js runs it. -->
   <section class="screen garage" id="pGarage" hidden aria-labelledby="garTitle">
     <header class="screen-bar">
       <button type="button" class="icon-btn" id="garBack" aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <h1 id="garTitle">Гараж</h1>
-      <button type="button" class="icon-btn bang" id="garSet" popovertarget="garSetPop" aria-label="Настройки заезда"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v9" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="19" r="1.7" fill="currentColor"/></svg></button>
+      <button type="button" class="icon-btn gar-set" id="garSet" popovertarget="garSetPop" aria-label="Настройки заезда"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M18.93 13L21.22 14.28L20.14 16.91L17.6 16.2A7 7 0 0 1 16.2 17.6L16.91 20.14L14.28 21.22L13 18.93A7 7 0 0 1 11 18.93L9.72 21.22L7.09 20.14L7.8 17.6A7 7 0 0 1 6.4 16.2L3.86 16.91L2.78 14.28L5.07 13A7 7 0 0 1 5.07 11L2.78 9.72L3.86 7.09L6.4 7.8A7 7 0 0 1 7.8 6.4L7.09 3.86L9.72 2.78L11 5.07A7 7 0 0 1 13 5.07L14.28 2.78L16.91 3.86L16.2 6.4A7 7 0 0 1 17.6 7.8L20.14 7.09L21.22 9.72L18.93 11A7 7 0 0 1 18.93 13Z"/><circle cx="12" cy="12" r="3"/></g></svg></button>
       <button type="button" class="pill-btn" id="garPaint" popovertarget="garPaintPop"><span class="swatch" id="garSwatch" aria-hidden="true"></span>Цвет</button>
     </header>
     <div class="gar-head">

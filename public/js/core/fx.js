@@ -1,4 +1,6 @@
-// Tire marks and smoke.
+// Tire marks and smoke. The smoke is kept light so the car stays visible through it:
+// a sliding wheel puffs on 42.5 % of frames (main.js; 30 % for other players, net.js),
+// each puff 2.55 across at 0.224 brightness.
 import { scene, glowTex } from './render.js';
 
 const MARKS=2600;
@@ -22,7 +24,7 @@ const smoke=[]; for(let i=0;i<SMOKE;i++){ smoke.push({x:0,y:-99,z:0,vx:0,vy:0,vz
 const smokeGeo=new THREE.BufferGeometry();
 smokeGeo.setAttribute('position',new THREE.BufferAttribute(smokePos,3));
 smokeGeo.setAttribute('color',new THREE.BufferAttribute(smokeCol,3));
-const smokePts=new THREE.Points(smokeGeo,new THREE.PointsMaterial({size:3.4,map:glowTex,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true}));
+const smokePts=new THREE.Points(smokeGeo,new THREE.PointsMaterial({size:2.55,map:glowTex,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true}));
 smokePts.frustumCulled=false; scene.add(smokePts);
 let smokeI=0;
 export function emitSmoke(x,z,vx,vz,amt){
@@ -34,7 +36,7 @@ export function emitSmoke(x,z,vx,vz,amt){
 export function updateSmoke(dt){
   for(let i=0;i<SMOKE;i++){ const p=smoke[i];
     if(p.life>0){ p.life-=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt; const k=Math.exp(-2.2*dt); p.vx*=k; p.vz*=k; p.vy*=k; }
-    const a=Math.max(0,p.life/p.max)*.32;
+    const a=Math.max(0,p.life/p.max)*.224;
     smokePos[i*3]=p.x; smokePos[i*3+1]=p.life>0?p.y:-99; smokePos[i*3+2]=p.z;
     smokeCol[i*3]=a*.95; smokeCol[i*3+1]=a*.85; smokeCol[i*3+2]=a*1.0;
   }

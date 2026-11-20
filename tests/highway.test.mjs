@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stepCar } from '../public/js/core/physics.js';
 import * as H from '../public/js/modes/traffic/geometry.js';
+import { CARS } from '../public/js/core/cars.js';
 
 const newCar = () => ({x:0,z:0,h:0,vx:0,vz:0,vF:0,vR:0,steer:0,idx:0,prog:0,off:false,pitch:0,spinV:0});
 const LIM = H.RAIL - 1.25;
@@ -15,7 +16,43 @@ test('rails stop the car and report hard hits', () => {
   for (let i = 0; i < 60 * 8; i++) { stepCar(car, input, 1 / 120); H.constrainToHighway(car, 1 / 120, hooks); maxX = Math.max(maxX, Math.abs(car.x)); }
   assert.ok(maxX <= LIM + 1e-9, `car went through the rail: |x| = ${maxX}`);
   assert.ok(hits.length > 0, 'hitting the rail at speed must count as a wall hit');
-  assert.equal(car.off, false);
+  assert.equal(car.off, Math.abs(car.x) > H.HALF, 'off the road exactly when on the shoulder');
+});
+
+// The shoulder brakes like the grass beside the drift track (car.off: 77.5 % pull, 70 %
+// grip, extra drag), so it is no way round the traffic.
+test('full throttle for 20 s: ~200 km/h in a lane, under 95 km/h on the shoulder', () => {
+  const drive = x => {
+    const car = { ...newCar(), x }, hooks = { onWall() {}, onLap() {} };
+    const input = { up: 1, down: 0, left: 0, right: 0, hb: 0 };
+    let top = 0, offAll = true;
+    for (let t = 0; t < 20; t += 1 / 120) {
+      stepCar(car, input, 1 / 120); H.constrainToHighway(car, 1 / 120, hooks);
+      top = Math.max(top, Math.hypot(car.vx, car.vz) * 3.6); offAll = offAll && car.off;
+    }
+    return { top, off: car.off, offAll, x: car.x };
+  };
+  const lane = drive(H.laneCenter(0));
+  assert.ok(lane.top > 195, `lane top speed ${lane.top.toFixed(1)} km/h`);
+  assert.equal(lane.off, false);
+  for (const x of [H.HALF + .3, LIM, -(H.HALF + .3), -LIM]) {      // both shoulders, mid-shoulder and against the rail
+    const sh = drive(x);
+    assert.ok(sh.offAll, `at x = ${x} the car must count as off the road`);
+    assert.ok(sh.top < 95 && sh.top > 70, `shoulder top speed ${sh.top.toFixed(1)} km/h at x = ${x}`);
+  }
+});
+
+// Every car, 30 s on the shoulder. The rally car loses less off the asphalt by design
+// (dirt 1.25 in core/cars.js), so it alone may reach 100 km/h; the rest stay under 95.
+test('every car on the shoulder stays far below its lane speed (the rally car a little faster)', () => {
+  for (const c of CARS) {
+    const car = { ...newCar(), x: H.HALF + 1, spec: c.stats }, hooks = { onWall() {}, onLap() {} };
+    const input = { up: 1, down: 0, left: 0, right: 0, hb: 0 };
+    let top = 0;
+    for (let t = 0; t < 30; t += 1 / 120) { stepCar(car, input, 1 / 120); H.constrainToHighway(car, 1 / 120, hooks); top = Math.max(top, Math.hypot(car.vx, car.vz) * 3.6); }
+    const limit = c.stats.dirt > 1 ? 100 : 95;
+    assert.ok(top < limit && top > 70, `${c.id}: shoulder top speed ${top.toFixed(1)} km/h (limit ${limit})`);
+  }
 });
 
 test('25 km at full speed: the car stays on the road and the numbers stay sane', () => {

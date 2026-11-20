@@ -10,7 +10,7 @@ import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
-import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft } from './core/audio.js';
+import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft, audioRumble } from './core/audio.js';
 import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
@@ -204,7 +204,7 @@ function showOver(){
   showPanel('pOver'); $('retry').focus();
 }
 function overTitle(a, b){ const h=$('overTitle'), sp=document.createElement('span'); sp.textContent=b; h.replaceChildren(a+' ', sp); }
-// Solo drift: the run is N laps (the garage's "!"); after the last one, the finish screen:
+// Solo drift: the run is N laps (the garage's gear button); after the last one, the finish screen:
 // the drift points big, the run's time, its best lap, a badge for a lap record.
 function showFinish(){
   G.state='over'; clearInput(); G.runEnd=false;
@@ -263,9 +263,10 @@ function frame(now){
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
   // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
   // Out of the race (results, the menu, the garage…) the engine and the tyres go back to
-  // idle once: the screens below return early and never reach the audio further down.
+  // idle once, and the shoulder rumble and the slipstream wind stop: the screens below
+  // return early and never reach the audio further down.
   const racing=G.state==='race'||G.state==='count'||G.state==='crash';
-  if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioIdle=true; } else if(racing) audioIdle=false;
+  if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioRumble(0); audioDraft(0); audioIdle=true; } else if(racing) audioIdle=false;
   if(garage.open){ stillKey=''; garage.frame(now); return; }
   if(lobby.open){ stillKey=''; lobby.frame(now); return; }        // the lobby: the same, with my car
   if(stillFrame()) return;
@@ -324,7 +325,7 @@ function frame(now){
   const smokeOn=G.state==='race' && info.speed>5 && (Math.abs(car.vR)>4.5 || (input.hb&&info.speed>8));
   for(const [k,lx] of [[0,.95],[1,-.95]]){
     const wx=car.x+rx*lx+fx*-1.35, wz=car.z+rz*lx+fz*-1.35;
-    if(smokeOn){ addMark(car,k,wx,wz); if(Math.random()<.85) emitSmoke(wx,wz,car.vx,car.vz,slide+.3); }
+    if(smokeOn){ addMark(car,k,wx,wz); if(Math.random()<.425) emitSmoke(wx,wz,car.vx,car.vz,slide+.3); }
     else car.lastMark[k]=null;
   }
   sendState(dt,slide);
@@ -346,6 +347,7 @@ function frame(now){
   const bands=[0,12,22,33,45,58,72]; let gear=1; while(gear<6 && spd>bands[gear]) gear++;   // six gears up to 250 km/h
   const lo=bands[gear-1], hi=bands[gear]; const rpm=.25+.75*Math.min(1,(spd-lo)/(hi-lo));
   audioUpdate(G.state==='race'?rpm:.2, G.state==='race'?input.up:0, slide);
+  audioRumble(G.state==='race' && car.off && G.mode.id==='traffic' ? Math.hypot(car.vx,car.vz) : 0);   // on the highway shoulder
 
   // HUD
   const kmh=Math.round(Math.hypot(car.vx,car.vz)*3.6);

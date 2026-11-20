@@ -4,24 +4,24 @@
 // server/).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
+import { startServer } from './server-start.mjs';
 import { decodeSnapshot } from '../public/js/modes/traffic/netcodec.js';
 import { startPose } from '../public/js/modes/traffic/geometry.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 2591, RUN_S = 20;
+const RUN_S = 20;
+let PORT;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let server;
 
 before(async () => {
-  server = spawn(process.execPath, ['src/index.js'], { cwd: path.join(ROOT, 'server'), env: { ...process.env, PORT: String(PORT), EXTRA_DURATION: String(RUN_S) }, stdio: 'ignore' });
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) return; } catch {} await sleep(200); }
-  throw new Error('server did not start');
+  server = await startServer({ EXTRA_DURATION: String(RUN_S) });
+  PORT = server.port;
 });
-after(() => new Promise(r => { server.once('exit', r); server.kill(); }));
+after(() => server && server.stop());
 
 function player(room, slot) {
   // report a car standing on its start spot, then wherever the test puts it

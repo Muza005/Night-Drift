@@ -23,6 +23,8 @@ export function scoring(dt){
   const ang=Math.atan2(Math.abs(car.vR),Math.max(.01,Math.abs(car.vF)))*180/Math.PI;
   // online, after the finish the car rolls on by itself: that slide scores nothing (it used
   // to be added to the score on screen after the server had already taken the final one)
+  // Off the asphalt nothing scores: the grass beside the drift track and, on the highway,
+  // the shoulder (a slide there earns no points and no ×2 on near misses).
   const drifting=speed>9 && car.vF>3 && ang>10 && !car.off && !(NET.online && NET.finished);
   drift.ang=ang;
   if(drifting){

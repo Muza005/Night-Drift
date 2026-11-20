@@ -112,7 +112,7 @@ try {
   // «Авто» → the garage → «Выбрать»: back in the lobby with the pick
   await B.click('#lobCar');
   await B.waitForFunction(() => !document.getElementById('pGarage').hidden);
-  check('«Авто» opens the garage: «Гараж», «Выбрать», no "!"', await B.innerText('#garTitle') === 'Гараж' && await B.innerText('#garGo') === 'Выбрать' && await B.$eval('#garSet', b => b.hidden));
+  check('«Авто» opens the garage: «Гараж», «Выбрать», no race settings', await B.innerText('#garTitle') === 'Гараж' && await B.innerText('#garGo') === 'Выбрать' && await B.$eval('#garSet', b => b.hidden));
   for (let i = 0; i < 2; i++) { await B.keyboard.press('ArrowRight'); await sleep(150); }
   await B.click('#garPaint'); await B.click('#garSwatches button[aria-label="Красный"]'); await B.keyboard.press('Escape');
   await B.click('#garGo');

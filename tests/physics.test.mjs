@@ -75,22 +75,26 @@ test('pressed against a rail the car scrapes along it, it does not stop', async 
   const { wallKeep } = await import('../public/js/core/physics.js');
   const H = await import('../public/js/modes/traffic/geometry.js');
   assert.ok(wallKeep(.5) >= .99 && wallKeep(5) === .9 && wallKeep(20) === .9, 'a glancing touch costs ~1 %, a hard hit 10 %');
-  // 180 km/h in the right-hand lane, steer into the rail (right = towards -x)
-  const ride = holdFor => {
-    const car = {x:H.laneCenter(3),z:0,h:0,vx:0,vz:50,vF:50,vR:0,steer:0,off:false,spinV:0};
+  // 180 km/h in the right-hand lane, steer into the rail (right = towards -x). The rail
+  // stands at the outer edge of the shoulder, and the shoulder brakes (car.off), so the
+  // ride is measured against a car rolling straight down the shoulder without touching it.
+  const ride = (holdFor, x = H.laneCenter(3)) => {
+    const car = {x,z:0,h:0,vx:0,vz:50,vF:50,vR:0,steer:0,off:false,spinV:0};
     let hits = 0; const hooks = { onWall: () => hits++ }, dt = 1 / 120, kmh = [];
     for (let t = 0; t < 4; t += dt) {
       stepCar(car, { up: 1, down: 0, left: 0, right: t < holdFor ? 1 : 0, hb: 0 }, dt);
       H.constrainToHighway(car, dt, hooks);
       kmh.push(Math.hypot(car.vx, car.vz) * 3.6);
     }
-    return { min: Math.min(...kmh.slice(120)), end: kmh.at(-1), hits, h: car.h };
+    return { kmh, end: kmh.at(-1), hits, h: car.h };
   };
+  const ref = ride(0, -(H.HALF + .4));   // on the shoulder, clear of the rail
+  const worst = r => Math.min(...r.kmh.slice(120).map((v, i) => v / ref.kmh[i + 120]));
   const held = ride(3.5);          // holding the steering into the rail the whole time
-  assert.ok(held.min > 100, `pressed into the rail the car dropped to ${held.min.toFixed(0)} km/h`);
+  assert.ok(worst(held) > .7, `pressed into the rail the car fell to ${(worst(held) * 100).toFixed(0)} % of the shoulder speed`);
   assert.ok(held.hits <= 3, `one hit, then scraping: ${held.hits} hits`);
   const touched = ride(.4);        // a touch: it straightens up along the rail and drives on
-  assert.ok(touched.end > 175 && Math.abs(touched.h) < .02, `after a touch: ${touched.end.toFixed(0)} km/h, heading ${touched.h.toFixed(3)}`);
+  assert.ok(touched.end > ref.end * .95 && Math.abs(touched.h) < .02, `after a touch: ${touched.end.toFixed(0)} km/h (shoulder ${ref.end.toFixed(0)}), heading ${touched.h.toFixed(3)}`);
 });
 
 test('off the asphalt the throttle keeps 77.5% of its pull', () => {
