@@ -11,8 +11,8 @@
 // tools/prep-car-model.mjs, the same URL core/carModels.js asks for; tests/models.test.mjs
 // keeps them equal.)
 (function(){
-  var M = { coupe: 'generic_sport_coupe_car.glb?v=0cfeb43068', gtr: 'nissan_gtr_r32.glb?v=05c2227734', rx7: 'lowpoly_stylized_rx_7_free.glb?v=20a3bd7107', muscle: 'muscle_car.glb?v=5ae2b0a0f9',
-    super: 'sports_car.glb?v=8ed83c4c6f', sedan: 'generic_sedan_car.glb?v=541e51e45d', nexus: 'nexus_rx.glb?v=ade0353e3e', rally: 'everest.glb?v=40bbad1983' };
+  var M = { coupe: 'generic_sport_coupe_car.glb?v=0cfeb43068', gtr: 'nissan_gtr_r32.glb?v=05c2227734', rx7: 'lowpoly_stylized_rx_7_free.glb?v=3da64842d7', muscle: 'muscle_car.glb?v=5ae2b0a0f9',
+    super: 'sports_car.glb?v=1e2a424159', sedan: 'generic_sedan_car.glb?v=541e51e45d', nexus: 'nexus_rx.glb?v=ade0353e3e', rally: 'everest.glb?v=40bbad1983' };
   var id = null; try { id = localStorage.getItem('nightdrift.car'); } catch (e) {}
   var l = document.createElement('link');
   l.rel = 'preload'; l.as = 'fetch'; l.crossOrigin = 'anonymous'; l.setAttribute('fetchpriority', 'high');

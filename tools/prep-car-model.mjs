@@ -7,6 +7,7 @@
 //    setting one colour. Where the paint was baked into a texture atlas, the triangles whose
 //    texels are the body colour are split off into the Paint material.
 // pack (models-src/cars/<name>.glb → public/models/cars/<name>.glb, what the game loads):
+//  - wheels modelled into the body mesh (the Lamborghini) are cut out into nodes of their own
 //  - wheels modelled steered (Rally, Ford) are turned straight: each wheel's axle (its
 //    thinnest direction, tools/wheel-axle.mjs) is put along the car's X axis, or the wheel
 //    wobbles in a figure eight as it spins
@@ -103,6 +104,128 @@ function straightenWheels(doc, log){
     log(`wheel ${w.name} straightened (axle was ${w.offX.toFixed(1)}° off X)`);
   }
 }
+// Wheels modelled into the body mesh (the Lamborghini: the whole car is one mesh) are cut
+// out into four nodes of their own, so they can spin. The mesh is split into connected
+// pieces (faces joined by a shared vertex position); a tyre is a piece that is round in
+// the car's side view (as tall as it is long), thin across, touching the ground and at
+// least a tenth of the car long; every piece that lies wholly inside a tyre's box (the
+// rim's spokes, hub, wheel nuts) goes with it. Each wheel becomes a node named for its
+// corner (FLW, FRW, RLW, RRW: core/carModels.js WHEEL; front is +Z, left is +X), with its
+// origin at the hub and its geometry in world units around it. Only geometry moves: at
+// rest the car looks exactly as before.
+function cutWheels(doc, log){
+  const root = doc.getRoot(), scene = root.listScenes()[0], buffer = root.listBuffers()[0];
+  const wheelNodes = new Set(wheelAxles(doc).map(w => w.node));
+  const meshNodes = root.listNodes().filter(n => n.getMesh() && !wheelNodes.has(n));
+  // the car's world box, for "touching the ground" and the size of a wheel
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const pts = new Map();          // primitive -> its vertices in world space
+  for(const n of meshNodes){
+    const W = n.getWorldMatrix();
+    for(const p of n.getMesh().listPrimitives()){
+      const a = p.getAttribute('POSITION'), w = [];
+      for(let i = 0; i < a.getCount(); i++){
+        const q = apply(W, a.getElement(i, [])); w.push(q);
+        for(let k = 0; k < 3; k++){ lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+      }
+      pts.set(p, w);
+    }
+  }
+  const len = hi[2] - lo[2], mid = [0, 1, 2].map(k => (lo[k] + hi[k]) / 2);
+  const eps = len * 1e-4;
+  let cut = 0;
+  for(const n of meshNodes){
+    const W = n.getWorldMatrix(), N = normalMatrix(W), prims = n.getMesh().listPrimitives();
+    // connected pieces over all the node's primitives, by vertex position
+    const par = [], find = i => { while(par[i] !== i){ par[i] = par[par[i]]; i = par[i]; } return i; };
+    const ids = new Map(), vid = new Map();      // position key -> id; primitive -> [id per vertex]
+    for(const p of prims){
+      const loc = pts.get(p).map(q => {
+        const k = q.map(v => Math.round(v / eps)).join(',');
+        if(!ids.has(k)){ ids.set(k, par.length); par.push(par.length); }
+        return ids.get(k);
+      });
+      vid.set(p, loc);
+      const idx = p.getIndices().getArray();
+      for(let f = 0; f < idx.length; f += 3){
+        const a = find(loc[idx[f]]), b = find(loc[idx[f + 1]]), c = find(loc[idx[f + 2]]);
+        par[a] = c; par[b] = c;
+      }
+    }
+    const pieces = new Map();       // root id -> { lo, hi, faces: Map<primitive, [face]> }
+    for(const p of prims){
+      const loc = vid.get(p), idx = p.getIndices().getArray(), w = pts.get(p);
+      for(let f = 0; f < idx.length / 3; f++){
+        const r = find(loc[idx[f * 3]]);
+        let pc = pieces.get(r);
+        if(!pc){ pc = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity], faces: new Map() }; pieces.set(r, pc); }
+        if(!pc.faces.has(p)) pc.faces.set(p, []);
+        pc.faces.get(p).push(f);
+        for(let j = 0; j < 3; j++){ const q = w[idx[f * 3 + j]]; for(let k = 0; k < 3; k++){ pc.lo[k] = Math.min(pc.lo[k], q[k]); pc.hi[k] = Math.max(pc.hi[k], q[k]); } }
+      }
+    }
+    const size = pc => [0, 1, 2].map(k => pc.hi[k] - pc.lo[k]);
+    const tyres = [...pieces.values()].filter(pc => {
+      const [x, y, z] = size(pc);
+      return Math.abs(y - z) < 0.05 * y && x < 0.5 * y && y > 0.1 * len && pc.lo[1] - lo[1] < 0.02 * (hi[1] - lo[1]);
+    });
+    if(!tyres.length) continue;
+    if(tyres.length !== 4) throw new Error(`${n.getName()}: ${tyres.length} tyres found, not 4`);
+    const inside = (pc, t) => [0, 1, 2].every(k => pc.lo[k] >= t.lo[k] - eps && pc.hi[k] <= t.hi[k] + eps);
+    const taken = new Map(prims.map(p => [p, new Set()]));     // primitive -> its faces now in a wheel
+    for(const t of tyres){
+      const hub = [0, 1, 2].map(k => (t.lo[k] + t.hi[k]) / 2);
+      const name = (hub[2] > mid[2] ? 'F' : 'R') + (hub[0] > mid[0] ? 'L' : 'R') + 'W';
+      const parts = [...pieces.values()].filter(pc => pc === t || (!tyres.includes(pc) && inside(pc, t)));
+      const mesh = doc.createMesh(name);
+      for(const p of prims){
+        const faces = parts.flatMap(pc => pc.faces.get(p) || []);
+        if(!faces.length) continue;
+        mesh.addPrimitive(subPrimitive(doc, buffer, p, faces, q => apply(W, q).map((v, k) => v - hub[k]), N));
+        for(const f of faces) taken.get(p).add(f);
+      }
+      scene.addChild(doc.createNode(name).setMesh(mesh).setTranslation(hub));
+      log(`wheel ${name} cut out: ${parts.length} pieces, hub at ${hub.map(v => v.toFixed(2)).join(', ')}`);
+      cut++;
+    }
+    // the body keeps the rest, its vertices compacted
+    for(const p of prims){
+      const keep = [];
+      for(let f = 0; f < p.getIndices().getCount() / 3; f++) if(!taken.get(p).has(f)) keep.push(f);
+      n.getMesh().addPrimitive(subPrimitive(doc, buffer, p, keep, null, null));
+      p.dispose();
+    }
+  }
+  if(cut) log(`${cut} wheels cut from the body mesh`);
+}
+const apply = (m, p) => [0, 1, 2].map(r => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]);
+// the inverse transpose of a matrix's 3x3 part, for normals (column-major like glTF)
+const normalMatrix = m => { const i = invert(m); return [i[0], i[4], i[8], 0, i[1], i[5], i[9], 0, i[2], i[6], i[10], 0, 0, 0, 0, 1]; };
+// A primitive of `faces` of p (face indices), with only the vertices they use. pos maps a
+// position (null: unchanged); N, if given, turns normals and tangents the same way.
+function subPrimitive(doc, buffer, p, faces, pos, N){
+  const idx = p.getIndices().getArray(), map = new Map(), order = [];
+  const out = new Uint32Array(faces.length * 3);
+  faces.forEach((f, j) => { for(let k = 0; k < 3; k++){ const v = idx[f * 3 + k]; if(!map.has(v)){ map.set(v, order.length); order.push(v); } out[j * 3 + k] = map.get(v); } });
+  const np = doc.createPrimitive().setMaterial(p.getMaterial()).setMode(p.getMode())
+    .setIndices(doc.createAccessor().setType('SCALAR').setArray(order.length > 65535 ? out : Uint16Array.from(out)).setBuffer(buffer));
+  for(const sem of p.listSemantics()){
+    const a = p.getAttribute(sem), n = a.getElementSize(), src = a.getArray();
+    const dst = new src.constructor(order.length * n);
+    order.forEach((v, j) => {
+      let e = a.getElement(v, []);
+      if(sem === 'POSITION' && pos) e = pos(e);
+      else if((sem === 'NORMAL' || sem === 'TANGENT') && N){
+        const t = [0, 1, 2].map(r => N[r] * e[0] + N[4 + r] * e[1] + N[8 + r] * e[2]), l = Math.hypot(...t) || 1;
+        e = [...t.map(v => v / l), ...e.slice(3)];
+      }
+      for(let k = 0; k < n; k++) dst[j * n + k] = e[k];
+    });
+    if((sem === 'POSITION' || sem === 'NORMAL' || sem === 'TANGENT') && pos && !(src instanceof Float32Array)) throw new Error(sem + ' is not float: cannot move it');
+    np.setAttribute(sem, doc.createAccessor().setType(a.getType()).setArray(dst).setNormalized(a.getNormalized()).setBuffer(buffer));
+  }
+  return np;
+}
 // Per model. small: materials of small parts (a grille, a tyre, decals, brake discs) whose
 // textures need no more than 512 px (the body's atlas keeps 1024).
 // (No simplification: tried with meshopt's simplifier at under 2 mm of error, the glossy
@@ -112,6 +235,7 @@ const PACK = {
   generic_sedan_car: { small: /honeycomb|tire|suspension|car-bottom|Stainless/ },
   generic_sport_coupe_car: { small: /wheel-brake-disc|mechanics|tire|grille/ },
   nexus_rx: { small: /Decals|Tires/ },
+  sports_car: { cutWheels: true },
 };
 // Everything but the wheels hangs straight from the scene, at its world place, so join()
 // can merge the body's parts by material (the Ford came as 92 meshes, each in a node of
@@ -148,6 +272,7 @@ function dropUnusedUVs(doc){
 }
 async function pack(doc, log, name){
   const opt = PACK[name] || {};
+  if(opt.cutWheels) cutWheels(doc, log);
   straightenWheels(doc, log);
   // (each pass takes only what is still JPEG or PNG: nothing is encoded twice)
   const webp = (more) => textureCompress({ encoder: sharp, targetFormat: 'webp', formats: /^image\/(jpeg|png)$/, ...more });

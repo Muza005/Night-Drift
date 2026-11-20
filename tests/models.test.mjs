@@ -48,11 +48,45 @@ test('palettes stay exact: the flat-colour textures are lossless WebP', () => {
   }
 });
 
+// The car's box in the file's scene space (wheels included).
+function carBox(doc){
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const n of doc.getRoot().listNodes()) {
+    const mesh = n.getMesh(); if (!mesh) continue;
+    const W = n.getWorldMatrix();
+    for (const p of mesh.listPrimitives()) {
+      const a = p.getAttribute('POSITION'), e = [];
+      for (let i = 0; i < a.getCount(); i++) {
+        const [x, y, z] = a.getElement(i, e);
+        const q = [0, 1, 2].map(r => W[r] * x + W[4 + r] * y + W[8 + r] * z + W[12 + r]);
+        for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+      }
+    }
+  }
+  return { lo, hi };
+}
+
+test('every car has four wheels that spin: one at each corner, separate nodes', () => {
+  // (a tyre and its rim are two nodes at one hub: one wheel)
+  for (const c of CARS) {
+    const doc = docs.get(c.id), { lo, hi } = carBox(doc), len = hi[2] - lo[2];
+    const mid = [0, 1, 2].map(k => (lo[k] + hi[k]) / 2);
+    const hubs = [];
+    for (const w of wheelAxles(doc)) {
+      let h = hubs.find(h => Math.hypot(...h.centre.map((v, k) => v - w.centre[k])) < 0.05 * len);
+      if (!h) hubs.push(h = { centre: w.centre, names: [] });
+      h.names.push(w.name);
+    }
+    assert.equal(hubs.length, 4, `${c.id}: ${hubs.length} wheels (${hubs.map(h => h.names.join('+')).join(', ')})`);
+    const corners = hubs.map(h => (h.centre[2] > mid[2] ? 'F' : 'R') + (h.centre[0] > mid[0] ? 'L' : 'R')).sort();
+    assert.deepEqual(corners, ['FL', 'FR', 'RL', 'RR'], `${c.id}: a wheel at each corner`);
+    for (const h of hubs) assert.ok(h.centre[1] < lo[1] + 0.4 * (hi[1] - lo[1]), `${c.id}: ${h.names} low, at the ground`);
+  }
+});
+
 test('every wheel spins true: its axle along the car\'s X axis within 2°', () => {
-  const NO_WHEELS = ['super', 'rx7'];          // their wheels are part of the body mesh
   for (const c of CARS) {
     const wheels = wheelAxles(docs.get(c.id));
-    if (NO_WHEELS.includes(c.id)) { assert.equal(wheels.length, 0, `${c.id}: no separate wheels`); continue; }
     assert.ok(wheels.length >= 4, `${c.id}: ${wheels.length} wheel nodes`);
     for (const w of wheels) assert.ok(w.offX < 2, `${c.id}: ${w.name} axle is ${w.offX.toFixed(1)}° off X`);
   }

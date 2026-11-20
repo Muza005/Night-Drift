@@ -49,9 +49,10 @@ function gltfLoader(){
 
 // The wheels of each model, by node name as GLTFLoader gives it (it drops dots and turns
 // spaces into "_"): where wheels are separate nodes they can spin. Some models have the
-// tyre and the rim as two nodes (Nexus, Dodge): both are listed. Models whose wheels are
-// part of the body mesh (the Lamborghini, the RX-7) have none.
-export const WHEEL = /^(DEF-Wheel(Ft|Bk)[LR]_\d+|Tire_(FL|FR|RL|RR)|(FL|FR|RL|RR)W|(Tire|Rim)_(FL|FR|RL|RR)_low|(FL|FR|RL|RR)(tire|rim)_[A-Za-z]+\d*)$/;
+// tyre and the rim as two nodes (Nexus, Dodge, the RX-7's Circle.001 and .004-.010;
+// .002 and .003 are its tail lights): both are listed. The Lamborghini's wheels were part of
+// its one body mesh: the pack step cuts them out into nodes FLW, FRW, RLW, RRW.
+export const WHEEL = /^(DEF-Wheel(Ft|Bk)[LR]_\d+|Tire_(FL|FR|RL|RR)|(FL|FR|RL|RR)W|(Tire|Rim)_(FL|FR|RL|RR)_low|(FL|FR|RL|RR)(tire|rim)_[A-Za-z]+\d*|Circle0(0[14-9]|10))$/;
 
 function normalise(scene){
   scene.updateMatrixWorld(true);
