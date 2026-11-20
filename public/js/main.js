@@ -4,7 +4,7 @@
 // G.mode.constrain() (the mode's walls and rules). Everything else here is the
 // single-file version's loop, split across modules.
 import { $, G, NET, drift, isTouch, serverNow } from './state.js';
-import { canvas, renderer, scene, camera, moon, qualityTick, captureBackdrop, drawBackdrop } from './core/render.js';
+import { canvas, renderer, scene, camera, moon, qualityTick, drawBackdrop } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
@@ -232,37 +232,37 @@ G.mode.idle(car);
 
 /* ---------- loop ---------- */
 let last=performance.now(), menuA=0;
-// The camera behind a menu screen: circling the car. The lobby and the garage take one
-// still picture from here (G.menuView, then core/render.js captureBackdrop).
+// The camera behind a menu screen: circling the car (the menus themselves show the drawn
+// city of core/render.js drawBackdrop, not the race).
 function menuView(){
   rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
   camera.position.copy(rig.pos); rig.look.set(car.x,.9,car.z); camera.lookAt(rig.look); rig.init=false;
   camera.fov=58; if(camera.view && camera.view.enabled) camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
-G.menuView=menuView;
 // A menu screen with nothing of the race moving (home, the mode cards, the results, the
 // pause and the finish or crash screen): the scene is drawn once, not every frame, and the
-// canvas keeps that picture. Behind home, the cards and the results it is the blurred
-// still the garage uses; behind pause and the finish screen, the race as it stood.
+// canvas keeps that picture. Behind home, the cards and the results it is the drawn night
+// city the garage uses; behind pause and the finish screen, the race as it stood.
 // Drawn again only when something it shows changes: the mode, my car, the window.
 let stillKey='', audioIdle=false;
 function stillFrame(){
   if($('menu').hidden){ stillKey=''; return false; }
+canvas.addEventListener('webglcontextrestored',()=>{ stillKey=''; });   // the still picture is gone with the context: draw it again
   const s=G.state, frozen=s==='pause'||s==='over';
   if(!frozen && s!=='menu' && s!=='results' && s!=='lobby') return false;
   const key=s+'|'+G.mode.id+'|'+(car.model?car.model.carId+':'+car.model.code:'')+'|'+innerWidth+'x'+innerHeight+'@'+renderer.getPixelRatio();
   if(key!==stillKey){
     stillKey=key;
     if(frozen) renderer.render(scene,camera);
-    else { menuView(); captureBackdrop(); drawBackdrop(); }
+    else drawBackdrop();
   }
   return true;
 }
 function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
-  // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
+  // The garage is up: only the stand is drawn, on the drawn night city.
   // Out of the race (results, the menu, the garage…) the engine and the tyres go back to
   // idle once, and the shoulder rumble and the slipstream wind stop: the screens below
   // return early and never reach the audio further down.

@@ -10,7 +10,7 @@
 // drops it. The gear settings (laps, density) are saved as soon as they change.
 import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
-import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
+import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
 import { createStand } from './stand.js';
 import { showPanel, hex, el } from './hud.js';
 
@@ -156,10 +156,8 @@ export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'f
   drawSettings(); drawCar();
   stand.setCar(S.ref, paint, 0);
   menuPixels(true);
-  captureBackdrop();                      // the track, once, as it stands behind the menu now
   return showPanel('pGarage', dir);
 }
-addEventListener('resize', () => { if(S.open) captureBackdrop(); });
 
 // Keys: ← → through the cars, Esc back (after closing an open popover first), Enter the
 // main button. Keys typed into a field or meant for a focused control are left alone.
@@ -190,7 +188,7 @@ addEventListener('keydown', e => {
 
 export const garage = {
   get open(){ return S.open && !$('pGarage').hidden; },
-  frame(now){ drawBackdrop(); stand.frame(now); },
+  frame(now){ drawBackdrop(stand.measure()); stand.frame(now); },
   close(){ if(S.open) leave(); },          // (S.open, not .open: also while its screen is still on its way in)          // a run starts (online) or the room is gone: no callback
   stand,
   get pick(){ return { car: CARS[S.idx].id, paint: S.paint }; },

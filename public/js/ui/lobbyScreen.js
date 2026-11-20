@@ -12,11 +12,11 @@
 //                  checks it too); «Готово» for the others, pressed again to take it back.
 //
 // net/net.js owns the room and calls renderLobby() whenever it changes; this file only
-// draws it and sends what the player does. Nothing of the race is drawn behind it: a
-// still, blurred picture of the scene, and the stand.
+// draws it and sends what the player does. Nothing of the race is drawn behind it: the
+// drawn night city (core/render.js drawBackdrop), and the stand.
 import { $, G, NET, isTouch } from '../state.js';
 import { carById, classById, paintByCode } from '../core/cars.js';
-import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
+import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
 import { createStand } from './stand.js';
 import { showPanel, el, hex, netStatus } from './hud.js';
 import { openGarage, garage, MIN_LAPS, MAX_LAPS } from './garageScreen.js';
@@ -239,7 +239,7 @@ function drawButton(s){
     // lit just now (not on the first look): one short flash, once
     if(lit && S.armed === false){ b.classList.remove('armed'); void b.offsetWidth; b.classList.add('armed'); }
     S.armed = lit;
-    netStatus('lobbyStatus', s.players.size < 2 ? 'Можно стартовать и одному. Друзьям — код слева внизу.' : n ? `Ждём «Готово»: ${n} ${plural(n, 'игрок', 'игрока', 'игроков')}.` : 'Все готовы. Можно стартовать.');
+    netStatus('lobbyStatus', s.players.size < 2 ? 'Можно стартовать и одному. Друзьям — код комнаты.' : n ? `Ждём «Готово»: ${n} ${plural(n, 'игрок', 'игрока', 'игроков')}.` : 'Все готовы. Можно стартовать.');
   } else {
     const on = !!(me && me.ready);
     b.textContent = 'Готово';
@@ -284,15 +284,13 @@ export function renderLobby(){
   $('lobMode').textContent = s.mode === 'traffic' ? 'Трасса' : 'Дрифт';
   drawPlayers(s); drawSettings(s); drawButton(s); drawCar(s);
   $('lobCar').disabled = !between();
-  // the scene behind follows the room's mode (the picture of it is taken again)
-  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).then(() => { if(lobby.open) backdrop(); }, e => console.error('mode failed to load', s.mode, e));
+  // the game follows the room's mode (the city behind is the same for both)
+  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).catch(e => console.error('mode failed to load', s.mode, e));
 }
-function backdrop(){ if(G.menuView) G.menuView(); captureBackdrop(); }
 export function openLobby(dir){
   S.open = true;
   menuPixels(true);
   renderLobby();
-  backdrop();
   return showPanel('pLobby', dir);
 }
 export function closeLobby(){
@@ -303,7 +301,6 @@ export function closeLobby(){
 }
 // leaving the room or a run starting: the garage opened from here goes too
 export function leaveLobby(){ closeLobby(); if(garage.open) garage.close(); }
-addEventListener('resize', () => { if(lobby.open) backdrop(); });
 
 // Keys: Esc leaves the room (after closing the ✕ panel or a rename first), Enter is the
 // main button unless a control has the focus.
@@ -317,7 +314,7 @@ addEventListener('keydown', e => {
 
 export const lobby = {
   get open(){ return S.open && !$('pLobby').hidden && !$('menu').hidden; },
-  frame(now){ drawBackdrop(); stand.frame(now); },
+  frame(now){ drawBackdrop(stand.measure()); stand.frame(now); },
   stand,
 };
 if(isTouch) $('pLobby').classList.add('touch');

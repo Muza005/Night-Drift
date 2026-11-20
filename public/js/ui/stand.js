@@ -18,6 +18,7 @@
 //                                    never an empty podium
 //   stand.repaint(paintCode)         recolours it at once
 //   stand.frame(now)                 draws one frame (now: rAF time, ms); false if not drawn
+//   stand.measure()                  the podium on screen now, for the backdrop (or null)
 //   stand.dispose()
 import { CARS, carById, paintByCode, paintHex } from '../core/cars.js';
 import { makeModel, preload, setPaint, PAINT_FINISH } from '../core/carModels.js';
@@ -340,21 +341,15 @@ export function createStand({ renderer, el }){
 
   /* ---------- drawing ---------- */
   let last = 0, disposed = false;
-  const box = { w: 0, h: 0 };
-  function frame(now){
-    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;   // from time, not frames; a long gap is not a jump
-    last = now;
-    if(disposed || !el.isConnected) return false;
+  const box = { w: 0, h: 0 }, P = new THREE.Vector3(), anchor = { x: 0, y: 0, sway: 0 };
+  // The box on screen, the camera framed to it, and where the podium stands in it (for the
+  // backdrop behind: its light pool). Null while the box is hidden or off screen.
+  function place(){
+    if(disposed || !el.isConnected) return null;
     const r = el.getBoundingClientRect();
     const vw = renderer.domElement.clientWidth || innerWidth, vh = renderer.domElement.clientHeight || innerHeight;
-    if(r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return false;
-    if(el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return false;   // in a hidden screen
-    step(dt);
-    for(const slot of [cur, gone]) if(slot){ slide(slot, dt); slot.turn.rotation.y = spin.angle; }
-    // the outline breathes (1.6 s), or holds still for reduced motion
-    outlineMat.opacity = reduced.matches ? 0.6 : 0.42 + 0.3 * (0.5 + 0.5 * Math.sin(now / 1000 * TAU / 1.6));
-    if(gone && Math.abs(gone.x) > span - 0.2){ drop(gone); gone = null; }   // out of the box: gone
-
+    if(r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
+    if(el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return null;   // in a hidden screen
     if(r.width !== box.w || r.height !== box.h){
       box.w = r.width; box.h = r.height;
       // frame the whole podium in any box: wide boxes fit its height, narrow ones its width
@@ -368,10 +363,27 @@ export function createStand({ renderer, el }){
       camera.position.set(0, LOOK.y + Math.sin(elev) * dist, Math.cos(elev) * dist);
       camera.lookAt(LOOK);
       camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();                           // (render() would, but the anchor below is now)
     }
+    P.set(0, -DISC_H / 2, 0).project(camera);
+    anchor.x = r.left + (P.x + 1) / 2 * r.width; anchor.y = r.top + (1 - P.y) / 2 * r.height;
+    anchor.sway = Math.sin(spin.angle);
+    return r;
+  }
+  function frame(now){
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 0;   // from time, not frames; a long gap is not a jump
+    last = now;
+    const r = place();
+    if(!r) return false;
+    const vw = renderer.domElement.clientWidth || innerWidth, vh = renderer.domElement.clientHeight || innerHeight;
+    step(dt);
+    for(const slot of [cur, gone]) if(slot){ slide(slot, dt); slot.turn.rotation.y = spin.angle; }
+    // the outline breathes (1.6 s), or holds still for reduced motion
+    outlineMat.opacity = reduced.matches ? 0.6 : 0.42 + 0.3 * (0.5 + 0.5 * Math.sin(now / 1000 * TAU / 1.6));
+    if(gone && Math.abs(gone.x) > span - 0.2){ drop(gone); gone = null; }   // out of the box: gone
 
     const x = r.left, y = vh - r.bottom;
-    // only depth is cleared: what the host drew behind the box (the blurred track) shows through
+    // only depth is cleared: what the host drew behind the box (the night city) shows through
     const exposure = renderer.toneMappingExposure, scissor = renderer.getScissorTest(), clearColor = renderer.autoClearColor;
     renderer.toneMappingExposure = EXPOSURE; renderer.autoClearColor = false;
     renderer.setViewport(x, y, r.width, r.height);
@@ -395,6 +407,9 @@ export function createStand({ renderer, el }){
   return {
     setCar, repaint, frame, dispose, scene, camera,
     get car(){ return cur.inst; },
+    // the podium on screen now ({x, y, sway}, css px), or null while the box is not shown;
+    // the host calls it before drawing what is behind, in the same frame
+    measure(){ return place() ? anchor : null; },
     get sliding(){ return !!gone || cur.x !== cur.target; },
     get podiums(){ return [cur, gone].filter(Boolean).map(s => ({ carId: s.carId, x: s.x, loaded: !!s.inst && !s.inst.fallback, fallback: !!(s.inst && s.inst.fallback), outline: s.outline.visible })); },
     get spin(){ return { angle: spin.angle, vel: spin.vel, idle: spin.idle, held: spin.grab !== null }; },
