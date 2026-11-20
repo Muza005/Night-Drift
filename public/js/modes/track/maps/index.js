@@ -12,13 +12,28 @@
 //                              (point 3 is 3, half way to point 4 is 3.5)
 //   bridges                    [{ from, to }] in control-point coordinates: stretches drawn as a
 //                              bridge (deck, railings, pillars) instead of on an embankment
-//   decor                      { city: buildings, lamps: one lamp every this many track points }
+//   vergeDrag                  braking off the asphalt, 1/s (default .45; .45·v m/s² at speed v).
+//                              Maps with wide verges: 0.3 (108 → ~60 km/h in 1 s coasting); cutting a corner over
+//                              the grass costs more than it saves
+//   curb                       'redwhite' (default): red and white curbs; 'zebra': concrete curbs
+//                              and white zebra hatching on the outside of every apex
+//   shortcuts                  [{ from, to, points, width }]: narrow cut-throughs (4-6 m) across
+//                              the inside of hairpins, see geometry.js buildShortcut. A lap
+//                              through one counts (the lap is checked by checkpoints); in drift
+//                              mode a corner taken through one scores nothing
+//   decor                      { theme: 'city' | 'forest' | 'port' (ground, run-off colour and
+//                              scenery), city: buildings, trees: trees (forest), containers,
+//                              cranes (port), lamps: one lamp every this many track points }
 //   hidden                     not offered to players (test maps)
 //   exempt                     rules of tests/maps.test.mjs this map may break, and why
 import neon from './neon.js';
+import estakada from './estakada.js';
+import serpantin from './serpantin.js';
+import pereval from './pereval.js';
+import razvyazka from './razvyazka.js';
 import testhill from './_testhill.js';
 
-export const MAPS = { neon, _testhill: testhill };
+export const MAPS = { neon, estakada, serpantin, pereval, razvyazka, _testhill: testhill };
 export const DEFAULT_MAP = 'neon';
 // the maps players can pick, in menu order
 export const MAP_IDS = Object.keys(MAPS).filter(id => !MAPS[id].hidden);

@@ -15,6 +15,9 @@ import { MAPS, DEFAULT_MAP } from './maps/index.js';
 
 export const CURB = 1.4, GRAV = 9.81;
 export let MAP = null, N = 0, ROAD = 16, HALF = 8, WALL = 14, START = 0, TRACK_LEN = 0, SC = 1, FLAT = true;
+// braking off the asphalt (1/s: the speed lost per second is this × the speed) and the
+// shortest legal lap (m: through every shortcut)
+export let VDRAG = .45, LAP_MIN = 0;
 // per track point: position (y = road height), horizontal tangent and normal (NM points to
 // the driver's left), distance along the lap
 export const P = [], TG = [], NM = [], DIST = [];
@@ -23,23 +26,25 @@ export const P = [], TG = [], NM = [], DIST = [];
 // centre line (> 0: a right-hand turn, the centre of the turn on the -NM side), whether
 // it is part of a bridge, and its control-point coordinate (maps' `bridges`, `start`)
 export const Y = [], GR = [], BANK = [], TB = [], HL = [], RAD = [], BRIDGE = [], CP = [];
+// Shortcuts (maps' `shortcuts`, see buildShortcut) and the lap's checkpoints: the track
+// points a lap must pass in order (GATES), none of them on a stretch a shortcut skips.
+export const SHORTCUTS = [], GATES = [];
 
 const listeners = [];
 export function onMapChange(fn){ listeners.push(fn); }
 
-export function setMap(id){
-  const map = MAPS[typeof id==='string' && Object.hasOwn(MAPS, id) ? id : DEFAULT_MAP];
-  if(MAP === map) return MAP;
-  MAP = map;
-  SC = map.scale || 1;
-  ROAD = map.width || 16; HALF = ROAD / 2; WALL = HALF + (map.verge || 6);
-  const curve = closedCurve(map.points.map(([x, z, h = 0, b = 0]) => ({ x: x * SC, y: h, z: z * SC, w: b * Math.PI / 180 })));
-  N = map.samples || Math.max(300, Math.round(curve.length / 1.6));
-  for(const a of [P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP]) a.length = 0;
+// Everything the track is, built from a map's data (pure: setMap copies it into the live
+// arrays above; blueprint() uses it for any map without switching).
+function buildGeometry(map){
+  const g = { map, SC: map.scale || 1, ROAD: map.width || 16 };
+  g.HALF = g.ROAD / 2; g.WALL = g.HALF + (map.verge || 6);
+  const curve = closedCurve(map.points.map(([x, z, h = 0, b = 0]) => ({ x: x * g.SC, y: h, z: z * g.SC, w: b * Math.PI / 180 })));
+  const N = g.N = map.samples || Math.max(300, Math.round(curve.length / 1.6));
+  const P=g.P=[], TG=g.TG=[], NM=g.NM=[], DIST=g.DIST=[], Y=g.Y=[], GR=g.GR=[], BANK=g.BANK=[], TB=g.TB=[], HL=g.HL=[], RAD=g.RAD=[], BRIDGE=g.BRIDGE=[], CP=g.CP=[];
   const l = map.points.length;
   for(let i=0;i<N;i++){ const u=i/N;
     const c=curve.getPointAt(u); P.push(new THREE.Vector3(c.x, c.y, c.z));
-    const g=curve.getTangentAt(u), t=new THREE.Vector3(g.x, g.y, g.z); t.y=0; t.normalize(); TG.push(t); NM.push(new THREE.Vector3(t.z,0,-t.x));
+    const gt=curve.getTangentAt(u), t=new THREE.Vector3(gt.x, gt.y, gt.z); t.y=0; t.normalize(); TG.push(t); NM.push(new THREE.Vector3(t.z,0,-t.x));
     BANK.push(c.w); TB.push(Math.tan(c.w)); Y.push(c.y); CP.push(curve.uToT(u) * l);
   }
   // Heights: the spline through the control points bends in steps at every control point
@@ -50,8 +55,8 @@ export function setMap(id){
     for(let k=0;k<12;k++){ for(let i=0;i<N;i++) b[i]=(a[(i-1+N)%N]+2*a[i]+a[(i+1)%N])/4; [a,b]=[b,a]; }
     for(let i=0;i<N;i++){ Y[i]=a[i]; P[i].y=a[i]; }
   }
-  TRACK_LEN = (() => { let L=0; for(let i=0;i<N;i++){ DIST.push(L); L+=P[i].distanceTo(P[(i+1)%N]); } return L; })();
-  FLAT = Y.every(y => y === 0) && BANK.every(b => b === 0);
+  g.TRACK_LEN = (() => { let L=0; for(let i=0;i<N;i++){ DIST.push(L); L+=P[i].distanceTo(P[(i+1)%N]); } return L; })();
+  g.FLAT = Y.every(y => y === 0) && BANK.every(b => b === 0);
   for(let i=0;i<N;i++){ const j=(i+1)%N; HL.push(Math.hypot(P[j].x-P[i].x, P[j].z-P[i].z)); }
   // grades: the slopes of the periodic cubic spline through the heights (C2: the road's
   // curvature over a crest changes smoothly, see surface()), by Gauss-Seidel
@@ -65,15 +70,102 @@ export function setMap(id){
     RAD.push(Math.abs(turn)<1e-9 ? 1e9 : s/turn); }
   const inSpan = (k, f, t) => f <= t ? (k >= f && k <= t) : (k >= f || k <= t);
   for(let i=0;i<N;i++) BRIDGE.push((map.bridges||[]).some(b => inSpan(CP[i], b.from, b.to)) ? 1 : 0);
-  START = map.start && map.start.sample !== undefined ? map.start.sample : sampleAt(map.start ? map.start.at : 0);
+  g.sampleAt = k => { k=((k%l)+l)%l;
+    let best=0, bd=1e9; for(let i=0;i<N;i++){ let d=Math.abs(CP[i]-k); d=Math.min(d, l-d); if(d<bd){bd=d;best=i;} }
+    return best; };
+  g.START = map.start && map.start.sample !== undefined ? map.start.sample : g.sampleAt(map.start ? map.start.at : 0);
+  g.VDRAG = map.vergeDrag || .45;
+  g.SHORTCUTS = (map.shortcuts || []).map((s, k) => buildShortcut(g, s, k));
+  g.LAP_MIN = g.TRACK_LEN - g.SHORTCUTS.reduce((a, s) => a + Math.max(0, s.saves), 0);
+  g.GATES = buildGates(g);
+  return g;
+}
+
+// A shortcut (map field `shortcuts: [{ from, to, points, width }]`): a narrow road (width
+// 4-6 m, default 5) that leaves the main road at control-point coordinate `from`, runs
+// through `points` ([x, z] or [x, z, height] in map units, × scale like the main points)
+// and joins the main road again at `to`, further along the lap. It starts and ends on the
+// main road's centre line; the main road's walls open where it passes through them.
+// Its corners are rounded (Chaikin), so put a point where it should bend. Heights, when
+// not given, go linearly from the main road's height at one end to the other's.
+// Built: one sample per metre: x, z, y, tangent (tx, tz), normal to the left (nx, nz),
+// distance d; E, X: the main track points where it leaves and joins; span: how many
+// main points it skips; saves: how many metres it saves.
+export const CUT_VERGE = .9;           // m from a shortcut's asphalt edge to its wall
+function buildShortcut(g, s, k){
+  const { P, Y, N, DIST, TRACK_LEN, SC } = g;
+  const E = g.sampleAt(s.from), X = g.sampleAt(s.to);
+  let pts = [[P[E].x, P[E].z, Y[E]], ...s.points.map(([x, z, h]) => [x*SC, z*SC, h]), [P[X].x, P[X].z, Y[X]]];
+  // heights not given: linear in the distance along the polyline
+  { let L=[0]; for(let i=1;i<pts.length;i++) L.push(L[i-1]+Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
+    pts = pts.map((p, i) => [p[0], p[1], p[2] !== undefined ? p[2] : Y[E] + (Y[X]-Y[E]) * L[i] / L[L.length-1]]); }
+  for(let it=0;it<4;it++){ const q=[pts[0]];
+    for(let i=0;i<pts.length-1;i++){ const a=pts[i], b=pts[i+1];
+      const mix=f=>[a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
+      if(i>0) q.push(mix(.25)); if(i<pts.length-2) q.push(mix(.75)); }
+    q.push(pts[pts.length-1]); pts=q; }
+  // resample: one point per metre
+  const L=[0]; for(let i=1;i<pts.length;i++) L.push(L[i-1]+Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
+  const len = L[L.length-1], n = Math.max(2, Math.round(len) + 1);
+  const x=new Float64Array(n), z=new Float64Array(n), y=new Float64Array(n), d=new Float64Array(n);
+  for(let i=0, j=0;i<n;i++){ const t=len*i/(n-1); while(j<pts.length-2 && L[j+1]<t) j++;
+    const f=(t-L[j])/((L[j+1]-L[j])||1), a=pts[j], b=pts[j+1];
+    x[i]=a[0]+(b[0]-a[0])*f; z[i]=a[1]+(b[1]-a[1])*f; y[i]=a[2]+(b[2]-a[2])*f; d[i]=t; }
+  const tx=new Float64Array(n), tz=new Float64Array(n), nx=new Float64Array(n), nz=new Float64Array(n), gr=new Float64Array(n);
+  for(let i=0;i<n;i++){ const a=Math.max(0,i-1), b=Math.min(n-1,i+1), dx=x[b]-x[a], dz=z[b]-z[a], l=Math.hypot(dx,dz)||1;
+    tx[i]=dx/l; tz[i]=dz/l; nx[i]=tz[i]; nz[i]=-tx[i]; gr[i]=(y[b]-y[a])/l; }
+  const half = (s.width || 5) / 2, wall = half + CUT_VERGE, m = wall + 2;
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for(let i=0;i<n;i++){ x0=Math.min(x0,x[i]); x1=Math.max(x1,x[i]); z0=Math.min(z0,z[i]); z1=Math.max(z1,z[i]); }
+  const span = (X - E + N) % N, skipped = (DIST[X] - DIST[E] + TRACK_LEN) % TRACK_LEN;
+  return { k, E, X, span, n, x, z, y, d, tx, tz, nx, nz, gr, len, half, wall, lim: wall - 1.25,
+    box: [x0-m, x1+m, z0-m, z1+m], saves: skipped - len };
+}
+// The lap's checkpoints: about one every 150 m (at least 6), counted from the start line,
+// moved off any stretch a shortcut skips (a lap through a shortcut passes all of them; a
+// lap that skips a section of track misses one and does not count).
+function buildGates(g){
+  const { N, START, SHORTCUTS, TRACK_LEN } = g;
+  const skipped = i => SHORTCUTS.some(s => ((i - s.E + 16 + N) % N) <= s.span + 32);   // ±16 points round the mouths too
+  const n = Math.max(6, Math.round(TRACK_LEN / 150)), out = [];
+  for(let k=1;k<n;k++){ let i=(START + Math.round(k*N/n)) % N, tries=0;
+    while(skipped(i) && tries++<N) i=(i+1)%N;
+    if(!out.includes(i)) out.push(i); }
+  // in lap order from the start line
+  return out.sort((a, b) => ((a - START + N) % N) - ((b - START + N) % N));
+}
+
+export function setMap(id){
+  const map = MAPS[typeof id==='string' && Object.hasOwn(MAPS, id) ? id : DEFAULT_MAP];
+  if(MAP === map) return MAP;
+  const g = buildGeometry(map);
+  MAP = map; SC = g.SC; ROAD = g.ROAD; HALF = g.HALF; WALL = g.WALL; N = g.N;
+  for(const k of ['P','TG','NM','DIST','Y','GR','BANK','TB','HL','RAD','BRIDGE','CP','SHORTCUTS','GATES']){ const a=ARRAYS[k]; a.length=0; for(const v of g[k]) a.push(v); }
+  TRACK_LEN = g.TRACK_LEN; FLAT = g.FLAT; START = g.START; VDRAG = g.VDRAG; LAP_MIN = g.LAP_MIN;
   for(const fn of listeners) fn(MAP);
   return MAP;
 }
+const ARRAYS = { P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP, SHORTCUTS, GATES };
 // the track point at control-point coordinate k
 export function sampleAt(k){
   const l=MAP.points.length; k=((k%l)+l)%l;
   let best=0, bd=1e9; for(let i=0;i<N;i++){ let d=Math.abs(CP[i]-k); d=Math.min(d, l-d); if(d<bd){bd=d;best=i;} }
   return best;
+}
+// A map's plan for the map card (stage 6) and the blueprint images, without switching to
+// it: the centre line (x, z, height per track point), the bridges as track-point spans, the
+// shortcuts' centre lines, the start point and direction, the lap length.
+const blueprints = new Map();
+export function blueprint(id){
+  if(!Object.hasOwn(MAPS, id)) return null;
+  if(!blueprints.has(id)){
+    const g = buildGeometry(MAPS[id]), b = [];
+    for(let i=0;i<g.N;i++) if(g.BRIDGE[i] && !g.BRIDGE[(i-1+g.N)%g.N]){ let j=i; while(g.BRIDGE[(j+1)%g.N] && j-i<g.N) j++; b.push({ from:i, to:j%g.N }); }
+    blueprints.set(id, { id, name: MAPS[id].name, len: g.TRACK_LEN, lapMin: g.LAP_MIN, width: g.ROAD, wall: g.WALL,
+      path: g.P.map((p, i) => [p.x, p.z, g.Y[i]]), bridges: b,
+      shortcuts: g.SHORTCUTS.map(s => ({ path: Array.from(s.x, (x, i) => [x, s.z[i]]), width: 2 * s.half, from: s.E, to: s.X })),
+      start: { i: g.START, x: g.P[g.START].x, z: g.P[g.START].z, dir: [g.TG[g.START].x, g.TG[g.START].z] } });
+  }
+  return blueprints.get(id);
 }
 setMap(DEFAULT_MAP);
 
@@ -92,6 +184,9 @@ export function safeOffsets(off, W=8){
 }
 
 export function placeAt(car,i){
+  // a short move (the R key) passes the checkpoints in between, as driving there would
+  if(GATES.length && car.idx!==undefined){ let d=i-car.idx; if(d>N/2) d-=N; if(d<-N/2) d+=N; if(d && Math.abs(d)<60) passGates(car, car.idx, d); }
+  car.cut=-1;
   const t=TG[i]; car.x=P[i].x; car.z=P[i].z; car.h=Math.atan2(t.x,t.z); car.vx=car.vz=0; car.vF=car.vR=0; car.steer=0; car.spinV=0; car.idx=i;
   car.lastMark=[null,null];
   car.y=Y[i]; car.vy=0; car.air=false; car.yawRate=0; car.hPrev=car.h; car.squash=0;
@@ -102,7 +197,15 @@ export function placeGrid(car,slot){
   let i=START, d=0; while(d<back){ const j=(i-1+N)%N; d+=P[j].distanceTo(P[i]); i=j; }
   placeAt(car,i); car.x+=NM[i].x*side*3.6; car.z+=NM[i].z*side*3.6;
   if(!FLAT) car.y=surface(car).y;
-  car.prog=-((START-i+N)%N);
+  car.prog=-((START-i+N)%N); car.gate=0;
+}
+// Back onto a shortcut (the R key while on one): its sample nearest the car, facing along it.
+export function placeOnCut(car){
+  const s=SHORTCUTS[car.cut]; if(!s) return false;
+  const k=cutLocate(s, car).k, i=cutIdx(s, k);
+  placeAt(car, i);
+  car.cut=s.k; car.x=s.x[k]; car.z=s.z[k]; car.h=Math.atan2(s.tx[k], s.tz[k]); car.hPrev=car.h; car.y=s.y[k];
+  return true;
 }
 // The nearest track point. Local (±36 points from car.idx) every substep, so at a
 // crossing the car never jumps to the other road. A full search (after a jump to a new
@@ -126,6 +229,7 @@ export function nearest(car,full){
 // answer is the same. The bank tilts the surface across the road.
 const SURF = { y:0, gx:0, gz:0, grade:0, curv:0, bank:0, lat:0 };
 export function surface(car, out=SURF){
+  if(car.cut>=0 && SHORTCUTS[car.cut]) return cutSurface(SHORTCUTS[car.cut], car, out);
   const i=car.idx, p=P[i], t=TG[i];
   let a, b;
   if((car.x-p.x)*t.x+(car.z-p.z)*t.z>=0){ a=i; b=(i+1)%N; } else { a=(i-1+N)%N; b=i; }
@@ -158,10 +262,15 @@ export function keepInWalls(p, memo){
   { const dx=P[i].x-p.x, dz=P[i].z-p.z, far=WALL+12; if(dx*dx+dz*dz>far*far){ q0.idx=i; i=nearest(q0, true); } }
   memo.idx=i;
   const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
-  if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
+  // on a shortcut: kept inside the shortcut's walls instead
+  // (a prediction a little past a shortcut's wall is found too, and put back against it,
+  // not thrown across onto the main road)
+  const cut=over>0 && SHORTCUTS.length ? cutAt(p, 3) : null;
+  if(cut){ const L=cut.loc; if(Math.abs(L.lat)>cut.s.lim){ const sg=Math.sign(L.lat), k=L.k, back=Math.abs(L.lat)-cut.s.lim; p.x-=cut.s.nx[k]*sg*back; p.z-=cut.s.nz[k]*sg*back; } }
+  else if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
   if(!FLAT){
     // drawn height: their reported flight (ballistic), never below the road
-    const ys=surface({x:p.x,z:p.z,idx:i}).y;
+    const ys=surface({x:p.x,z:p.z,idx:i,cut:cut?cut.s.k:-1}).y;
     p.y = p.y===undefined ? ys : Math.max(ys, p.y);
   }
   return p;
@@ -217,23 +326,120 @@ function vertical(car,dt,hooks){
 // finishLap() call, hooks.onLand(power) a landing after a jump.
 export function constrainToTrack(car,dt,hooks){
   if(!FLAT && car.air) fly(car,dt);
+  if(SHORTCUTS.length){ constrainWithCuts(car,dt,hooks); return; }
   // track
   const ni=nearest(car,false);
-  let d=ni-car.idx; if(d>N/2) d-=N; if(d<-N/2) d+=N; car.prog+=d; car.idx=ni;
+  moveIdx(car, ni);
   const p=P[ni], n=NM[ni];
   const lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-1.25;
-  if(Math.abs(lat)>lim){
-    const s=Math.sign(lat), push=Math.abs(lat)-lim; car.x-=n.x*s*push; car.z-=n.z*s*push;
-    const vn=(car.vx*n.x+car.vz*n.z)*s;
-    wallAlign(car, n.x*s, n.z*s, dt);
-    if(vn>0){ const k=wallKeep(vn); car.vx-=n.x*s*vn*1.45; car.vz-=n.z*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
-  }
+  if(Math.abs(lat)>lim) wallHit(car, n.x, n.z, Math.sign(lat), Math.abs(lat)-lim, dt, hooks);
   car.off=Math.abs(lat)>HALF+CURB;
-  if(car.off && !car.air){ const k=Math.exp(-.45*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: half the drag it had before
+  if(car.off && !car.air){ const k=Math.exp(-VDRAG*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: the map's verge drag (VDRAG, default .45/s)
   if(!FLAT) vertical(car,dt,hooks);
+  laps(car,hooks);
+}
+// a wall at normal (nx, nz) × side s, the car `push` m through it
+function wallHit(car, nx, nz, s, push, dt, hooks){
+  car.x-=nx*s*push; car.z-=nz*s*push;
+  const vn=(car.vx*nx+car.vz*nz)*s;
+  wallAlign(car, nx*s, nz*s, dt);
+  if(vn>0){ const k=wallKeep(vn); car.vx-=nx*s*vn*1.45; car.vz-=nz*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
+}
+// The car's track point moves to ni: the lap progress (car.prog, in track points) and the
+// checkpoints follow.
+function moveIdx(car, ni){
+  let d=ni-car.idx; if(d>N/2) d-=N; if(d<-N/2) d+=N; car.prog+=d;
+  if(d && GATES.length) passGates(car, car.idx, d);
+  car.idx=ni;
+}
+// Checkpoints: car.gate is how many of GATES this lap has passed, in order. A step forward
+// over the next one passes it, a step back over the last one un-passes it. A step longer
+// than 60 points (a jump across the track) passes nothing.
+function passGates(car, from, d){
+  const g=car.gate|0;
+  if(d>0 && d<60){ if(g<GATES.length && ((GATES[g]-from+N)%N)>0 && ((GATES[g]-from+N)%N)<=d) car.gate=g+1; }
+  else if(d<0 && d>-60){ if(g>0 && ((from-GATES[g-1]+N)%N)<-d) car.gate=g-1; }
+}
+// A lap: once round (car.prog) with every checkpoint passed. Round without them (a
+// section skipped): the lap does not count, and the next one starts at the line as usual.
+function laps(car,hooks){
+  if(car.prog>=N){ const ok=(car.gate|0)>=GATES.length; car.prog-=N; car.gate=0; if(ok) hooks.onLap(); }
+}
 
-  // laps
-  if(car.prog>=N){ car.prog-=N; hooks.onLap(); }
+// --- shortcuts ---
+// Where (x, z) is on shortcut s: the nearest sample k, the offset to its left (lat), and
+// whether it is inside the shortcut's walls (in) and on its asphalt (road).
+const LOC = { k:0, lat:0, in:false, road:false, end:false };
+function cutLocate(s, p, out=LOC){
+  let k=0, bd=1e18; for(let i=0;i<s.n;i++){ const dx=p.x-s.x[i], dz=p.z-s.z[i], d=dx*dx+dz*dz; if(d<bd){bd=d;k=i;} }
+  const rx=p.x-s.x[k], rz=p.z-s.z[k], along=rx*s.tx[k]+rz*s.tz[k];
+  const end=(k===0 && along<0) || (k===s.n-1 && along>0);
+  out.k=k; out.lat=rx*s.nx[k]+rz*s.nz[k]; out.end=end; out.in=!end && Math.abs(out.lat)<=s.lim; out.road=!end && Math.abs(out.lat)<=s.half+.3;
+  return out;
+}
+// the shortcut (and where on it) whose walls contain (x, z), or null; with a margin (m),
+// also one whose walls it is just outside of
+function cutAt(p, margin=0){
+  for(const s of SHORTCUTS){ const b=s.box; if(p.x<b[0]-margin || p.x>b[1]+margin || p.z<b[2]-margin || p.z>b[3]+margin) continue;
+    const loc=cutLocate(s, p, { k:0, lat:0, in:false, road:false });
+    if(loc.in || (margin && !loc.end && Math.abs(loc.lat)<=s.lim+margin)) return { s, loc }; }
+  return null;
+}
+// the main track point a car at shortcut sample k counts as (its lap progress): from the
+// point where the shortcut leaves to where it joins, in proportion
+const cutIdx = (s, k) => (s.E + Math.round(s.span * k / (s.n - 1))) % N;
+// Where the car is on the main road near shortcut s's two ends (searched around them, as
+// the car's own track point is the shortcut's): the nearest point, the offset, inside the walls
+const MN = { j:0, lat:0, in:false };
+function mainNear(s, car){
+  let bj=s.E, bd=1e18;
+  for(const c of [s.E, s.X]) for(let k=-40;k<=40;k++){ const j=(c+k+N)%N, dx=P[j].x-car.x, dz=P[j].z-car.z, d=dx*dx+dz*dz; if(d<bd){bd=d;bj=j;} }
+  const rx=car.x-P[bj].x, rz=car.z-P[bj].z;
+  MN.j=bj; MN.lat=rx*NM[bj].x+rz*NM[bj].z;
+  MN.in=Math.abs(MN.lat)<=WALL-1.25 && Math.abs(rx*TG[bj].x+rz*TG[bj].z)<3;
+  return MN;
+}
+// The road surface on a shortcut: its height, grade along it; no bank, no crest.
+function cutSurface(s, car, out){
+  const L=cutLocate(s, car, { k:0, lat:0, in:false, road:false }), k=L.k;
+  const along=(car.x-s.x[k])*s.tx[k]+(car.z-s.z[k])*s.tz[k];
+  out.y=s.y[k]+s.gr[k]*along; out.grade=s.gr[k]; out.curv=0; out.bank=0; out.lat=L.lat;
+  out.gx=s.gr[k]*s.tx[k]; out.gz=s.gr[k]*s.tz[k]; out.tx=s.tx[k]; out.tz=s.tz[k];
+  return out;
+}
+// constrainToTrack on a map with shortcuts. The car is on the main road (car.cut -1) or
+// on shortcut car.cut. The space it may drive in is the main road's walls together with
+// the shortcuts' walls: inside either, nothing stops it; outside both, it hits the walls
+// of the road it is on. It changes road where it is inside one road's walls and not the
+// other's (the main road's walls are open where a shortcut passes through them). On a
+// shortcut its track point (car.idx) runs from where the shortcut leaves the main road
+// to where it joins, so the lap progress and the checkpoints count it as the bit of road
+// it skips.
+function constrainWithCuts(car,dt,hooks){
+  let s=car.cut>=0 ? SHORTCUTS[car.cut] : null, onRoad=false;
+  if(!s){
+    const ni=nearest(car,false); moveIdx(car, ni);
+    const p=P[ni], n=NM[ni], lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-1.25;
+    const c=Math.abs(lat)>HALF ? cutAt(car) : null;
+    if(c && Math.abs(lat)>lim){ s=c.s; car.cut=s.k; }                    // through the gap in the wall: onto the shortcut
+    else {
+      if(!c && Math.abs(lat)>lim) wallHit(car, n.x, n.z, Math.sign(lat), Math.abs(lat)-lim, dt, hooks);
+      onRoad=Math.abs(lat)<=HALF+CURB || (c && c.loc.road);
+    }
+  }
+  if(s){
+    const L=cutLocate(s, car), m=mainNear(s, car);
+    if(m.in && !L.in){ car.cut=-1; moveIdx(car, m.j); onRoad=Math.abs(m.lat)<=HALF+CURB; }   // back on the main road
+    else {
+      moveIdx(car, cutIdx(s, L.k));
+      if(!L.in && !m.in) wallHit(car, s.nx[L.k], s.nz[L.k], Math.sign(L.lat), Math.abs(L.lat)-s.lim, dt, hooks);
+      onRoad=L.road || (m.in && Math.abs(m.lat)<=HALF+CURB);
+    }
+  }
+  car.off=!onRoad;
+  if(car.off && !car.air){ const k=Math.exp(-VDRAG*dt); car.vx*=k; car.vz*=k; }
+  if(!FLAT) vertical(car,dt,hooks);
+  laps(car,hooks);
 }
 
 // How to draw a car on the road: its height, and pitch and roll (radians, for a

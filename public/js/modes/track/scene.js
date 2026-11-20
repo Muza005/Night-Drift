@@ -6,7 +6,7 @@
 // local radius (geometry.js safeOffsets) and checked for folds, so on a hairpin tighter
 // than the offset the line narrows instead of looping over itself ("broken curbs").
 import { scene, cv, tex, glowTex, winTex } from '../../core/render.js';
-import { P, NM, TG, DIST, Y, TB, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, safeOffsets, onMapChange } from './geometry.js';
+import { P, NM, TG, DIST, Y, TB, RAD, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, SHORTCUTS, safeOffsets, onMapChange } from './geometry.js';
 
 // Road texture: 512 px across the 16 m road (32 px/m), one tile = ROAD_TILE m along it.
 // Edge lines 5 px = 0.156 m, 0.5 m in from the asphalt edge; centre line 4 px = 0.125 m,
@@ -25,6 +25,29 @@ const groundTex = (() => {
   g.strokeStyle='rgba(120,90,255,.20)'; g.lineWidth=2; g.strokeRect(0,0,256,256);
   g.strokeStyle='rgba(120,90,255,.07)'; g.lineWidth=1; g.beginPath(); g.moveTo(128,0); g.lineTo(128,256); g.moveTo(0,128); g.lineTo(256,128); g.stroke();
   const t=tex(c,true); t.repeat.set(90,90); return t;
+})();
+// the ground of a forest and a port (maps' decor.theme)
+const themeGround = (bg, line) => { const [c,g]=cv(256,256); g.fillStyle=bg; g.fillRect(0,0,256,256);
+  g.strokeStyle=line; g.lineWidth=2; g.strokeRect(0,0,256,256); const t=tex(c,true); t.repeat.set(90,90); return t; };
+const forestGroundTex = themeGround('#0a130e', 'rgba(90,160,110,.10)'), portGroundTex = themeGround('#101219', 'rgba(140,150,190,.12)');
+// White zebra hatching on the outside of an apex (maps with curb: 'zebra'): bars across the
+// strip at 45°, a solid line along its outer edge. u: across (0 at the road edge), v: along, one bar per tile.
+const zebraTex = (() => {
+  const [c,g]=cv(64,64); g.clearRect(0,0,64,64); g.fillStyle='#f4f6ff';
+  g.beginPath(); g.moveTo(0,0); g.lineTo(26,0); g.lineTo(64,38); g.lineTo(64,64); g.lineTo(0,0); g.fill();
+  g.beginPath(); g.moveTo(0,38); g.lineTo(26,64); g.lineTo(0,64); g.fill();
+  g.fillRect(56,0,8,64);
+  const t=tex(c,true); t.encoding=THREE.sRGBEncoding; return t;
+})();
+// A shortcut's asphalt: lighter, white edges, yellow chevrons along it. u across, v along (one tile = 6 m).
+const cutTex = (() => {
+  const W=128, H=192, [c,g]=cv(W,H); g.fillStyle='#2b2d36'; g.fillRect(0,0,W,H);
+  const id=g.getImageData(0,0,W,H); for(let k=0;k<id.data.length;k+=4){const n=(Math.random()-.5)*22; id.data[k]+=n; id.data[k+1]+=n; id.data[k+2]+=n;} g.putImageData(id,0,0);
+  g.fillStyle='rgba(235,240,255,.9)'; g.fillRect(6,0,5,H); g.fillRect(W-11,0,5,H);
+  g.strokeStyle='rgba(255,194,61,.9)'; g.lineWidth=9; g.lineJoin='miter';
+  g.beginPath(); g.moveTo(34,70); g.lineTo(64,40); g.lineTo(94,70); g.stroke();
+  g.beginPath(); g.moveTo(34,150); g.lineTo(64,120); g.lineTo(94,150); g.stroke();
+  return tex(c,true);
 })();
 const checkerTex = (() => {
   const [c,g]=cv(256,32); for(let x=0;x<16;x++) for(let y=0;y<2;y++){ g.fillStyle=(x+y)%2?'#111':'#f2f2f2'; g.fillRect(x*16,y*16,16,16);} return tex(c,false);
@@ -91,6 +114,54 @@ const poolMat=new THREE.MeshBasicMaterial({map:glowTex,color:0xffa956,transparen
 const cityMat=new THREE.MeshStandardMaterial({color:0x0e1020,roughness:.8,emissive:0xffffff,emissiveMap:winTex,emissiveIntensity:.9});
 const chk=checkerTex.clone(); chk.needsUpdate=true;
 const lineMat=new THREE.MeshStandardMaterial({map:chk, roughness:.7});
+// maps' curb: 'zebra': a concrete strip instead of the red and white curb, and the hatching;
+// the paint glows a little, as it does in the lamps' light
+const cConcrete=new THREE.Color(0x4a4d5a);
+const zebraMat=new THREE.MeshStandardMaterial({map:zebraTex, transparent:true, alphaTest:.4, roughness:.6, emissive:0x9aa2c0, emissiveMap:zebraTex, emissiveIntensity:.35, side:THREE.DoubleSide, depthWrite:false});
+const cutMat=new THREE.MeshStandardMaterial({map:cutTex, roughness:.8, metalness:.05, side:THREE.DoubleSide});
+// forest and port decor
+const leafMat=new THREE.MeshStandardMaterial({color:0x123222, roughness:.9, emissive:0x0b2416, emissiveIntensity:.5});
+const trunkMat=new THREE.MeshStandardMaterial({color:0x2a1d14, roughness:1});
+const boxMat=new THREE.MeshStandardMaterial({roughness:.7, metalness:.3});
+const craneMat=new THREE.MeshStandardMaterial({color:0x3a2a12, roughness:.6, metalness:.5, emissive:0xffa020, emissiveIntensity:.12});
+const THEMES = {
+  city: { ground: groundTex, runoff: 0x17142a },
+  forest: { ground: forestGroundTex, runoff: 0x13241a },
+  port: { ground: portGroundTex, runoff: 0x1a1c25 },
+};
+// An open strip along a shortcut (geometry.js SHORTCUTS: x, z, y, nx, nz, d per sample)
+// from offset o0 to o1, yOff above its road; skip(k): leave out the piece from sample k to k+1.
+function cutRibbon(sc, o0, o1, yOff, vScale, skip, colorFn){
+  const pos=[], uv=[], nor=[], col=[];
+  for(let k=0;k<sc.n-1;k++){ if(skip && skip(k)) continue; const j=k+1;
+    const pt=(i,o)=>[sc.x[i]+sc.nx[i]*o, sc.y[i]+yOff, sc.z[i]+sc.nz[i]*o];
+    const A=pt(k,o0), B=pt(k,o1), C=pt(j,o0), D=pt(j,o1), v0=sc.d[k]/vScale, v1=sc.d[j]/vScale;
+    for(const [p,u,v] of [[A,0,v0],[C,0,v1],[B,1,v0],[B,1,v0],[C,0,v1],[D,1,v1]]){ pos.push(p[0],p[1],p[2]); uv.push(u,v); nor.push(0,1,0); }
+    if(colorFn){ const c=colorFn(k); for(let q=0;q<6;q++) col.push(c.r,c.g,c.b); }
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3)); if(colorFn) g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  return g;
+}
+function cutWall(sc, o, y0, y1, skip){
+  const pos=[];
+  for(let k=0;k<sc.n-1;k++){ if(skip && skip(k)) continue; const j=k+1;
+    const ax=sc.x[k]+sc.nx[k]*o, az=sc.z[k]+sc.nz[k]*o, bx=sc.x[j]+sc.nx[j]*o, bz=sc.z[j]+sc.nz[j]*o, ya=sc.y[k], yb=sc.y[j];
+    pos.push(ax,ya+y0,az, bx,yb+y0,bz, ax,ya+y1,az, ax,ya+y1,az, bx,yb+y0,bz, bx,yb+y1,bz); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.computeVertexNormals(); return g;
+}
+// whether (x, z) is inside some shortcut's walls (plus `m` m): the main road's walls open there
+function inCut(x, z, m=0){
+  for(const sc of SHORTCUTS){ const b=sc.box; if(x<b[0]-m || x>b[1]+m || z<b[2]-m || z>b[3]+m) continue;
+    let k=0, bd=1e18; for(let i=0;i<sc.n;i++){ const dx=x-sc.x[i], dz=z-sc.z[i], d=dx*dx+dz*dz; if(d<bd){bd=d;k=i;} }
+    const rx=x-sc.x[k], rz=z-sc.z[k], along=rx*sc.tx[k]+rz*sc.tz[k];
+    if((k===0 && along<0) || (k===sc.n-1 && along>0)) continue;
+    if(Math.abs(rx*sc.nx[k]+rz*sc.nz[k])<=sc.wall+m) return true; }
+  return false;
+}
+// how far (x, z) is from the main road's centre line (the nearest of every second point)
+function mainDist(x, z){ let bd=1e18; for(let i=0;i<N;i+=2){ const dx=P[i].x-x, dz=P[i].z-z, d=dx*dx+dz*dz; if(d<bd) bd=d; } return Math.sqrt(bd); }
 
 // The track points (every second one) within `r` m of horizontal point (x, z), at any
 // height (for lamps and pillars: nothing stands on another road or under a bridge).
@@ -105,6 +176,9 @@ function build(){
   const cx=(minX+maxX)/2, cz=(minZ+maxZ)/2;
   const flatMap = Y.every(y=>y===0);
 
+  const theme = THEMES[(MAP.decor && MAP.decor.theme) || 'city'] || THEMES.city;
+  if(groundMat.map!==theme.ground){ groundMat.map=theme.ground; groundMat.needsUpdate=true; }
+  runoffMat.color.setHex(theme.runoff);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400,2400).rotateX(-Math.PI/2), groundMat);
   if(!flatMap) ground.position.set(cx,-.02,cz);   // («Ночной город» keeps its ground where it always was)
   ground.receiveShadow = true; B.add(ground);
@@ -112,12 +186,42 @@ function build(){
   for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10), runoffMat); m.receiveShadow=true; B.add(m); }
   const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE), roadMat);
   road.receiveShadow = true; B.add(road);
-  for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; B.add(m); }
+  const zebra = MAP.curb==='zebra';
+  for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,zebra?()=>cConcrete:i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; B.add(m); }
+  if(zebra){
+    // the hatching's width: up to 3.2 m on the outside of turns under ~110 m radius, widest
+    // at the tightest (a running maximum over ±12 points, then smoothed over ±6)
+    const f=new Float64Array(N), w=new Float64Array(N), sm=new Float64Array(N);
+    for(let i=0;i<N;i++) f[i]=Math.max(0,Math.min(1,(1/Math.abs(RAD[i])-1/110)/(1/35-1/110)))*Math.sign(RAD[i]);
+    for(let i=0;i<N;i++){ let v=0; for(let k=-12;k<=12;k++){ const q=f[(i+k+N)%N]; if(Math.abs(q)>Math.abs(v)) v=q; } w[i]=v; }
+    for(let i=0;i<N;i++){ let a=0; for(let k=-6;k<=6;k++) a+=w[(i+k+N)%N]; sm[i]=a/13; }
+    for(const s of [1,-1]){
+      const on=i=>sm[i]*s>.08, O0=new Float64Array(N), O1=new Float64Array(N);
+      for(let i=0;i<N;i++){ O0[i]=s*(HALF-.12); O1[i]=s*(HALF+(on(i)?.6+2.6*Math.abs(sm[i]):.6)); }
+      const m=new THREE.Mesh(ribbon(O0,O1,.04,2.2,null,i=>!on(i)||!on((i+1)%N)||(SHORTCUTS.length&&inCut(P[i].x+NM[i].x*O1[i],P[i].z+NM[i].z*O1[i]))), zebraMat);
+      m.renderOrder=1; B.add(m); }
+  }
   for(const s of [1,-1]){
-    // the neon strip 2 cm inside the wall, also where a hairpin pulls the wall in
+    // the neon strip 2 cm inside the wall, also where a hairpin pulls the wall in; open
+    // where a shortcut passes through
     const O=safeOffsets(s*WALL), In=O.map(o=>o-Math.sign(o)*.02);
-    B.add(new THREE.Mesh(vribbon(O,0,.95), wallMat));
-    B.add(new THREE.Mesh(vribbon(In,.78,.95), neonMat[s]));
+    const gap=SHORTCUTS.length ? (()=>{ const g=new Uint8Array(N); for(let i=0;i<N;i++) g[i]=inCut(P[i].x+NM[i].x*O[i], P[i].z+NM[i].z*O[i], .3)?1:0; return i=>g[i]||g[(i+1)%N]; })() : null;
+    B.add(new THREE.Mesh(vribbon(O,0,.95,gap), wallMat));
+    B.add(new THREE.Mesh(vribbon(In,.78,.95,gap), neonMat[s]));
+  }
+  // shortcuts: asphalt (where it is off the main road's asphalt and curbs), small red and
+  // white curbs, run-off, walls with neon (where outside the main road's walls)
+  for(const sc of SHORTCUTS){
+    const dm=Float64Array.from({length:sc.n},(_,k)=>mainDist(sc.x[k],sc.z[k]));
+    const onMain=(k,r)=>dm[k]<r||dm[k+1]<r;
+    B.add(new THREE.Mesh(cutRibbon(sc,-sc.wall,sc.wall,.01,10,k=>onMain(k,WALL-.5)), runoffMat));
+    // (its asphalt runs on over the main road's curb up to the edge of its asphalt, a little
+    // above the curb, so the mouth is one clean surface)
+    const road=new THREE.Mesh(cutRibbon(sc,-sc.half,sc.half,.04,6,k=>dm[k]<HALF-.3&&dm[k+1]<HALF-.3), cutMat); road.receiveShadow=true; B.add(road);
+    for(const [a,b] of [[sc.half,sc.half+.5],[-sc.half-.5,-sc.half]]) B.add(new THREE.Mesh(cutRibbon(sc,a,b,.035,1,k=>onMain(k,HALF+CURB),k=>Math.floor(sc.d[k]/1.5)%2?cRed:cWhite), curbMat));
+    for(const s of [1,-1]){ const skip=k=>onMain(k,WALL);
+      B.add(new THREE.Mesh(cutWall(sc,s*sc.wall,0,.95,skip), wallMat));
+      B.add(new THREE.Mesh(cutWall(sc,s*(sc.wall-.02),.78,.95,skip), neonMat[s])); }
   }
 
   // Raised road: an embankment (sides down to the ground) where it is not a bridge; a
@@ -164,6 +268,9 @@ function build(){
       const near=roadsNear(v.x,v.z,WALL+.5);
       if(near.some(j=>Math.abs(j-i)>40 && Math.abs(j-i)<N-40)) continue;
       if(roadsNear(v.x,v.z,WALL+3).some(j=>Y[j]>base+2 && Y[j]<base+9.5)) continue;
+      if(SHORTCUTS.length && inCut(v.x,v.z,2)) continue;
+      // nor on or beside a bridge (its deck; the arches light it), where the post would graze the deck
+      if(BRIDGE[i] || roadsNear(v.x,v.z,WALL+4).some(j=>BRIDGE[j] && Y[j]>base+1)) continue;
       spots.push([i,s,v,base]); }
     const postG=new THREE.CylinderGeometry(.14,.2,1,6).translate(0,.5,0);
     const headG=new THREE.BoxGeometry(2.4,.22,.6);
@@ -180,8 +287,51 @@ function build(){
     });
     posts.castShadow=true; B.add(posts, heads); }
 
+  // nothing of the scenery stands on a road or a shortcut: (x, z) at least `r` m clear of their walls
+  const clear=(x,z,r)=>{ const need=WALL+r; for(let i=0;i<N;i+=3){ const dx=P[i].x-x, dz=P[i].z-z; if(dx*dx+dz*dz<need*need) return false; }
+    for(const sc of SHORTCUTS) for(let k=0;k<sc.n;k+=2){ const dx=sc.x[k]-x, dz=sc.z[k]-z, nd=sc.wall+r; if(dx*dx+dz*dz<nd*nd) return false; }
+    return true; };
+  const decor=MAP.decor||{}, themeId=decor.theme||'city';
+  /* forest: dark cones on trunks round the track and in its infields */
+  if(themeId==='forest'){
+    const cnt=decor.trees||220, cone=new THREE.ConeGeometry(1,1,7).translate(0,.5,0), stem=new THREE.CylinderGeometry(.18,.25,1,5).translate(0,.5,0);
+    const leaves=new THREE.InstancedMesh(cone,leafMat,cnt), trunks=new THREE.InstancedMesh(stem,trunkMat,cnt);
+    const m=new THREE.Matrix4(), q=new THREE.Quaternion(), one=new THREE.Vector3();
+    let placed=0, tries=0;
+    while(placed<cnt && tries<8000){ tries++;
+      const x=minX-90+Math.random()*(maxX-minX+180), z=minZ-90+Math.random()*(maxZ-minZ+180);
+      const h=7+Math.random()*9, r=h*(.28+Math.random()*.08);
+      if(!clear(x,z,r+2)) continue;
+      m.compose(new THREE.Vector3(x,1.6,z),q,one.set(r,h,r)); leaves.setMatrixAt(placed,m);
+      m.compose(new THREE.Vector3(x,0,z),q,one.set(1,1.8,1)); trunks.setMatrixAt(placed,m); placed++; }
+    leaves.count=trunks.count=placed; leaves.castShadow=true; B.add(leaves, trunks);
+  }
+  /* port: stacks of shipping containers and a few cranes */
+  if(themeId==='port'){
+    const cnt=decor.containers||140, g=new THREE.BoxGeometry(12.2,2.6,2.45).translate(0,1.3,0), box=new THREE.InstancedMesh(g,boxMat,cnt);
+    const cols=[0x8c2b2b,0x2b4f8c,0x2f6b3d,0x8c6a2b,0x5b5f6b,0x6b2b5f].map(c=>new THREE.Color(c));
+    const m=new THREE.Matrix4(), q=new THREE.Quaternion(), e=new THREE.Euler(), one=new THREE.Vector3(1,1,1);
+    let placed=0, tries=0;
+    while(placed<cnt && tries<4000){ tries++;
+      const x=minX-110+Math.random()*(maxX-minX+220), z=minZ-110+Math.random()*(maxZ-minZ+220), a=Math.random()<.5?0:Math.PI/2;
+      if(!clear(x,z,9)) continue;
+      const rows=1+Math.floor(Math.random()*3), side=1+Math.floor(Math.random()*3);
+      e.set(0,a,0); q.setFromEuler(e);
+      // side by side across their long sides, `rows` high
+      for(let s=0;s<side && placed<cnt;s++) for(let r=0;r<rows && placed<cnt;r++){
+        const off=(s-1)*2.5; m.compose(new THREE.Vector3(x+(a?off:0), r*2.6, z+(a?0:off)),q,one); box.setMatrixAt(placed,m); box.setColorAt(placed,cols[Math.floor(Math.random()*cols.length)]); placed++; } }
+    box.count=placed; box.castShadow=true; box.receiveShadow=true; if(box.instanceColor) box.instanceColor.needsUpdate=true; B.add(box);
+    for(let k=0,tries2=0;k<(decor.cranes||3) && tries2<400;tries2++){
+      const x=minX-60+Math.random()*(maxX-minX+120), z=minZ-60+Math.random()*(maxZ-minZ+120);
+      if(!clear(x,z,22)) continue; k++;
+      const c=new THREE.Group(); c.position.set(x,0,z); c.rotation.y=Math.random()*Math.PI;
+      for(const sx of [-6,6]) for(const sz of [-5,5]){ const leg=new THREE.Mesh(new THREE.BoxGeometry(.9,30,.9),craneMat); leg.position.set(sx,15,sz); c.add(leg); }
+      const beam=new THREE.Mesh(new THREE.BoxGeometry(14,2,12),craneMat); beam.position.y=30; c.add(beam);
+      const boom=new THREE.Mesh(new THREE.BoxGeometry(2,1.6,52),craneMat); boom.position.set(0,31,8); c.add(boom);
+      B.add(c); }
+  }
   /* city */
-  { const cnt=(MAP.decor&&MAP.decor.city)||150, g=new THREE.BoxGeometry(1,1,1).translate(0,.5,0);
+  if(themeId==='city' || decor.city){ const cnt=decor.city||150, g=new THREE.BoxGeometry(1,1,1).translate(0,.5,0);
     const city=new THREE.InstancedMesh(g,cityMat,cnt); const m=new THREE.Matrix4(), q=new THREE.Quaternion(), e=new THREE.Euler();
     // «Ночной город»'s city box (x from -315 to 410, z from -242 to 435 m); other maps: around their own track
     const w0=flatMap&&MAP.id==='neon'?600*MAP.scale/1.2:(maxX-minX)+260, d0=flatMap&&MAP.id==='neon'?560*MAP.scale/1.2:(maxZ-minZ)+260;
@@ -192,7 +342,7 @@ function build(){
       const w=10+Math.random()*22, d=10+Math.random()*22, h=12+Math.random()*(Math.random()<.2?90:40);
       let ok=true, need=WALL+Math.max(w,d)*.75+5;
       for(let i=0;i<N;i+=3){ const dx=P[i].x-x, dz=P[i].z-z; if(dx*dx+dz*dz<need*need){ok=false;break;} }
-      if(!ok) continue;
+      if(!ok || (SHORTCUTS.length && !clear(x,z,Math.max(w,d)*.75+5))) continue;
       e.set(0,Math.random()*Math.PI,0); q.setFromEuler(e); m.compose(new THREE.Vector3(x,0,z),q,new THREE.Vector3(w,h,d)); city.setMatrixAt(placed++,m);
     }
     city.count=placed; city.castShadow=true; city.receiveShadow=true; B.add(city); }

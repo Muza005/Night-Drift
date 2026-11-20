@@ -30,6 +30,9 @@ export function scoring(dt){
   // in the air after a crest (maps with heights) nothing scores, and a drift under way
   // waits for the landing instead of running out of grace
   if(car.air) return {drifting:false,ang,speed};
+  // a corner taken through a shortcut (drift maps, modes/track/geometry.js) scores
+  // nothing: the slide that carried the car into it is lost too
+  if(car.cut>=0){ if(drift.active) dropDrift(); return {drifting:false,ang,speed}; }
   if(drifting){
     drift.active=true; drift.grace=.75; drift.time+=dt;
     drift.pts+=(Math.min(ang,65)-6)*speed*.22*dt;

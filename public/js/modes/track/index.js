@@ -18,7 +18,7 @@ import { camera } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
-import { P, TG, Y, N, BRIDGE, START, FLAT, MAP, placeAt, placeGrid, constrainToTrack, keepInWalls, nearest, setMap, onMapChange, carPose } from './geometry.js';
+import { P, TG, Y, N, BRIDGE, START, FLAT, MAP, SHORTCUTS, placeAt, placeOnCut, placeGrid, constrainToTrack, keepInWalls, nearest, setMap, onMapChange, carPose } from './geometry.js';
 import { MAPS, DEFAULT_MAP } from './maps/index.js';
 import { group } from './scene.js';
 
@@ -36,7 +36,7 @@ G.setMap = id => { const before=MAP; setMap(id && Object.hasOwn(MAPS, id) ? id :
    passing over. On a map with heights a small gauge at the left shows how high my car is
    (between the map's lowest and highest road); under a bridge my arrow is drawn below it. */
 const map=$('map'), mg=map.getContext('2d');
-let mx, mz, trackPath, bridgePaths, yMin=0, yMax=0;
+let mx, mz, trackPath, bridgePaths, cutPaths=[], yMin=0, yMax=0;
 function buildMap(){
   let minX=1e9,maxX=-1e9,minZ=1e9,maxZ=-1e9; for(const p of P){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
   const mScale=250/Math.max(maxX-minX,maxZ-minZ), mOx=150-(minX+maxX)/2*mScale, mOz=150-(minZ+maxZ)/2*mScale;
@@ -48,6 +48,8 @@ function buildMap(){
     while(BRIDGE[j] && k++<N){ j=(j+1)%N; path.lineTo(mx(P[j].x),mz(P[j].z)); }
     bridgePaths.push({path, from:i, to:j}); }
   yMin=Math.min(...Y); yMax=Math.max(...Y);
+  // shortcuts: thin yellow lines
+  cutPaths=SHORTCUTS.map(sc=>{ const path=new Path2D(); for(let k=0;k<sc.n;k+=2) k?path.lineTo(mx(sc.x[k]),mz(sc.z[k])):path.moveTo(mx(sc.x[k]),mz(sc.z[k])); path.lineTo(mx(sc.x[sc.n-1]),mz(sc.z[sc.n-1])); return path; });
 }
 buildMap(); onMapChange(buildMap);
 const onBridge=(i,b)=>b.from<=b.to ? (i>=b.from && i<=b.to) : (i>=b.from || i<=b.to);
@@ -59,6 +61,7 @@ function drawMap(car){
   mg.clearRect(0,0,300,300);
   mg.lineJoin='round'; mg.strokeStyle='rgba(62,240,255,.18)'; mg.lineWidth=16; mg.stroke(trackPath);
   mg.strokeStyle='rgba(238,240,255,.75)'; mg.lineWidth=4; mg.stroke(trackPath);
+  if(cutPaths.length){ mg.strokeStyle='rgba(255,194,61,.85)'; mg.lineWidth=2; mg.setLineDash([4,3]); for(const c of cutPaths) mg.stroke(c); mg.setLineDash([]); }
   const s=P[START]; mg.fillStyle='#ffc23d'; mg.beginPath(); mg.arc(mx(s.x),mz(s.z),6,0,7); mg.fill();
   // cars below the bridges first (the bridges then pass over them), cars on a bridge after;
   // another player's track point is the one keepInWalls found for them (g.walls)
@@ -95,7 +98,8 @@ export const trackMode = {
   idle(car){ placeAt(car, START); },
   // back onto the road: the point nearest to where the car is, by height too (a car that
   // fell off a bridge comes back on the road it is on, not on the bridge)
-  respawn(car){ placeAt(car, FLAT ? car.idx : nearest(car, true)); },
+  // (on a shortcut: back onto the shortcut)
+  respawn(car){ if(car.cut>=0 && placeOnCut(car)) return; placeAt(car, FLAT ? car.idx : nearest(car, true)); },
   pose(car, dt){ return carPose(car, dt, car.pose || (car.pose = { y:0, pitch:0, roll:0, squash:0 })); },
   constrain(car, dt, hooks){ constrainToTrack(car, dt, hooks); },
 
@@ -135,7 +139,7 @@ export const trackMode = {
     }
     if(G.state==='race'){
       const fx=Math.sin(car.h), fz=Math.cos(car.h);
-      const back=(fx*TG[car.idx].x+fz*TG[car.idx].z)<-.3 && info.speed>4;
+      const back=!(car.cut>=0) && (fx*TG[car.idx].x+fz*TG[car.idx].z)<-.3 && info.speed>4;   // (a shortcut runs its own way)
       G.wrongT=back?G.wrongT+dt:0;
       if(G.wrongT>.8 && G.toastT<=0) flash('Не туда — разворачивайся',null,.6);
     }
