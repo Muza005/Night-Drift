@@ -20,5 +20,8 @@ You tune how the cars feel and how they hit each other.
 - Realism targets: car-to-car restitution ~0.1, friction at the contact, spin ≤ ~2 rad/s, positional correction ≤ 0.3 m per substep, one side decides each hit (no double impulse), light class masses 0.9–1.15.
 - Any change to what goes over the network is coordinated with the net agent via the parent.
 
+## Browser runs: never pop up windows
+The user works on this computer while tests run. Browser tests take `--headed` (no window, real GPU via ANGLE/EGL, 60 fps) — never `--show`. Own Playwright scripts launch Chrome with `headless: true` and args `['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu']` (see tests/browser.mjs), never `headless: false`. CHROME_PATH=/home/proser/.cache/ms-playwright/chromium-1247/chrome-linux64/chrome. Kill any server you start by its PID before you finish.
+
 ## Done means
 `npm test` green (except known failures named by the parent), the new scenario's numbers meet the targets, `test:sync -- --headed` still passes. Report numbers before/after.

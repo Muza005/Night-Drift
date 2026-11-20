@@ -13,9 +13,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const HEADED = process.argv.includes('--headed');
+const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
 const PORT = 2598;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -31,11 +32,7 @@ const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok }); console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${info ? '  (' + info + ')' : ''}`); };
 
 const server = await startServer();
-const browser = await chromium.launch({
-  headless: !HEADED,
-  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
-  args: HEADED ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
+const browser = await chromium.launch(launchOptions(process.argv, []));
 const errors = [];
 async function player(name, x) {
   // (software rendering draws three games on the CPU: smaller windows, more patience)

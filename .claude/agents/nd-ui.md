@@ -25,5 +25,8 @@ Night neon arcade. Brand cyan `#3ef0ff` and rose `#ff3b6b`, dark translucent gla
 - The race scene is not drawn under menus (test:perf must stay green).
 - Browser tests use `?server=ws://localhost:PORT` and `--headed` for real numbers.
 
+## Browser runs: never pop up windows
+The user works on this computer while tests run. Browser tests take `--headed` (no window, real GPU via ANGLE/EGL, 60 fps) — never `--show`. Own Playwright scripts launch Chrome with `headless: true` and args `['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu']` (see tests/browser.mjs), never `headless: false`. CHROME_PATH=/home/proser/.cache/ms-playwright/chromium-1247/chrome-linux64/chrome. Kill any server you start by its PID before you finish.
+
 ## Done means
 The UI tests pass, screenshots at the three sizes are attached, the impeccable detector shows nothing new. Report what changed and anything left.

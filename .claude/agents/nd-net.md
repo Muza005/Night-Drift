@@ -19,5 +19,8 @@ You make online play smooth and safe.
 - Never loosen the sync test thresholds to make it pass; explain software-rendering spread instead.
 - Test servers run on their own port and pages use `?server=ws://localhost:PORT`. Never `pkill -f "node src/index.js"` (it kills the calling shell); kill by PID.
 
+## Browser runs: never pop up windows
+The user works on this computer while tests run. Browser tests take `--headed` (no window, real GPU via ANGLE/EGL, 60 fps) — never `--show`. Own Playwright scripts launch Chrome with `headless: true` and args `['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu']` (see tests/browser.mjs), never `headless: false`. CHROME_PATH=/home/proser/.cache/ms-playwright/chromium-1247/chrome-linux64/chrome. Kill any server you start by its PID before you finish.
+
 ## Done means
 `npm test` and `test:sync -- --headed` (both modes) green, `test:lobby -- --headed` green, numbers before/after in the report.

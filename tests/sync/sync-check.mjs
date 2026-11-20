@@ -21,6 +21,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
@@ -212,12 +213,8 @@ const server = await startServer();
 const proxy = latencyProxy(PROXY, PORT);
 // --headed: two real windows on the GPU (60 fps, as players have it); by default software
 // rendering, a few frames a second, which is the harder case for the prediction
-const HEADED = args.includes('--headed');
-const browser = await chromium.launch({
-  headless: !HEADED,
-  ...(CHROME ? { executablePath: CHROME } : { channel: 'chrome' }),
-  args: HEADED ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
+const browser = await chromium.launch({ ...launchOptions(process.argv, []), ...(CHROME ? { executablePath: CHROME } : { channel: 'chrome' }) });
 let failed = false;
 try {
   for (let i = 0; i < RUNS; i++) {

@@ -312,8 +312,8 @@ function frame(now){
   /* visuals */
   const fx=Math.sin(car.h), fz=Math.cos(car.h), rx=Math.cos(car.h), rz=-Math.sin(car.h);
   car.root.position.set(car.x,0,car.z); car.root.rotation.y=car.h;
-  car.roll+=(Math.max(-.11,Math.min(.11,car.vR*.012))-car.roll)*Math.min(1,dt*6);
-  car.body.rotation.z=car.roll;
+  // No body roll in a slide: the 3D models' wheels are part of the body, so leaning it
+  // pushed the tyres on one side into the road.
   car.pitch+=(((input.down&&car.vF>1)?.035:input.up?-.02:0)-car.pitch)*Math.min(1,dt*5);
   car.body.rotation.x=car.pitch;
   if(G.state!=='pause') car.spin+=car.vF*dt/.38;             // paused: the wheels stand still like everything else

@@ -383,7 +383,6 @@ export function updateGhosts(dt){
     updateWake(g.fx,wk,s.x,s.z,dt);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
-    m.roll+=((-s.steer*s.slide*.1)-m.roll)*Math.min(1,dt*6); m.body.rotation.z=m.roll;
     m.under.material.opacity=.4+s.slide*.35;
     const fx=Math.sin(s.h), fz=Math.cos(s.h), rx=Math.cos(s.h), rz=-Math.sin(s.h);
     for(const [k,lx] of [[0,.95],[1,-.95]]){

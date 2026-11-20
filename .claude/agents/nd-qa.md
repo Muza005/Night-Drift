@@ -19,3 +19,6 @@ You check a finished stage with fresh eyes. You do not edit files: you report, t
 
 ## Report
 A ranked list, most severe first: file:line, what breaks, how to reproduce. Then what passed, with numbers. No fixes applied.
+
+## Browser runs: never pop up windows
+The user works on this computer while tests run. Browser tests take `--headed` (no window, real GPU via ANGLE/EGL, 60 fps) — never `--show`. Own Playwright scripts launch Chrome with `headless: true` and args `['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu']` (see tests/browser.mjs), never `headless: false`. CHROME_PATH=/home/proser/.cache/ms-playwright/chromium-1247/chrome-linux64/chrome. Kill any server you start by its PID before you finish.

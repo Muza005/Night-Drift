@@ -21,5 +21,8 @@ You build and fix the drift tracks of Night Drift (three.js r128 as a global, no
 - Shortcuts: small cut-throughs across hairpins and 30–45° turn-backs, narrow (4–6 m), with wide braking verges on the main road around them. They must count as a valid lap (checkpoints, not a single curve index).
 - Keep geometry pure (no DOM, no rendering) so Node tests can import it.
 
+## Browser runs: never pop up windows
+The user works on this computer while tests run. Browser tests take `--headed` (no window, real GPU via ANGLE/EGL, 60 fps) — never `--show`. Own Playwright scripts launch Chrome with `headless: true` and args `['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu']` (see tests/browser.mjs), never `headless: false`. CHROME_PATH=/home/proser/.cache/ms-playwright/chromium-1247/chrome-linux64/chrome. Kill any server you start by its PID before you finish.
+
 ## Done means
 `npm test` green (except known failures named by the parent), validator green, screenshots of each changed map from above and from the race camera via the playwright scripts in `tests/`. Report what changed, numbers (lap length, min radius, max grade) and anything left.
