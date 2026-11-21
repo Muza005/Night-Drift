@@ -1,6 +1,7 @@
 // Node scenario: two players' cars, each simulated on "its own computer" (stepCar +
 // constrainToTrack + the collision code), states and bumps travelling with ~150 ms of
-// ping (75 ± 25 ms each way via the server, schema patches every 33 ms).
+// ping (75 ± 25 ms each way via the server; old: schema patches every 33 ms, new: states
+// passed on at once, stage 9).
 //   npm run test:hits -- [old|new] [map]   (old: the code at 6a4c289, for the before numbers)
 import { createRequire } from 'node:module';
 const R = new URL('../../../', import.meta.url).href;
@@ -43,7 +44,7 @@ const hooks = { onWall() {}, onLap() {}, onLand() {} };
 // one scenario: B drives along the straight at vB; A comes at relative speed `closing`
 // along direction `ang` (0 = straight from behind, rotated toward B's left side)
 function run(kind, closingKmh, { collide = true, carA = 'coupe', carB = 'coupe', vBkmh = 40 } = {}) {
-  seed = 7;
+  seed = Number(process.env.SEED) || 7;   // SEED=n: another draw of the lags
   const A = mkClient('a', carA, GAS), B = mkClient('b', carB, GAS);
   A.ghost.id = 'b'; B.ghost.id = 'a'; A.ghost.car = carB; B.ghost.car = carA;
   const t = T.TG[bestI], fx = t.x, fz = t.z, nx = -fz, nz = fx;   // forward, and to the side (n)
@@ -63,14 +64,21 @@ function run(kind, closingKmh, { collide = true, carA = 'coupe', carB = 'coupe',
   A.car.idx = T.nearest(A.car, true);
   const cls = [A, B], other = c => c === A ? B : A;
   const wire = [];          // {at, to, kind, m}
-  for (const c of cls) c.send = m => wire.push({ at: time + lag() + lag(), to: other(c), kind: 'bump', m: { ...m, from: c.id } });
+  // after: one connection per player, so what the server sends a player arrives in order
+  // (TCP); a message never overtakes the one before it (as in test:sync's latency proxy)
+  const order = new Map(), inOrder = (to, at) => which === 'old' ? at : Math.max(order.get(to) || 0, at);
+  const post = (to, kind, m) => { const at = inOrder(to, time + lag() + lag()); order.set(to, at); wire.push({ at, to, kind, m }); };
+  for (const c of cls) c.send = m => post(other(c), 'bump', { ...m, from: c.id });
   const rec = { A: [], B: [], gA: [] };
   let patchT = 0, time = 0;
   const dt = 1 / 60;
   // prime the ghost buffers with a state 2 frames old so collisions can start at once
   const stateOf = c => ({ t: c.now, x: c.car.x, z: c.car.z, h: c.car.h, vx: c.car.vx, vz: c.car.vz, vf: c.car.vF, steer: c.car.steer, slide: 0, y: 0, vy: 0, idx: c.car.idx });
   for (const c of cls) { const s = stateOf(c); other(c).ghost.buf.push({ ...s, x: s.x - s.vx * .033, z: s.z - s.vz * .033, t: -33 }, s); }
-  const serverQ = [];        // states at the server waiting for the next patch
+  // (old: states at the server waiting for the next patch. Kept as it was for the old
+  // numbers, but note it under-counts their latency: a patch takes everything queued, the
+  // player-to-server leg is skipped, so states came ~75 ms sooner than they really do.)
+  const serverQ = [];
   for (let f = 0; f < 90; f++) {
     time = f * dt * 1000;
     for (const c of cls) c.now = time;
@@ -89,7 +97,10 @@ function run(kind, closingKmh, { collide = true, carA = 'coupe', carB = 'coupe',
       }
       if (algo.B) c.car.liftMax = Math.max(c.car.liftMax || 0, algo.B.lift(c.car, dt));
       c.sendT += dt;
-      if (c.sendT >= .033) { c.sendT = which === 'old' ? 0 : c.sendT - .033; serverQ.push({ to: other(c), m: stateOf(c), at: time + lag() }); }
+      // before: every 33 ms, the remainder dropped, through the schema patches; after (stage 9):
+      // 40 a second near another car, evenly, passed on by the server at once
+      if (which === 'old') { if (c.sendT >= .033) { c.sendT = 0; serverQ.push({ to: other(c), m: stateOf(c), at: time + lag() }); } }
+      else if (c.sendT >= 1 / 40) { c.sendT = Math.min(c.sendT - 1 / 40, 1 / 40); post(other(c), 'state', stateOf(c)); }
     }
     rec.A.push([time, A.car.x, A.car.z, A.car.vx, A.car.vz, A.car.spinV, A.car.h, A.car.y || 0, A.car.air ? 1 : 0]);
     rec.B.push([time, B.car.x, B.car.z, B.car.vx, B.car.vz, B.car.spinV, B.car.h, B.car.y || 0, B.car.air ? 1 : 0]);

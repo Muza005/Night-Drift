@@ -16,8 +16,11 @@
 //    picture of B must not jump: from the frame of the hit on, how much B's drawn speed
 //    changes from one frame to the next (in metres per 60 fps frame), apart from the
 //    frames of the hit itself (stage 8: one judge per hit, A's picture lined up with B's).
+//    The same for B's picture of A from B's own hit on (stage 9).
 // 4. Prediction: A drives a scripted route for 20 s. On every frame we compare where B
-//    draws A with where A really was at that moment.
+//    draws A with where A really was at that moment; also where A's speed changes fast
+//    (stage 9), and the game's own numbers (net.js NET.report: update rate, delay, jitter,
+//    update age, the size of its corrections).
 // It fails if the hit does not reach B or if B's picture of A drifts too far.
 import { spawn } from 'node:child_process';
 import net from 'node:net';
@@ -147,7 +150,12 @@ async function runOnce(browser) {
     // every frame, with the frame's time.
     await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z);
       window.__hit = []; const tick = ts => { if (!window.__hit) return; requestAnimationFrame(tick);
-        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'B') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz]); };
+        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'B') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz, g.off ? g.off.x : 0, g.off ? g.off.z : 0, g.last ? g.last.t : 0, g.kick ? (g.kick.run ? 2 : 1) : 0, g.last ? g.last.vx : 0, g.last ? g.last.vz : 0]); };
+      requestAnimationFrame(tick); });
+    // and B its own velocity and its picture of A (A's hit reaches B in A's updates)
+    await B.evaluate(() => { const nd = window.__nd;
+      window.__hit = []; const tick = ts => { if (!window.__hit) return; requestAnimationFrame(tick);
+        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'A') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz, g.off ? g.off.x : 0, g.off ? g.off.z : 0, g.last ? g.last.t : 0, g.mem ? g.mem.role : '', nd.car.x, nd.car.z]); };
       requestAnimationFrame(tick); });
     await A.keyboard.down('w');
     let bump = 0;
@@ -157,17 +165,25 @@ async function runOnce(browser) {
     for (let i = 0; i < 120; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); if (bump > MIN_BUMP) break; }
     await A.keyboard.up('w'); await sleep(1000);
     const hitRec = await A.evaluate(() => { const r = window.__hit; window.__hit = null; return r; });
-    if (process.env.SYNC_HIT_DUMP) (await import('node:fs')).writeFileSync(process.env.SYNC_HIT_DUMP, JSON.stringify(hitRec));
+    const hitRecB = await B.evaluate(() => { const r = window.__hit; window.__hit = null; return r; });
+    if (process.env.SYNC_HIT_DUMP) { const fs = await import('node:fs'); fs.writeFileSync(process.env.SYNC_HIT_DUMP, JSON.stringify(hitRec)); fs.writeFileSync(process.env.SYNC_HIT_DUMP + '.B.json', JSON.stringify(hitRecB)); }
     await A.keyboard.press('r'); await sleep(500);
     // A's own hit: a jump of its velocity (driving changes it by < 0.5 m/s per frame); then
     // B's drawn speed change per frame from there on, the hit's own frames apart
-    let hitAt = -1, jump = 0;
-    for (let i = 1; i < hitRec.length && hitAt < 0; i++) if (Math.hypot(hitRec[i][3] - hitRec[i - 1][3], hitRec[i][4] - hitRec[i - 1][4]) > 1.5) hitAt = i;
-    if (hitAt > 0) for (let i = hitAt + 2; i < hitRec.length; i++) {
-      const d1 = Math.max(4, hitRec[i][0] - hitRec[i - 1][0]), d0 = Math.max(4, hitRec[i - 1][0] - hitRec[i - 2][0]);
-      jump = Math.max(jump, Math.hypot((hitRec[i][1] - hitRec[i - 1][1]) / d1 - (hitRec[i - 1][1] - hitRec[i - 2][1]) / d0,
-        (hitRec[i][2] - hitRec[i - 1][2]) / d1 - (hitRec[i - 1][2] - hitRec[i - 2][2]) / d0) * 1000 / 60);
-    }
+    const jumpOf = rec => {
+      let at = -1, most = null;
+      for (let i = 1; i < rec.length && at < 0; i++) if (Math.hypot(rec[i][3] - rec[i - 1][3], rec[i][4] - rec[i - 1][4]) > 1.5) at = i;
+      if (at > 0) { most = 0; for (let i = at + 2; i < rec.length; i++) {
+        const d1 = Math.max(4, rec[i][0] - rec[i - 1][0]), d0 = Math.max(4, rec[i - 1][0] - rec[i - 2][0]);
+        most = Math.max(most, Math.hypot((rec[i][1] - rec[i - 1][1]) / d1 - (rec[i - 1][1] - rec[i - 2][1]) / d0,
+          (rec[i][2] - rec[i - 1][2]) / d1 - (rec[i - 1][2] - rec[i - 2][2]) / d0) * 1000 / 60);
+      } }
+      return most;
+    };
+    const jump = jumpOf(hitRec);
+    // B's picture of A from B's own hit on (B feels the hit when A's updates with A's own
+    // reaction come in too): also judged on the GPU only
+    const jumpB = jumpOf(hitRecB);
 
     step = 'prediction drive';
     // Prediction: A drives, both record every frame.
@@ -183,6 +199,8 @@ async function runOnce(browser) {
     // player's clock error; comparing equal real moments adds the clock error on top.
     const clock = [await A.evaluate(() => window.__nd.NET.offset), await B.evaluate(() => window.__nd.NET.offset)].map(Math.round);
     const rtt = await B.evaluate(() => window.__nd.NET.rtt);
+    // the game's own numbers (net.js NET.report, ?debug=net): B's updates of A
+    const net = await B.evaluate(() => window.__nd.NET.report ? window.__nd.NET.report().ghosts.find(g => g.name === "A") : null);
 
     // A pressing R teleports the car back onto the track; B needs a moment to catch up.
     // That is a reset, not a sync error, so the 1.5 s after each teleport are left out.
@@ -200,6 +218,24 @@ async function runOnce(browser) {
       errs.push(Math.hypot(gx - (a0[1] + (a1[1] - a0[1]) * u), gz - (a0[2] + (a1[2] - a0[2]) * u)));
       if (process.env.SYNC_DEBUG && errs.at(-1) > 6) console.log('BIG', (t - ra[0][0]).toFixed(0), 'err', errs.at(-1).toFixed(1), 'ghost', gx.toFixed(1), gz.toFixed(1), 'A', a0[1].toFixed(1), a0[2].toFixed(1), 'v', (a0[3]*3.6).toFixed(0), 'ghostflag', a0[4], 'dtA', (a1[0]-a0[0]).toFixed(0));
     }
+    // the frames where A's speed changes fast (the handbrake, a wall, a hit): more than 3 m/s
+    // within 0.25 s, and the half second after (the error there is the prediction's hard case)
+    const fast = [];
+    for (let i = 0, k = 0; i < ra.length; i++) {
+      while (k < ra.length && ra[k][0] < ra[i][0] + 250) k++;
+      if (k < ra.length && Math.abs(ra[k][3] - ra[i][3]) > 3) fast.push(ra[i][0]);
+    }
+    const errsFast = []; { let q = 0, k = 0;
+      for (const [t, gx, gz] of rb) {
+        if (afterReset(t)) continue;
+        while (q < fast.length && fast[q] < t - 750) q++;
+        if (q >= fast.length || fast[q] > t) continue;
+        while (k + 1 < ra.length && ra[k + 1][0] < t) k++;
+        if (k + 1 >= ra.length || ra[k][0] > t) continue;
+        const a0 = ra[k], a1 = ra[k + 1], u = (t - a0[0]) / Math.max(1e-9, a1[0] - a0[0]);
+        errsFast.push(Math.hypot(gx - (a0[1] + (a1[1] - a0[1]) * u), gz - (a0[2] + (a1[2] - a0[2]) * u)));
+      } }
+    errsFast.sort((a, b) => a - b);
     errs.sort((a, b) => a - b);
     const mean = errs.reduce((s, e) => s + e, 0) / errs.length;
     const fps = ra.length / ((ra.at(-1)[0] - ra[0][0]) / 1000);
@@ -225,7 +261,10 @@ async function runOnce(browser) {
       rtt: Math.round(rtt), fps: Math.round(fps), clock,
       speedKmh: Math.round(ra.reduce((s, r) => s + r[3], 0) / ra.length * 3.6),
       mean: +mean.toFixed(2), p95: +errs[Math.floor(errs.length * 0.95)].toFixed(2), bump: +bump.toFixed(2), errors,
-      jump: hitAt > 0 ? +jump.toFixed(2) : null,
+      jump: jump === null ? null : +jump.toFixed(2), jumpB: jumpB === null ? null : +jumpB.toFixed(2),
+      p50: +errs[Math.floor(errs.length * 0.5)].toFixed(2),
+      fast: errsFast.length ? { n: errsFast.length, p95: +errsFast[Math.floor(errsFast.length * 0.95)].toFixed(2) } : null,
+      net: net && { hz: Math.round(net.hz), delay: Math.round(net.delay), jitter: +net.jitter.toFixed(1), age: Math.round(net.age), p50: +net.p50.toFixed(2), p95: +net.p95.toFixed(2) },
       bots: botErr.length ? { n: botErr.length, mean: +(botErr.reduce((s, e) => s + e, 0) / botErr.length).toFixed(3), p95: +botErr[Math.floor(botErr.length * 0.95)].toFixed(3),
         raw: +(botRaw.reduce((s, e) => s + e, 0) / botRaw.length).toFixed(3) } : null,
     };
@@ -247,6 +286,8 @@ try {
     if (r.bump < MIN_BUMP) bad.push(`hit did not reach player B (B speed ${r.bump} m/s)`);
     if (HEADED && r.jump === null) bad.push('A never felt its hit on B');
     if (HEADED && r.jump > LIMIT_JUMP) bad.push(`A's picture of B jumped ${r.jump} m in a frame after the hit > ${LIMIT_JUMP} m`);
+    if (HEADED && r.jumpB > LIMIT_JUMP) bad.push(`B's picture of A jumped ${r.jumpB} m in a frame after the hit > ${LIMIT_JUMP} m`);
+    if (r.fast && r.fast.p95 > LIMIT_P95) bad.push(`p95 error ${r.fast.p95} m > ${LIMIT_P95} m where A's speed changes fast`);
     if (r.mean > LIMIT_MEAN) bad.push(`mean error ${r.mean} m > ${LIMIT_MEAN} m`);
     if (r.p95 > LIMIT_P95) bad.push(`p95 error ${r.p95} m > ${LIMIT_P95} m`);
     if (r.errors.length) bad.push('page errors: ' + r.errors.join('; '));
@@ -256,7 +297,9 @@ try {
       else if (r.bots.mean > LIMIT_BOT_MEAN || r.bots.p95 > LIMIT_BOT_P95) bad.push(`players disagree on bots: mean ${r.bots.mean} m, p95 ${r.bots.p95} m`);
     }
     console.log(`run ${i + 1}: ping ${r.rtt} ms, ${r.fps} fps, clock error A ${r.clock[0]} ms B ${r.clock[1]} ms, A at ${r.speedKmh} km/h → B sees A off by ` +
-      `mean ${r.mean} m, p95 ${r.p95} m; bump pushed B to ${r.bump} m/s, A's picture of B jumped at most ${r.jump} m in a frame after it` +
+      `mean ${r.mean} m, p50 ${r.p50} m, p95 ${r.p95} m (p95 ${r.fast ? r.fast.p95 : '-'} m where A's speed changes fast); bump pushed B to ${r.bump} m/s, ` +
+      `the picture of the other car jumped at most ${r.jump} m (A's of B) / ${r.jumpB} m (B's of A) in a frame after it` +
+      (r.net ? `; B's game: A's updates ${r.net.hz}/s, delay ${r.net.delay} ms, jitter ${r.net.jitter} ms, age ${r.net.age} ms, corrections p50 ${r.net.p50} m p95 ${r.net.p95} m` : '') +
       (r.bots ? `; bots: A and B differ by mean ${r.bots.mean} m, p95 ${r.bots.p95} m at the same server moment, ${r.bots.raw} m with the clock error (${r.bots.n} samples)` : '') +
       `  ${bad.length ? 'FAIL: ' + bad.join(', ') : 'ok'}`);
     if (bad.length) failed = true;

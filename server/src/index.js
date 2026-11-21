@@ -3,7 +3,8 @@
 // The server is the single source of truth for everything that decides the race:
 // who is in the room, when the race starts, lap times, finishing order and results.
 // Car movement is calculated on each player's computer (no lag for your own car)
-// and streamed here ~30 times a second.
+// and streamed here 30-40 times a second; the server checks each state and passes it on to
+// the other players at once (stage 9: not through the schema patches).
 //
 // Two modes. "track": the drift track, 3 laps (unchanged). "traffic": the highway, a
 // timed run ranked by score. In traffic mode this server also runs the traffic itself
@@ -40,6 +41,8 @@ const DENSITIES = ['low', 'mid', 'high'];   // traffic density (public/js/modes/
 const WRECK_MS = 3000, GHOST_MS = 1500;     // online crash: stopped and blinking, then can't be hit
 const SNAPSHOT_EVERY = 2;                    // traffic steps (1/20 s) per snapshot: 10 a second
 const SNAP_BEHIND = 120, SNAP_AHEAD = 780;   // a player is sent the bots this far behind and ahead of its car (m)
+const CAR_TOP = 80;                           // m/s: faster than any car (72 m/s flat out in a slipstream)
+const HIST_MS = 800;                         // a player's states kept for the speed check (speedSeen)
 
 // The traffic simulation is an ES module shared with the game; load it once.
 let T = null;
@@ -58,6 +61,12 @@ let MAPS = null;
 async function mapsLib() {
   if (!MAPS) MAPS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'modes', 'track', 'maps', 'meta.js')).href);
   return MAPS;
+}
+// A car's state as the server passes it on to the other players ('st', see 'state' below).
+let CODEC = null;
+async function codecLib() {
+  if (!CODEC) CODEC = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'net', 'statecodec.js')).href);
+  return CODEC;
 }
 // The cars and paints players can pick: public/js/core/cars.js, shared with the game.
 // Players may share a paint: the interface marks a player by their seat, not by colour.
@@ -86,12 +95,9 @@ class Player extends Schema {
                              // Everyone lists the room the same way: the host first, then by order.
     this.ready = false;      // pressed "Готово" in the lobby (the host does not need to)
     this.connected = true;
-    this.x = 0; this.z = 0; this.h = 0;
-    this.y = 0; this.vy = 0;   // height and, in a jump, vertical speed (track maps with heights)
-    this.idx = 0;            // the sender's nearest track point (finds the right road at a bridge)
-    this.vf = 0; this.steer = 0; this.slide = 0;
-    this.vx = 0; this.vz = 0;
-    this.t = 0;              // sender's synced clock (server ms) when this position was true
+    // How far down the road (traffic: the distance in the results). Updated twice a second:
+    // the car's movement itself is not in the schema (_s below).
+    this.z = 0;
     this.lap = 0;            // completed laps
     this.prog = 0;           // progress along the current lap, 0..track points (900 on «Ночной город»)
     this.score = 0;
@@ -104,13 +110,17 @@ class Player extends Schema {
     this.ghostUntil = 0;     // server ms: until then bots and other cars pass through
     this.misses = 0;         // near misses this run (reported by the player)
     this.wrecks = 0;         // crashes this run (counted here)
+    // The car's last state (stage 9: not in the schema; the server passes each state on to
+    // the other players the moment it comes, 'st'): position, heading, height and, in a
+    // jump, vertical speed, the nearest track point (the right road at a bridge), speeds,
+    // steering, slide, and t: the sender's synced clock (server ms) when it was true.
+    this._s = { x: 0, z: 0, h: 0, y: 0, vy: 0, idx: 0, vf: 0, steer: 0, slide: 0, vx: 0, vz: 0, t: 0 };
+    this._hist = [];         // the last states as they arrived: { a: server ms, t: stamp, x, z } (speedSeen)
   }
 }
 defineTypes(Player, {
   name: 'string', color: 'number', car: 'string', slot: 'uint8', order: 'uint16', ready: 'boolean', connected: 'boolean',
-  x: 'float32', z: 'float32', h: 'float32', y: 'float32', vy: 'float32', idx: 'uint16',
-  vf: 'float32', steer: 'float32', slide: 'float32',
-  vx: 'float32', vz: 'float32', t: 'float64',
+  z: 'float32',
   lap: 'uint8', prog: 'int16', score: 'uint32', bestLap: 'number',
   finished: 'boolean', finishTime: 'number', place: 'uint8',
   wreckUntil: 'float64', ghostUntil: 'float64', misses: 'uint16', wrecks: 'uint8',
@@ -163,6 +173,7 @@ class RaceRoom extends Room {
     this.cars = await carsLib();
     this.maps = await mapsLib();
     this.bumps = await bumpLib();
+    this.codec = await codecLib();
     this.bumpRate = new Map();   // "from>to" -> { tokens, t }: how many hits one player may still send another
     this.roomId = await freeCode();
     this.setState(new RaceState());
@@ -175,7 +186,7 @@ class RaceRoom extends Room {
     this.traffic = null;         // traffic mode: the simulation of the current run
     this.trafficTimer = null;
     this.botHitAt = new Map();   // bot id -> server ms of the last accepted hit
-    this.setPatchRate(33);       // send updates ~30 times a second
+    this.setPatchRate(50);       // the schema (scores, laps, phases): 20 times a second; cars go at once ('st')
     this.lapStamp = new Map();   // sessionId -> server ms when the current lap started
     this.lastState = new Map();  // sessionId -> { t, x, z } for sanity checks
     this.timers = [];
@@ -258,35 +269,56 @@ class RaceRoom extends Room {
       if (target) { target.send('kicked', {}); target.leave(4001); }
     });
 
+    // A player's car, 30-40 times a second. Checked, kept here (_s: hits, traffic and the
+    // speed check use it) and passed on at once to every other player ('st', statecodec.js).
+    // At most ~60 a second per player (a burst of 12): each one goes out to everyone else.
     this.onMessage('state', (client, m) => {
       const p = this.state.players.get(client.sessionId);
-      if (!p || !m || this.state.phase === 'lobby') return;
+      if (!p || !isObj(m) || this.state.phase === 'lobby') return;
       const now = Date.now();
+      p._stTok = Math.min(12, (p._stTok ?? 12) + (now - (p._stAt || now)) * 0.06); p._stAt = now;
+      if (p._stTok < 1) return;
+      p._stTok -= 1;
       // the track fits in ±2000 m; the highway runs on for as long as anyone can drive
-      const hw = this.state.mode === 'traffic';
-      const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, p.x), z = finite(m.z, hw ? -1e7 : -2000, hw ? 1e7 : 2000, p.z);
+      const hw = this.state.mode === 'traffic', S = p._s;
+      const x = finite(m.x, hw ? -20 : -2000, hw ? 20 : 2000, S.x), z = finite(m.z, hw ? -1e7 : -2000, hw ? 1e7 : 2000, S.z);
       const last = this.lastState.get(client.sessionId);
       if (last) {
         // A car tops out around 70 m/s (250 km/h in a slipstream). Allow generous slack for lag spikes and the
         // "back to track" reset, but reject obvious teleports.
         const dt = Math.max(0.05, (now - last.t) / 1000);
-        if (Math.hypot(x - last.x, z - last.z) > 90 * dt + 25) return;
+        const jump = Math.hypot(x - last.x, z - last.z);
+        if (jump > 90 * dt + 25) return;
+      }
+      // A step faster than any car (a reset back to the track, or a made-up position) is not
+      // driving: the speed check (speedSeen) never looks back across it. Its time is the longer
+      // of the stamps' and the arrivals' (unfloored), so neither many small messages nor
+      // bunched arrivals let a hop pass for speed; an honest step is ≤ 72 m/s over its stamp time.
+      let bad = false;
+      if (last) {
+        const dts = Math.max(0, finite(m.t, now - 1500, now, now) - p._s.t), dta = now - last.t;
+        bad = Math.hypot(x - last.x, z - last.z) > CAR_TOP * Math.max(dts, dta) / 1000 + 0.3;
       }
       this.lastState.set(client.sessionId, { t: now, x, z });
-      p.x = x; p.z = z;
-      p.h = finite(m.h, -1e4, 1e4, p.h);
-      p.y = hw ? 0 : finite(m.y, -50, 200, 0);     // a map's roads stay within this; a jump's peak too
-      p.vy = hw ? 0 : finite(m.vy, -60, 60, 0);
-      p.idx = Math.round(finite(m.idx, 0, 65535, 0));
-      p.vf = finite(m.vf, -20, 80);          // forward speed: 72.3 m/s flat out, a little more in a slipstream
-      p.steer = finite(m.steer, -1, 1);
-      p.slide = finite(m.slide, 0, 1);
-      p.vx = finite(m.vx, -80, 80); p.vz = finite(m.vz, -80, 80);   // the fastest car in a slipstream: ~72 m/s
-      // Trust the sender's timestamp only within a sane window around the server clock.
-      p.t = finite(m.t, now - 1500, now, now);
+      S.x = x; S.z = z;
+      S.h = finite(m.h, -1e4, 1e4, S.h);
+      S.y = hw ? 0 : finite(m.y, -50, 200, 0);     // a map's roads stay within this; a jump's peak too
+      S.vy = hw ? 0 : finite(m.vy, -60, 60, 0);
+      S.idx = Math.round(finite(m.idx, 0, 65535, 0));
+      S.vf = finite(m.vf, -20, 80);          // forward speed: 72.3 m/s flat out, a little more in a slipstream
+      S.steer = finite(m.steer, -1, 1);
+      S.slide = finite(m.slide, 0, 1);
+      S.vx = finite(m.vx, -80, 80); S.vz = finite(m.vz, -80, 80);   // the fastest car in a slipstream: ~72 m/s
+      // Trust the sender's timestamp only within a sane window around the server clock,
+      // and never older than its last one (the others drop an out-of-date state anyway).
+      S.t = Math.max(S.t, finite(m.t, now - 1500, now, now));
+      const H = p._hist; H.push({ a: now, t: S.t, x, z, bad });
+      while (H.length && now - H[0].a > HIST_MS) H.shift();
+      if (now - (p._zAt || 0) >= 500) { p.z = z; p._zAt = now; }     // the schema's distance: twice a second
       p.prog = Math.round(finite(m.prog, -50, 8000));   // track points into the lap: 900 on «Ночной город», more on longer maps
       if (!p.finished) p.score = this.acceptScore(p, finite(m.score, 0, 1e8, p.score), now);
       if (hw) p.misses = Math.round(finite(m.misses, p.misses, 65535, p.misses));
+      this.broadcast('st', this.codec.encodeState(client.sessionId, S), { except: client });
     });
 
     // Traffic: a player hit a bot. The player's game resolved the hit for its own car at
@@ -344,8 +376,10 @@ class RaceRoom extends Room {
     // - only between two racing cars that are close (positions here are a ping old), neither
     //   finished nor a blinking crashed car;
     // - the velocity change can't be more than a hit between these two cars at their last
-    //   reported speeds can give (restitution, friction and masses of bump.js, closing
-    //   speed at most the sum of the two speeds, +3 m/s for speeds a ping old), and never
+    //   reported speeds can give, a speed never above what the server saw the car move at
+    //   (speedOf: a modified client can't claim speed for a bigger hit) (restitution,
+    //   friction and masses of bump.js, closing speed at most the sum of the two speeds,
+    //   +3 m/s for speeds a ping old), and never
     //   more than MAX_DV; spin and hop only as much as that hit can give, push within PUSH;
     // - at most 10 hits a second from one player to another (a burst of 3), the game sends
     //   one per 100 ms while two cars scrape.
@@ -355,7 +389,7 @@ class RaceRoom extends Room {
       if (!from || !to || m.to === client.sessionId || from.finished || to.finished) return;
       const now = Date.now();
       if (now < from.ghostUntil || now < to.ghostUntil) return;   // a crashed, blinking car can't push or be pushed
-      if (Math.hypot(from.x - to.x, from.z - to.z) > 25) return;   // they weren't even close (positions here are a ping old)
+      if (Math.hypot(from._s.x - to._s.x, from._s.z - to._s.z) > 25) return;   // they weren't even close (positions here are a ping old)
       const target = this.clients.find(c => c.sessionId === m.to);
       if (!target) return;
       const key = client.sessionId + '>' + m.to, r = this.bumpRate.get(key) || { tokens: 3, t: now };
@@ -364,7 +398,8 @@ class RaceRoom extends Room {
       r.tokens -= 1; this.bumpRate.set(key, r);
       const B = this.bumps.BUMP, mass = this.bumps.carMass;
       const mf = mass(from.car), mt = mass(to.car);
-      const closing = Math.hypot(from.vx, from.vz) + Math.hypot(to.vx, to.vz) + 3;
+      // the speeds as the server saw the cars move, not as claimed (speedOf)
+      const closing = this.speedOf(from) + this.speedOf(to) + 3;
       const most = Math.min(B.MAX_DV, (1 + B.E) * Math.hypot(1, B.MU) * closing * mf / (mf + mt));
       let jx = finite(m.jx, -B.MAX_DV, B.MAX_DV), jz = finite(m.jz, -B.MAX_DV, B.MAX_DV);
       const j = Math.hypot(jx, jz); if (j > most) { jx *= most / j; jz *= most / j; }
@@ -465,9 +500,29 @@ class RaceRoom extends Room {
 
   // A player's position now: the last report moved on by its velocity (at most 0.5 s).
   playerNow(p, now) {
-    const age = Math.min(0.5, Math.max(0, (now - p.t) / 1000));
-    return { x: p.x + p.vx * age, z: p.z + p.vz * age, v: p.vz };
+    const S = p._s, age = Math.min(0.5, Math.max(0, (now - S.t) / 1000));
+    return { x: S.x + S.vx * age, z: S.z + S.vz * age, v: S.vz };
   }
+  // How fast a player's car really moves, from its own positions as they came here, not
+  // the speed it claims (a modified client could claim 80 m/s standing still, for a bigger
+  // hit): the fastest average over the windows of 150-700 ms that end at its latest state.
+  // A window's time is the stamps' (the sender's clock: arrival times shift with the jitter),
+  // but never less than the arrival times' less 60 ms (a stamp can be made up).
+  speedSeen(p) {
+    const H = p._hist, L = H[H.length - 1]; let v = 0;
+    if (!L || L.bad) return 0;
+    for (let i = H.length - 2; i >= 0; i--) {
+      if (H[i + 1].bad) break;                 // a hop between H[i] and H[i+1]: no window across it
+      const da = L.a - H[i].a; if (da < 150) continue; if (da > 700) break;
+      const dt = Math.max(L.t - H[i].t, da - 60) / 1000;
+      v = Math.max(v, Math.hypot(L.x - H[i].x, L.z - H[i].z) / dt);
+    }
+    return v;
+  }
+  // The speed a hit is checked with: the claimed one, but no more than the seen one, +10%
+  // and 3 m/s (a window's average lags a car that speeds up or was just hit), and never
+  // more than the fastest car can go.
+  speedOf(p) { return Math.min(Math.hypot(p._s.vx, p._s.vz), this.speedSeen(p) * 1.1 + 3, CAR_TOP); }
   trafficPlayers(now) {
     return [...this.state.players.values()].filter(p => p.connected).sort((a, b) => a.slot - b.slot)
       .map(p => ({ ...this.playerNow(p, now), id: p.slot, ghost: now < p.ghostUntil }));
@@ -486,7 +541,7 @@ class RaceRoom extends Room {
     // put around the start as "far behind every player", and the second run in a room
     // began with an empty road up to 380 m instead of 200 m. t = 0: not a report, so the
     // games do not draw it (net.js pushSnap).
-    s.players.forEach(p => { const g = lib.startPose(p.slot); p.x = g.x; p.z = g.z; p.vx = 0; p.vz = 0; p.vf = 0; p.t = 0; });
+    s.players.forEach(p => { const g = lib.startPose(p.slot); Object.assign(p._s, { x: g.x, z: g.z, vx: 0, vz: 0, vf: 0, t: 0 }); p.z = g.z; p._hist = []; });
     this.botHitAt.clear();
     let last = Date.now(), steps = 0;
     this.trafficTimer = setInterval(() => {
@@ -524,6 +579,7 @@ class RaceRoom extends Room {
       p.lap = 0; p.prog = 0; p.score = 0; p.bestLap = 0;
       p.finished = false; p.finishTime = 0; p.place = 0;
       p.wreckUntil = 0; p.ghostUntil = 0; p.misses = 0; p.wrecks = 0; p._scoreAt = 0;
+      p._hist = [];                                          // the speed check starts afresh
     });
     this.lapStamp.clear(); this.lastState.clear(); this.bumpRate.clear();
     s.phase = 'countdown';
@@ -556,6 +612,7 @@ class RaceRoom extends Room {
     if (this.state.phase !== 'race') return;
     if (this.state.mode === 'traffic') {
       // Ranked by score; equal scores by distance.
+      this.state.players.forEach(p => { p.z = p._s.z; });     // the distance as it is now, not half a second ago
       [...this.state.players.values()].sort((a, b) => (b.score - a.score) || (b.z - a.z))
         .forEach((p, i) => { p.place = i + 1; p.finished = true; });
       this.stopTraffic();

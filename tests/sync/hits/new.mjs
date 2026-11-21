@@ -1,29 +1,30 @@
 // The collision code (stage 8): net.js collideGhosts / onBump / updateGhosts (the parts that
 // move the ghost), with NET/G replaced by a client object. The maths is the real bump.js.
-import { predict } from './old.mjs';
 const B = await import('../../../public/js/net/bump.js');
-const angDiff=(a,b)=>{ const t=Math.PI*2; return (((b-a+Math.PI)%t)+t)%t-Math.PI; };
+const S = await import('../../../public/js/net/ghostsync.js');
+const P = process.env.SMOOTH ? { ...S.SMOOTH, ...JSON.parse(process.env.SMOOTH) } : S.SMOOTH;
+const add=(p,k)=>({x:p.x+k.x,z:p.z+k.z,h:p.h+k.h,vx:p.vx+k.vx,vz:p.vz+k.vz,w:(p.w||0)+k.w});
 export const newAlgo = {
   name: 'after', B,
   ghost(cl, g, nowS, dt, keep, car){
     const b=g.buf; if(!b.length) return;
     const s1=b[b.length-1], s0=b.length>1?b[0]:null;
-    const T=predict(s0,s1,nowS);
-    if(!g.off) g.off={x:0,z:0,h:0};
+    const T=S.predict(s0,s1,nowS,P);
+    if(!g.view) g.view=S.newView();
     if(g.last && g.last!==s1){
-      const O=predict(g.lastPrev,g.last,nowS), ko=B.kickAt(g.kick,nowS,g.last.t);
+      const O=S.predict(g.lastPrev,g.last,nowS,P), ko=B.kickAt(g.kick,nowS,g.last.t);
       g.kick=B.kickUpdate(g.kick,g.last,s1,cl.rtt);
       const kn=B.kickAt(g.kick,nowS,s1.t);
-      g.off.x+=O.x+ko.x-T.x-kn.x; g.off.z+=O.z+ko.z-T.z-kn.z; g.off.h+=angDiff(T.h+kn.h,O.h+ko.h);
+      S.correct(g.view, add(O,ko), add(T,kn), P);
     }
     g.last=s1; g.lastPrev=s0;
     const kd=B.kickAt(g.kick,nowS,s1.t); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
     g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz;
-    if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
-    const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
-    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,idx:s1.idx};
+    if(g.pinned){ g.view.ov.x=g.view.ov.z=0; } else S.settle(g.view,dt,P);
+    const o=g.view.off, s={x:T.x+o.x,z:T.z+o.z,h:T.h+o.h,idx:s1.idx};
     if(keep) keep(s,g);
-    if(g.mem) B.keepOut(s,car,g.mem,cl.nowMs(),cl.rtt);
+    g.pinned=false;
+    if(g.mem){ const bx=s.x, bz=s.z; B.keepOut(s,car,g.mem,cl.nowMs(),cl.rtt); if(s.x!==bx||s.z!==bz){ g.view.off.x+=s.x-bx; g.view.off.z+=s.z-bz; g.pinned=true; } }
     g.x=s.x; g.z=s.z; g.h=s.h;
   },
   collide(cl, dt=1/120){

@@ -33,7 +33,7 @@ function player(room, slot) {
   const snaps = [];
   room.onMessage('tr', m => snaps.push(m));
   room.onMessage('bump', m => (me.bumps = (me.bumps || 0) + 1));
-  for (const t of ['pong', 'event', 'lapTime']) room.onMessage(t, () => {});
+  for (const t of ['pong', 'event', 'lapTime', 'st']) room.onMessage(t, () => {});
   return { me, snaps, stop: () => clearInterval(timer) };
 }
 
