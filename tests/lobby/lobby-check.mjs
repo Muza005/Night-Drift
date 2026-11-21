@@ -9,13 +9,18 @@
 // opens the garage and «Выбрать» brings the pick back; a rename reaches the others; the
 // host sends one player out: that player sees the note and cannot come back; in the race
 // every car is its player's model and paint, and every player has their seat's colour.
+// The map (stage 6): only the host has «Карта» (a guest's message is refused too); the
+// plate under the settings shows the map to all; a new map: the guests get a short note
+// and every «Готово» goes; a player who comes in later sees the room's map; the race
+// starts on it in all three browsers.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const HEADED = process.argv.includes('--headed');
+const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
 const PORT = 2598;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -31,11 +36,7 @@ const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok }); console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${info ? '  (' + info + ')' : ''}`); };
 
 const server = await startServer();
-const browser = await chromium.launch({
-  headless: !HEADED,
-  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
-  args: HEADED ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
+const browser = await chromium.launch(launchOptions(process.argv, []));
 const errors = [];
 async function player(name, x) {
   // (software rendering draws three games on the CPU: smaller windows, more patience)
@@ -90,6 +91,8 @@ try {
   check('both ready: «Старт» lights, with its one flash', await A.$eval('#startRace', b => b.classList.contains('armed')));
   await C.click('#startRace');                    // C takes it back…
   await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  // the server's patch reaches A and C at slightly different moments: give C's own up to 2 s
+  await C.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-pressed') === 'false', null, { timeout: 2000 }).catch(() => {});
   check('«Готово» pressed again takes it back: «Старт» goes off', await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false');
   await C.click('#startRace');                    // …and presses it again
   await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
@@ -109,10 +112,48 @@ try {
   await A.click('#cfgMode label:nth-child(1)');
   await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
 
+  // the map: the plate for everyone, «Карта» for the host only
+  const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.bp') }));
+  for (const p of [A, B, C]) await p.waitForFunction(() => !document.getElementById('lobMap').hidden);
+  await A.waitForFunction(() => !document.getElementById('lobMapBtn').hidden);
+  const plates = await Promise.all([A, B, C].map(plate));
+  check('the plate under the settings: «Ночной город» with its blueprint, for everyone', plates.every(x => x.shown && x.bp && x.name === 'Ночной город'), JSON.stringify(plates[1]));
+  check('«Карта» for the host only', !(await A.$eval('#lobMapBtn', b => b.hidden)) && await B.$eval('#lobMapBtn', b => b.hidden) && await C.$eval('#lobMapBtn', b => b.hidden));
+  await B.evaluate(() => document.getElementById('lobMapBtn').click()); await sleep(250);
+  check('a guest cannot open the picker', !(await B.evaluate(() => document.getElementById('mapPop').matches(':popover-open'))));
+  await B.evaluate(() => __nd.NET.room.send('config', { map: 'pereval' })); await sleep(400);
+  check('…nor change the map (the server refuses it), «Готово» stays', await A.evaluate(() => __nd.NET.room.state.map) === 'neon' && await A.$eval('#startRace', b => b.getAttribute('aria-disabled')) === 'false');
+  await A.click('#lobMapBtn');
+  await A.waitForFunction(() => document.getElementById('mapPop').matches(':popover-open'));
+  check('the host\'s «Карта» opens the picker on the room\'s map', await A.evaluate(() => document.activeElement.dataset.map) === 'neon' && await A.$$eval('#mapGrid .map-card', c => c.length) === 6);
+  await A.keyboard.press('Escape'); await sleep(300);
+  check('Esc closes the picker, the host stays in the lobby', !(await A.evaluate(() => document.getElementById('mapPop').matches(':popover-open'))) && !(await A.$eval('#pLobby', e => e.hidden)) && await A.evaluate(() => !!__nd.NET.room));
+  await A.click('#lobMapBtn'); await A.waitForFunction(() => document.getElementById('mapPop').matches(':popover-open'));
+  await A.keyboard.press('ArrowRight'); await A.keyboard.press('ArrowRight'); await A.keyboard.press('Enter');
+  for (const p of [A, B, C]) await p.waitForFunction(() => document.getElementById('lobMapName').textContent === 'Серпантин');
+  check('the host picks «Серпантин»: everyone\'s plate shows it', await B.evaluate(() => __nd.NET.room.state.map) === 'serpantin');
+  const toast = p => p.evaluate(() => ({ open: document.getElementById('noteToast').matches(':popover-open'), info: document.getElementById('noteToast').hasAttribute('data-info'), text: document.getElementById('noteText').textContent }));
+  const [tA, tB, tC] = await Promise.all([A, B, C].map(toast));
+  check('the guests get a short note, the host none', tB.open && tC.open && tB.info && /Серпантин/.test(tB.text) && !tA.open, JSON.stringify(tB));
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  check('a new map: every «Готово» is taken back, «Старт» goes off', await B.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false' && await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false' && (await listOf(A)).every(r => !r[3]));
+  const scene = p => p.evaluate(async () => (await import('/js/modes/track/geometry.js')).MAP.id);
+  check('the lobby\'s track follows the room\'s map in every browser', (await Promise.all([A, B, C].map(scene))).every(m => m === 'serpantin'));
+  await B.click('#startRace'); await C.click('#startRace');
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
+  // «Трасса»: no map there
+  await A.click('#cfgMode label:nth-child(2)');
+  await B.waitForFunction(() => __nd.NET.room.state.mode === 'traffic');
+  await A.waitForFunction(() => document.getElementById('lobMapBtn').hidden);
+  check('«Трасса»: no plate, no «Карта»', await B.$eval('#lobMap', e => e.hidden) && await A.$eval('#lobMapBtn', b => b.hidden));
+  await A.click('#cfgMode label:nth-child(1)');
+  await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
+  await A.waitForFunction(() => !document.getElementById('lobMapBtn').hidden);
+
   // «Авто» → the garage → «Выбрать»: back in the lobby with the pick
   await B.click('#lobCar');
   await B.waitForFunction(() => !document.getElementById('pGarage').hidden);
-  check('«Авто» opens the garage: «Гараж», «Выбрать», no "!"', await B.innerText('#garTitle') === 'Гараж' && await B.innerText('#garGo') === 'Выбрать' && await B.$eval('#garSet', b => b.hidden));
+  check('«Авто» opens the garage: «Гараж», «Выбрать», no race settings, no «Карта»', await B.innerText('#garTitle') === 'Гараж' && await B.innerText('#garGo') === 'Выбрать' && await B.$eval('#garSet', b => b.hidden) && await B.$eval('#garMap', b => b.hidden));
   for (let i = 0; i < 2; i++) { await B.keyboard.press('ArrowRight'); await sleep(150); }
   await B.click('#garPaint'); await B.click('#garSwatches button[aria-label="Красный"]'); await B.keyboard.press('Escape');
   await B.click('#garGo');
@@ -160,10 +201,19 @@ try {
   await sleep(500);
   check('…and cannot come back, and is told why', !(await C.evaluate(() => __nd.NET.online)) && await A.evaluate(() => __nd.NET.room.state.players.size) === 2 && /исключил/.test(await C.innerText('#netStatus')), await C.innerText('#netStatus'));
 
+  // Dan comes in later: he sees the room's map
+  const D = await player('Dan');
+  await D.click('#goOnline'); await sleep(400); await D.fill('#codeIn', code); await D.click('#joinRoom');
+  await D.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('lobMapName').textContent === 'Серпантин');
+  check('a player who comes in later sees the room\'s map on the plate, and no note', (await plate(D)).bp && !(await toast(D)).open && await scene(D) === 'serpantin');
+  await D.click('#startRace');
+
   // the race: every car is its player's model and paint; seat colours on the tags
   await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
   await A.click('#startRace');
-  for (const p of [A, B]) await p.waitForFunction(() => ['countdown', 'race'].includes(__nd.NET.room.state.phase), null, { timeout: 15000 });
+  for (const p of [A, B, D]) await p.waitForFunction(() => ['countdown', 'race'].includes(__nd.NET.room.state.phase), null, { timeout: 15000 });
+  const raceMaps = await Promise.all([A, B, D].map(scene));
+  check('the race starts on «Серпантин» in all three browsers', raceMaps.every(m => m === 'serpantin'), raceMaps.join());
   const bId = await B.evaluate(() => __nd.NET.room.sessionId), aId = await A.evaluate(() => __nd.NET.room.sessionId);
   await A.waitForFunction(id => { const g = __nd.NET.ghosts.get(id); return g && g.m.model; }, bId, { timeout: 30000 });
   await B.waitForFunction(id => { const g = __nd.NET.ghosts.get(id); return g && g.m.model; }, aId, { timeout: 30000 });

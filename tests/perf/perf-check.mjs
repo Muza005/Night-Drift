@@ -13,9 +13,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const HEADED = process.argv.includes('--headed');
+const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
 const PORT = 2599;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -31,11 +32,7 @@ const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok }); console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${info ? '  (' + info + ')' : ''}`); };
 
 const server = await startServer();
-const browser = await chromium.launch({
-  headless: !HEADED,
-  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
-  args: HEADED ? ['--ignore-gpu-blocklist', '--js-flags=--expose-gc'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--js-flags=--expose-gc'],
-});
+const browser = await chromium.launch(launchOptions(process.argv, ['--js-flags=--expose-gc']));
 const errors = [];
 try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -72,7 +69,7 @@ try {
 
   // 2. the garage: the stand and the still only
   await page.click('#mTrack');
-  await page.waitForFunction(() => !document.getElementById('pGarage').hidden && document.getElementById('garStand').getAttribute('aria-label'));
+  await page.waitForFunction(() => !document.getElementById('pGarage').hidden && /, цвет /.test(document.getElementById('garStand').getAttribute('aria-label')));
   // every model once, as a player browsing would (loading is not what is measured)
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowRight'); await sleep(450); }
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowLeft'); await sleep(450); }

@@ -10,12 +10,14 @@
 <style>
 /* A check sheet for the car models (stage 1 of the UI plan): every car, the same size, on
    the ground, in a few paints. Not part of the game. ?paints=all shows all 11 paints;
-   ?paints=0,4,9 picks rows by index in PAINTS. */
+   ?paints=0,4,9 picks rows by index in PAINTS. ?cars=rally,sedan shows only those; ?view=side|top|bottom|front looks from there;
+   ?spin=90 turns every wheel that many degrees about its axle, ?spin=anim keeps them
+   spinning: a wheel whose axle is off X wobbles (the Rally's "figure eight"). */
 html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--f-body); }
 header { padding: var(--sp-4) var(--sp-5) var(--sp-2); display: flex; gap: var(--sp-4); align-items: baseline; flex-wrap: wrap; }
 h1 { margin: 0; font: 800 var(--fs-lg) var(--f-display); }
 #status { color: var(--text-quiet); font-size: var(--fs-sm); }
-#grid { display: grid; grid-template-columns: 120px repeat(8, 1fr); padding: 0 var(--sp-5) var(--sp-5); }
+#grid { display: grid; grid-template-columns: 120px repeat(var(--cols, 8), 1fr); padding: 0 var(--sp-5) var(--sp-5); }
 #grid > div { display: grid; place-items: center; font-size: var(--fs-sm); color: var(--text-quiet); text-align: center; min-height: 28px; }
 #grid .cell { aspect-ratio: 4 / 3; border: 1px solid var(--line); border-radius: var(--r-sm); margin: 3px; }
 #grid .row-name { justify-items: start; display: flex; gap: var(--sp-2); align-items: center; }
@@ -29,15 +31,19 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: n
 <canvas id="c"></canvas>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="../js/vendor/meshopt_decoder.js"></script>
 <script type="module">
-import { CARS, PAINTS, paintCode, paintHex } from '../js/core/cars.js';
+import { CARS as ALL, PAINTS, paintCode, paintHex } from '../js/core/cars.js';
 import { makeModel, CAR_LEN } from '../js/core/carModels.js';
 
 const q = new URLSearchParams(location.search).get('paints');
+const only = new URLSearchParams(location.search).get('cars');
+const CARS = only ? ALL.filter(c => only.split(',').includes(c.id)) : ALL;
 const rows = q === 'all' ? PAINTS.map((_, i) => i) : (q ? q.split(',').map(Number) : [0, 4, 9]);
 
 // the sheet: a label row, then one row per paint
 const grid = document.getElementById('grid'), cells = [];
+grid.style.setProperty('--cols', CARS.length);
 grid.append(document.createElement('div'));
 for (const c of CARS) { const d = document.createElement('div'); d.textContent = c.name; grid.append(d); }
 for (const r of rows) {
@@ -80,7 +86,9 @@ scene.add(floor);
 const ground = new THREE.Mesh(new THREE.RingGeometry(3.15, 3.2, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3ef0ff, toneMapped: false }));
 ground.position.y = 0.002; scene.add(ground);
 const camera = new THREE.PerspectiveCamera(30, 4 / 3, 0.1, 100);
-camera.position.set(5.2, 2.6, 6.2); camera.lookAt(0, 0.5, 0);
+const params = new URLSearchParams(location.search), view = params.get('view'), spin = params.get('spin');
+const VIEWS = { side: [9, 0.5, 0], top: [0, 10, 0.001], bottom: [0, -10, 0.001], front: [0, 0.6, 9] };
+camera.position.set(...(VIEWS[view] || [5.2, 2.6, 6.2])); camera.lookAt(0, view === 'top' || view === 'bottom' ? 0 : 0.5, 0);
 
 const status = document.getElementById('status');
 const t0 = performance.now();
@@ -89,6 +97,8 @@ const sizes = CARS.map(c => { const one = loaded.find(l => l.car === c.id).inst;
 status.textContent = `${CARS.length} машин загружено за ${Math.round(performance.now() - t0)} мс · длина ${CAR_LEN} м`;
 window.__sizes = sizes; console.log(sizes.join('\n'));
 
+const setSpin = deg => { for (const l of loaded) for (const w of l.inst.wheels) w.rotation.x = deg * Math.PI / 180; };
+if (spin && spin !== 'anim') setSpin(Number(spin));
 function draw() {
   renderer.setSize(innerWidth, innerHeight, false);
   renderer.setScissor(0, 0, innerWidth, innerHeight); renderer.setClearColor(0x000000, 0); renderer.clear();
@@ -104,6 +114,7 @@ function draw() {
 }
 draw();
 addEventListener('resize', draw); addEventListener('scroll', draw, { passive: true });
+if (spin === 'anim') { const loop = t => { setSpin(t * 0.36); draw(); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
 </script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 /* ---------- online ----------
    Each player's car is simulated on their own computer and streamed to the server
-   ~30 times a second, stamped with a clock synced to the server. The server owns the
+   30-40 times a second, stamped with a clock synced to the server. The server owns the
    race itself: the room, the start moment, lap times, finishing order. Other players'
    cars are predicted forward to the present moment (position + velocity × age of the
    update) and eased toward each new prediction, so what you see matches what they see.
@@ -16,14 +16,21 @@
 
    The new interface: the lobby is drawn by ui/lobbyScreen.js; every other player's car
    is the model and paint they picked; a player's colour in the standings, on the name
-   tag and the minimap is their seat's (ui/seats.js), since paints may repeat. */
+   tag and the minimap is their seat's (ui/seats.js), since paints may repeat.
+
+   Stage 9 (sync): the server passes every car's state on the moment it comes ('st',
+   statecodec.js) instead of in the 33 ms schema patches; we send 40 times a second near
+   another car, 30 otherwise, evenly (the remainder of a frame is kept); the prediction
+   carries the change of speed and its corrections fade on a spring (ghostsync.js), so a
+   correction never shows as a jump; ?debug=net shows ping, jitter, update age and how far
+   the picture of each car was off. */
 import { $, G, NET, serverNow } from '../state.js';
 import { car, applyLook } from '../player.js';
 import { choice } from '../ui/garage.js';
 import { carById, paintHex } from '../core/cars.js';
 import { setPaint } from '../core/carModels.js';
 import { canvas, cv, tex, scene, camera } from '../core/render.js';
-import { wake, stepDraft } from '../core/draft.js';
+import { wake, stepDraft, createTrail, trailPush, trailReset } from '../core/draft.js';
 import { createWake, updateWake, disposeWake } from '../core/draftfx.js';
 import { makeCar, dressCar, disposeCar } from '../core/carModel.js';
 import { addMark, emitSmoke, clearMarks } from '../core/fx.js';
@@ -33,8 +40,9 @@ import { crash, bank, dropDrift } from '../game.js';
 import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note, cancelPanels } from '../ui/hud.js';
 import { renderLobby as drawLobby, openLobby, leaveLobby, openRoomGarage } from '../ui/lobbyScreen.js';
 import { roster, seatOf, seatHex } from '../ui/seats.js';
-
-const angDiff=(a,b)=>{ const t=Math.PI*2; return (((b-a+Math.PI)%t)+t)%t-Math.PI; };
+import { carMass, keepOut, newMem, collideStep, takeOut, receive, catchUp, kickStart, kickAt, kickUpdate } from './bump.js';
+import { predict, newView, correct, settle, reset as resetView, newStats, statArrive, statErr, errPct } from './ghostsync.js';
+import { decodeState } from './statecodec.js';
 
 function endpoint(){
   try{ const q=new URLSearchParams(location.search).get('server'); if(q) return q; }catch(e){}
@@ -78,7 +86,7 @@ export async function connectRoom(kind){
   netStatus('netStatus', kind==='create' ? 'Создаю комнату…' : 'Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
+    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',map:G.soloMap||'neon',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     try{ bindRoom(room); }
     catch(e){ console.error('joining the room failed', e); try{ room.leave(true); }catch(_){} leaveOnline('Не получилось войти в комнату. Обновите страницу.'); }
@@ -118,6 +126,9 @@ function bindRoom(room){
   // highway: the server's traffic, 10 snapshots a second
   room.onMessage('tr',m=>{ if(G.mode.id==='traffic' && G.mode.netTraffic) G.mode.netTraffic(m); });
   room.onMessage('bump',onBump);
+  // the other players' cars, each state passed on by the server the moment it came
+  room.onMessage('st',m=>{ if(NET.room!==room || room.state.phase==='lobby') return;
+    const s=decodeState(m), g=s && NET.ghosts.get(s.id); if(g && s.t) pushSnap(g,s,serverNow()); });
   // the host sent us out of the room: no reconnecting, back to the online mode cards
   room.onMessage('kicked',()=>{ if(NET.room===room) leaveOnline('Вас исключили из комнаты.'); });
   room.onMessage('lapTime',m=>{
@@ -129,7 +140,7 @@ function bindRoom(room){
     else addGhost(id,p);
     p.onChange(()=>{
       if(id===room.sessionId && (p.car!==car.carId || p.color!==car.paintHex)) applyLook(p.car,p.color);
-      const g=NET.ghosts.get(id); if(g){ ghostLook(g,p); pushSnap(g,p); }
+      const g=NET.ghosts.get(id); if(g) ghostLook(g,p);
       const ph=room.state.phase; if(ph==='lobby') renderLobby(); else if(ph==='results') renderResults();
     });
     renderLobby(); if(room.state.phase==='results') renderResults();
@@ -138,6 +149,8 @@ function bindRoom(room){
   room.state.listen('hostId',()=>{ relabel(); renderLobby(); renderResults(); });
   // between runs the scene behind the lobby follows the mode the host picked
   room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m).catch(e=>console.error('mode failed to load', m, e)); renderLobby(); });
+  // the room's drift map: everyone in the room drives the same one (not mid-run)
+  room.state.listen('map',id=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMap && G.setMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } renderLobby(); });
   room.state.listen('duration',()=>renderLobby());
   room.state.listen('density',()=>renderLobby());
   room.state.listen('laps',()=>renderLobby());
@@ -148,6 +161,7 @@ function bindRoom(room){
 function onPhase(ph){
   if(!NET.room) return;
   const s=NET.room.state;
+  if(ph==='lobby'||ph==='countdown') for(const g of NET.ghosts.values()) forget(g);   // a new run: last run's states are gone
   if(ph==='lobby'){ const from=G.state; leaveLobby(); G.state='lobby'; openLobby(from==='menu'||from==='results'?'forward':undefined); }
   else if(ph==='countdown'||ph==='race'){
     leaveLobby();                                      // a garage opened from the lobby goes too
@@ -162,7 +176,8 @@ function onPhase(ph){
       if(p==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); }
       else { G.state='count'; G.prevCount=99; }
     };
-    // the room's mode decides the scene (the highway module may still need to load)
+    // the room's map and mode decide the scene (the highway module may still need to load)
+    if(G.setMap) G.setMap(s.map);
     if(G.mode.id!==s.mode && G.setMode) G.setMode(s.mode).then(go, e=>{ console.error('mode failed to load', s.mode, e); leaveOnline('Не загрузился режим «Трасса». Обновите страницу.'); });
     else go();
   }
@@ -202,6 +217,7 @@ export async function leaveOnline(msg){
   applyLook(choice.car,choice.paint); $('standings').hidden=true;
   // nothing of the online run stays on screen: the countdown digit, the ping, the drift meter
   $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
+  if(G.setMap) G.setMap(null);           // back to the solo map
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
   if(G.openModes) G.openModes('online','back'); else showPanel('pModes');
   netStatus('netStatus',msg||'',!!msg);
@@ -229,8 +245,8 @@ function addGhost(id,p){
   if(NET.ghosts.has(id)) return;
   const ac=accent(id), m=makeCar(look(p),false), label=makeLabel(p.name,ac); m.root.add(label); m.root.visible=false;
   m.under.material.color.setHex(ac);
-  const fx=createWake(); scene.add(fx.root);              // its slipstream lines (core/draftfx.js)
-  const g={id,p,m,fx,label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0};
+  const fx=createWake(); scene.add(fx.root);              // its slipstream air (core/draftfx.js)
+  const g={id,p,m,fx,trail:createTrail(),label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0,view:newView(),stats:newStats()};
   NET.ghosts.set(id,g);
   dressCar(m,p.car,p.color);                              // their car's own model (it loads once)
 }
@@ -251,82 +267,56 @@ function ghostLook(g,p){
 function relabel(){ if(!NET.room) return; NET.room.state.players.forEach((p,id)=>{ const g=NET.ghosts.get(id); if(g) ghostLook(g,p); }); }
 function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; g.m.dressing=(g.m.dressing||0)+1; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
-function pushSnap(g,p){
-  if(NET.room && NET.room.state.phase==='lobby'){ g.buf.length=0; g.last=g.lastPrev=null; g.off=null; return; }
+// A state of that car arrived (at our server clock `arrival`). Its t is the sender's clock
+// (synced to the server) at the moment the state was true; an older one than we have is dropped.
+function pushSnap(g,s,arrival){
   const b=g.buf, l=b[b.length-1];
-  if(!p.t || (l && p.t<=l.t)) return;      // nothing new, or an out-of-date update
-  // t is the sender's clock (synced to the server) at the moment this position was true.
-  b.push({t:p.t,x:p.x,z:p.z,h:p.h,vx:p.vx,vz:p.vz,vf:p.vf,steer:p.steer,slide:p.slide});
+  if(l && s.t<=l.t) return;
+  statArrive(g.stats,s.t,arrival);
+  b.push(s);
   if(b.length>2) b.shift();
 }
-// Where a car is at server time nowS: its last reported position moved forward by its
-// velocity for as long as the update was travelling, turning at its last turn rate.
-function predict(s0,s1,nowS){
-  const age=Math.min(.5,Math.max(0,(nowS-s1.t)/1000));
-  let w=0; if(s0){ const span=(s1.t-s0.t)/1000; if(span>.005) w=Math.max(-3,Math.min(3,angDiff(s0.h,s1.h)/span)); }
-  const turn=w*age, c=Math.cos(-turn/2), sn=Math.sin(-turn/2);
-  return {x:s1.x+(s1.vx*c-s1.vz*sn)*age, z:s1.z+(s1.vx*sn+s1.vz*c)*age, h:s1.h+turn};
-}
-// Our local guess of how an opponent reacts to a hit we just gave them, used until their
-// own updates (which include the real reaction) arrive. Velocity fades like tyre grip would.
-function kickDisp(g,nowS){
-  const K=g.kick; if(!K) return {x:0,z:0,h:0,vx:0,vz:0,w:0};
-  const tau=Math.max(0,(nowS-K.t)/1000), e=Math.exp(-K.k*tau), f=(1-e)/K.k;
-  return {x:K.bx+K.vx*f, z:K.bz+K.vz*f, h:K.bh+K.w*f, vx:K.vx*e, vz:K.vz*e, w:K.w*e};
-}
+function forget(g){ g.buf.length=0; g.last=g.lastPrev=null; resetView(g.view); g.kick=null; }
+const plus=(p,k)=>({x:p.x+k.x,z:p.z+k.z,h:p.h+k.h,vx:p.vx+k.vx,vz:p.vz+k.vz,w:p.w+k.w});
+// g.kick: our local guess of how an opponent reacts to a hit we just decided (bump.js
+// kickStart/kickAt), drawn until their own updates show the real reaction.
 
 /* ---------- car-to-car collisions ----------
-   Each car is two overlapping circles (front and rear), which follows the long box shape
-   closely and is cheap to test. Each player resolves the hit for their own car against
-   the predicted position of the other car, and also sends the other car's half of the hit
-   through the server. Whoever notices the contact first decides it; the second notice
-   within 0.3 s is ignored, so a hit is never applied twice. */
-const CAR_R=1.05, CAR_OFF=1.15, CAR_I=1.87, BOUNCE=.3;
-function carCircles(x,z,h){ const fx=Math.sin(h), fz=Math.cos(h); return [[x+fx*CAR_OFF,z+fz*CAR_OFF],[x-fx*CAR_OFF,z-fz*CAR_OFF]]; }
-const clampN=(v,a)=>Math.max(-a,Math.min(a,v));
-export function collideGhosts(){
+   The maths and the rule of who decides a hit are in bump.js: the player driving into the
+   other decides it (one judge per hit), changes its own car and sends the other car's share
+   through the server; the other player applies only that, lined up with what the judge
+   already shows. While it waits, the other car is drawn out of its own (updateGhosts). */
+// Can our car and g touch right now? (both racing, neither a blinking crashed car, same level)
+function touchable(g,nowS){
+  return NET.online && NET.room && G.state==='race' && !NET.finished && !(G.mode.isGhost && G.mode.isGhost())
+    && g.m.root.visible && !g.p.finished && g.vx!==undefined && nowS>=g.p.ghostUntil
+    && Math.abs((g.y||0)-(car.y||0))<=(G.mode.sameLevel||3);
+}
+// one physics substep (dt s): main.js calls it after each physics step
+export function collideGhosts(dt=1/120){
   if(!NET.online || !NET.room || G.state!=='race' || NET.finished) return;
-  if(G.mode.isGhost && G.mode.isGhost()) return;          // our car crashed and is blinking: nothing touches it
-  const now=performance.now(), nowS=serverNow();
+  catchUp(car,dt);                                         // a hit we got: its reaction lined up with the judge's picture
+  const now=performance.now(), tS=serverNow(), me=NET.room.sessionId, mMe=carMass(car.carId);
   for(const g of NET.ghosts.values()){
-    if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
-    if(nowS < g.p.ghostUntil) continue;                     // their car crashed and is blinking
-    if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
-    let best=null;
-    for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
-      const dx=a[0]-b[0], dz=a[1]-b[1], d=Math.hypot(dx,dz);
-      if(d<2*CAR_R && (!best||d<best.d)) best={d,dx,dz,b};
-    }
-    if(!best) continue;
-    const d=Math.max(best.d,1e-3), nx=best.dx/d, nz=best.dz/d, pen=2*CAR_R-d;
-    car.x+=nx*pen*.5; car.z+=nz*pen*.5;              // the other car moves the other half
-    const vn=(car.vx-g.vx)*nx+(car.vz-g.vz)*nz;
-    if(vn>=0) continue;                                // already moving apart
-    const cx=best.b[0]+nx*CAR_R, cz=best.b[1]+nz*CAR_R; // contact point
-    const j=-(1+BOUNCE)*vn/2, Jx=nx*j, Jz=nz*j;        // equal masses
-    car.vx+=Jx; car.vz+=Jz;
-    car.spinV=clampN(car.spinV+((cz-car.z)*Jx-(cx-car.x)*Jz)/CAR_I*.6,4);
-    NET.hitAt[g.id]=now;
-    if(-vn>3) crash(-vn);
-    if(now-(NET.sentAt[g.id]||0)>250){
-      NET.sentAt[g.id]=now;
-      const w=clampN(((cz-g.z)*-Jx-(cx-g.x)*-Jz)/CAR_I*.6,4);
-      NET.room.send('bump',{to:g.id,jx:-Jx,jz:-Jz,w,dx:-nx*pen*.5,dz:-nz*pen*.5});
-      // Show the opponent reacting right away instead of after a round trip.
-      const nowS=serverNow(), kd=kickDisp(g,nowS);
-      g.kick={t:nowS,k:3,bx:kd.x,bz:kd.z,bh:kd.h,vx:kd.vx-Jx,vz:kd.vz-Jz,w:kd.w+w};
-    }
+    const mem=g.mem||(g.mem=newMem());
+    // a scrape's impulses are sent together, one message per SEND_GAP at most
+    const out=takeOut(mem,now); if(out) NET.room.send('bump',{to:g.id,...out});
+    if(!touchable(g,tS) || Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
+    const r=collideStep(car,g,mem,{now,tS,mMe,mOther:carMass(g.car),air:!!G.mode.hops});
+    if(!r || !r.other) continue;
+    if(r.impact>3) crash(r.impact);
+    // show the other car reacting right away instead of after a round trip
+    g.kick=kickStart(g.kick,g,r.other,r.push,tS);
   }
 }
 function onBump(m){
   if(G.state!=='race' || NET.finished || !m) return;
   if(G.mode.isGhost && G.mode.isGhost()) return;
-  const now=performance.now();
-  if(now-(NET.hitAt[m.from]||0)<300) return;        // we already handled this contact ourselves
-  NET.hitAt[m.from]=now;
-  car.vx+=m.jx; car.vz+=m.jz; car.spinV=clampN(car.spinV+m.w,4);
-  car.x+=m.dx; car.z+=m.dz;
-  const hit=Math.hypot(m.jx,m.jz)*1.5; if(hit>3) crash(hit);
+  const g=NET.ghosts.get(m.from); if(!g) return;
+  const mem=g.mem||(g.mem=newMem());
+  const hit=receive(car,m,mem,{now:performance.now(),tS:serverNow(),mMe:carMass(car.carId),mOther:carMass(g.car),meId:NET.room&&NET.room.sessionId,fromId:m.from,rtt:NET.rtt,air:!!G.mode.hops});
+  if(mem.undone) g.kick=null;                               // their hit stands, not ours: their car as they report it
+  if(hit>3) crash(hit);
 }
 export function updateGhosts(dt){
   const show=NET.online && (G.state==='count'||G.state==='race'||G.state==='results');
@@ -337,7 +327,7 @@ export function updateGhosts(dt){
   for(const g of NET.ghosts.values()){
     const b=g.buf, m=g.m;
     m.root.visible=show && b.length>0 && g.p.connected;
-    if(!m.root.visible){ updateWake(g.fx,null,g.x,g.z,dt); continue; }
+    if(!m.root.visible){ trailReset(g.trail); updateWake(g.fx,null,null,null,dt,camera.position); continue; }
     // a crashed car blinks (its parts, not the car: the car still counts as on the road):
     // fast while stopped, slower while it can't be hit yet
     const blink = nowS < g.p.ghostUntil;
@@ -348,62 +338,113 @@ export function updateGhosts(dt){
       if(!m.model) for(const o of m.proc.parts) if(o.isGroup) o.visible=on; }
     g.blinked = blink;
     // Predict where the car is right now: last known position moved forward by its
-    // velocity for as long as the update was travelling, turning at its last turn rate.
+    // velocity for as long as the update was travelling, turning at its last turn rate,
+    // speeding up or braking as it did (ghostsync.js predict).
     const s1=b[b.length-1], s0=b.length>1?b[0]:null;
     const T=predict(s0,s1,nowS);
-    // When a fresh update moves the prediction, keep the drawn car where it was and fade
-    // that small correction out over ~0.1 s, so corrections never look like jumps and the
-    // car itself never trails behind the prediction.
-    if(!g.off) g.off={x:0,z:0,h:0};
+    // When a fresh update moves the prediction, the drawn car stays where it was and keeps
+    // its speed; that small correction fades out on a spring (ghostsync.js), so corrections
+    // never look like jumps and the car itself never trails behind the prediction.
     if(g.last && g.last!==s1){
-      const O=predict(g.lastPrev,g.last,nowS), ko=kickDisp(g,nowS);
-      // The opponent's own updates include our hit once they have had time to react;
-      // from then on stop adding our local guess of that hit.
-      if(g.kick && s1.t>g.kick.t+(NET.rtt||250)+80) g.kick=null;
-      const kn=kickDisp(g,nowS);
-      g.off.x+=O.x+ko.x-T.x-kn.x; g.off.z+=O.z+ko.z-T.z-kn.z; g.off.h+=angDiff(T.h+kn.h,O.h+ko.h);
+      const O=predict(g.lastPrev,g.last,nowS), ko=kickAt(g.kick,nowS,g.last.t);
+      // The opponent's own updates include our hit once they have reacted (their velocity
+      // jumps by the hit's change): from then on only the distance their car is still
+      // making up is added (bump.js kickUpdate), until it is all in their updates.
+      g.kick=kickUpdate(g.kick,g.last,s1,NET.rtt);
+      const kn=kickAt(g.kick,nowS,s1.t);
+      statErr(g.stats, correct(g.view, plus(O,ko), plus(T,kn)));
     }
-    g.last=s1; g.lastPrev=s0;
-    { const kd=kickDisp(g,nowS); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
-      g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; }
-    if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
-    const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
-    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide};
+    g.last=s1; g.lastPrev=s0; g.stats.age=nowS-s1.t;
+    const kd=kickAt(g.kick,nowS,s1.t); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
+    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz;   // (rv: as reported, without our guess)
+    // (held while the car rests against ours, below: the spring would pull it back inside)
+    if(g.pinned){ g.view.ov.x=g.view.ov.z=0; } else settle(g.view,dt);
+    g.off=g.view.off;
+    // height: their reported height carried on by their vertical speed (in a jump it is the
+    // flight; vy is 0 on the road), the track mode keeps it on or above the road
+    const age=Math.min(.5,Math.max(0,(nowS-s1.t)/1000));
+    const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide,
+      y:s1.vy?s1.y+s1.vy*age-4.905*age*age:s1.y, idx:s1.idx};
     if(G.mode.ghostBounds) G.mode.ghostBounds(s,g);        // never through a wall or a rail (the prediction does not know them)
-    g.x=s.x; g.z=s.z; g.h=s.h;
-    m.root.position.set(s.x,0,s.z); m.root.rotation.y=s.h;
+    // a hit theirs to decide: drawn against our car, not inside it, until it comes (bump.js).
+    // The push out stays in the smoothing offset (it fades on the spring like a correction):
+    // the car rests against ours instead of being pushed out afresh from deep inside each
+    // frame, which flipped it from one side of our car to the other (up to 4 m a frame), and
+    // it does not snap back when the push ends. While it rests against ours the spring is
+    // held, so each frame only pushes it out by the little its prediction moved in (a clear
+    // direction), not from deep inside (where the direction out flips from frame to frame).
+    g.pinned=false;
+    if(g.mem && touchable(g,nowS)){ const bx=s.x, bz=s.z; keepOut(s,car,g.mem,performance.now(),NET.rtt);
+      if(s.x!==bx || s.z!==bz){ g.view.off.x+=s.x-bx; g.view.off.z+=s.z-bz; g.pinned=true;
+        // a long push (they keep driving into us) must not build up to a reset-sized offset
+        const o=g.view.off, n=Math.hypot(o.x,o.z), cap=PIN_MAX; if(n>cap){ o.x*=cap/n; o.z*=cap/n; } } }
+    g.x=s.x; g.z=s.z; g.h=s.h; g.y=s.y||0;
+    m.root.position.set(s.x,g.y+(G.mode.hops?0:kd.y),s.z); m.root.rotation.y=s.h;   // (with heights their own hop comes in y)
     // a name tag right at the camera (that car is just behind ours) would fill the screen:
     // it fades out closer than 16 m and is gone by 8 m (the tags are for cars further off;
     // the cars around ours are named in the standings)
     { const d=Math.hypot(camera.position.x-s.x, camera.position.y-2.8, camera.position.z-s.z);
       g.label.material.opacity=Math.max(0,Math.min(1,(d-8)/8)); }
-    // its pocket, seen from our car: the white lines show when we are close behind it
-    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished) ? wake(car,g) : null;
+    // its pocket follows the path it drove (its trail); seen from our car, the white air
+    // shows when we are close behind it
+    trailPush(g.trail,g.x,g.z,g.y,g.h,dt);
+    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=(G.mode.sameLevel||3)) ? wake(car,g,g.trail) : null;   // not across a bridge or a floor
     if(wk && wk.inside) inPocket=true;
-    updateWake(g.fx,wk,s.x,s.z,dt);
+    updateWake(g.fx,wk,g,g.trail,dt,camera.position,scene.fog&&scene.fog.density);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
-    m.roll+=((-s.steer*s.slide*.1)-m.roll)*Math.min(1,dt*6); m.body.rotation.z=m.roll;
     m.under.material.opacity=.4+s.slide*.35;
     const fx=Math.sin(s.h), fz=Math.cos(s.h), rx=Math.cos(s.h), rz=-Math.sin(s.h);
     for(const [k,lx] of [[0,.95],[1,-.95]]){
       const wx=s.x+rx*lx-fx*1.35, wz=s.z+rz*lx-fz*1.35;
-      if(s.slide>.12 && s.vf>5){ addMark(m,k,wx,wz); if(Math.random()<.6) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3); }
+      if(s.slide>.12 && s.vf>5 && !(s1.vy)){ addMark(m,k,wx,wz,g.y); if(Math.random()<.3) emitSmoke(wx,wz,fx*s.vf,fz*s.vf,s.slide+.3,g.y); }
       else m.lastMark[k]=null;
     }
   }
   // how much slipstream push our car gets (main.js passes it to stepCar as input.draft)
   stepDraft(NET.draft, inPocket, dt);
+  if(NET_DEBUG) drawNetDebug(dt);
 }
 
-// Sends our car ~30 times a second while racing. Called once per frame from the loop.
+// Sends our car while racing, called once per frame from the loop: 40 times a second when
+// another car is within 20 m (a hit is seen sooner and lines up better), 30 otherwise.
+// Evenly: the part of a frame past the moment is kept for the next one (it used to be
+// dropped, and at 45 fps that sent ~22 a second instead of 30); never a burst after a
+// long frame.
+export const SEND_NEAR=1/40, SEND_FAR=1/30, NEAR_M=20;
 export function sendState(dt,slide){
   if(NET.online && NET.room && (G.state==='race'||G.state==='count')){
+    let gap=SEND_FAR;
+    for(const g of NET.ghosts.values()) if(g.m.root.visible && Math.hypot(g.x-car.x,g.z-car.z)<NEAR_M){ gap=SEND_NEAR; break; }
     NET.sendT+=dt;
-    if(NET.sendT>=.033){ NET.sendT=0;
-      NET.room.send('state',{x:car.x,z:car.z,h:car.h,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow(),
+    if(NET.sendT>=gap){ NET.sendT=Math.min(NET.sendT-gap,gap);
+      NET.room.send('state',{x:car.x,z:car.z,h:car.h,y:car.y||0,vy:car.air?car.vy:0,idx:car.idx||0,vx:car.vx*NET.pace,vz:car.vz*NET.pace,vf:car.vF,steer:car.steer,slide,prog:car.prog,score:G.score,t:serverNow(),
         ...(G.mode.stats ? { misses: G.mode.stats().misses } : {})}); }
   }
+}
+
+/* ?debug=net: the network numbers, bottom left, 4 times a second. Per opponent: how often its
+   updates come (their stamps), the one-way delay (with the clocks' error) and its jitter,
+   how old the update it is drawn from is, and how far our picture of it was off when each
+   update came (median / 95th percentile of the last 300). NET.report() gives the same to tests. */
+const NET_DEBUG=(()=>{ try{ return /[?&]debug=net\b/.test(location.search); }catch(e){ return false; } })();
+export function netReport(){
+  const out=[];
+  for(const g of NET.ghosts.values()){ const S=g.stats;
+    out.push({name:g.name, n:S.n, hz:S.gap?1000/S.gap:0, delay:S.delay, jitter:S.jitter, age:S.age, p50:errPct(S,.5), p95:errPct(S,.95)}); }
+  return {rtt:NET.rtt||0, ghosts:out};
+}
+NET.report=netReport;
+let dbgBox=null, dbgT=0;
+const PIN_MAX=6;   // m: the most the keep-out push may move a car from its prediction (ghostsync RESET is 12)
+function drawNetDebug(dt){
+  if((dbgT-=dt)>0) return; dbgT=.25;
+  if(!dbgBox){ dbgBox=document.createElement('pre'); dbgBox.id='netDebug';
+    Object.assign(dbgBox.style,{position:'fixed',left:'8px',bottom:'8px',zIndex:99,margin:0,padding:'6px 8px',font:'12px/1.35 ui-monospace,monospace',color:'#e8ecff',background:'rgba(8,10,20,.72)',borderRadius:'6px',pointerEvents:'none',whiteSpace:'pre-wrap',maxWidth:'calc(100vw - 16px)'});
+    document.body.append(dbgBox); }
+  const r=netReport(), f=(v,d=0)=>Number(v||0).toFixed(d);
+  dbgBox.hidden=!NET.online;
+  dbgBox.textContent='ping '+f(r.rtt)+' ms\n'+r.ghosts.map(g=>g.name+': '+f(g.hz)+'/s · delay '+f(g.delay)+' ms · jitter '+f(g.jitter,1)+' ms · age '+f(g.age)+' ms · off p50 '+f(g.p50,2)+' m p95 '+f(g.p95,2)+' m').join('\n');
 }
 
 /* lobby, standings, results */
@@ -421,7 +462,7 @@ export function renderStandings(){
   NET.room.state.players.forEach((p,id)=>{
     const mine=id===me, laps=mine?Math.min(G.lap-1,NET.laps):p.lap, prog=mine?car.prog:p.prog;
     rows.push({name:p.name,color:accent(id),mine,fin:p.finished,
-      key:p.finished?1e7-p.place:laps*1000+prog,
+      key:p.finished?1e9-p.place:laps*1e5+prog,
       tag:p.finished?'финиш':Math.min(laps+1,NET.laps)+'/'+NET.laps});
   });
   rows.sort((a,b)=>b.key-a.key);

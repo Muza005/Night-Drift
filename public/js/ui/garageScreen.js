@@ -1,29 +1,32 @@
 // The garage screen (#pGarage): the car on the stand, ‹ › through the cars (no wrapping),
 // its five bars compared with the car you came with, the paint palette and, solo, the
-// run's settings ("!") and "Поехали". From the lobby it is "Гараж" with "Выбрать".
+// run's settings (the gear), the map («Дрифт» only) and "Поехали". From the lobby it is
+// "Гараж" with "Выбрать".
 //
-//   openGarage({ kind: 'solo' | 'lobby', mode, car, paint, dir, onGo(car, paint), onBack() })
+//   openGarage({ kind: 'solo' | 'lobby', mode, car, paint, dir, onGo(car, paint), onBack(), onMap(id) })
 //   garage.open        is it on screen
 //   garage.frame(now)  the main loop calls this instead of drawing the track while it is open
 //
 // The car and paint are not saved here: onGo gets the pick and the caller keeps it; onBack
-// drops it. The "!" settings (laps, density) are saved as soon as they change.
+// drops it. The gear settings (laps, density) are saved as soon as they change.
 import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
-import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
+import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
 import { createStand } from './stand.js';
 import { showPanel, hex, el } from './hud.js';
+import { openMapPicker, mapPicker } from './mapPicker.js';
+import { MAPS } from '../modes/track/maps/index.js';
 
 const LS = {
   get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
 export const MIN_LAPS = 1, MAX_LAPS = 10, DEFAULT_LAPS = 3;
-// Solo drift: how many laps a run has (the "!" settings), remembered.
+// Solo drift: how many laps a run has (the gear settings), remembered.
 { const n = parseInt(LS.get('nightdrift.laps'), 10); G.soloLaps = n >= MIN_LAPS && n <= MAX_LAPS ? n : DEFAULT_LAPS; }
 
 const stand = createStand({ renderer, el: $('garStand') });
-const S = { open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null };
+const S = { open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null, onMap: null };
 const NAMES = garageBars(CARS[0].stats).map(b => b[0]);
 
 /* ---------- the bars ---------- */
@@ -104,7 +107,21 @@ for(const [pop, btn] of [['garPaintPop', 'garPaint'], ['garSetPop', 'garSet']]){
   $(btn).setAttribute('aria-expanded', 'false');
 }
 
-/* ---------- the run's settings ("!", solo) ---------- */
+/* ---------- the map (solo «Дрифт») ----------
+   «Карта» with the map's name opens the picker; a pick is the next run's map at once
+   (onMap: the caller switches the track and keeps it). */
+function drawMap(){
+  const name = (MAPS[G.soloMap] || MAPS.neon).name;
+  $('garMapName').textContent = name;
+  $('garMap').setAttribute('aria-label', `Карта: ${name}. Сменить карту`);
+}
+$('garMap').addEventListener('click', () => {
+  if(!S.open || $('garMap').hidden) return;
+  openMapPicker({ current: G.soloMap, source: $('garMap'),
+    onPick(id){ if(S.onMap) S.onMap(id); drawMap(); $('garLive').textContent = 'Карта: ' + MAPS[id].name; } });
+});
+
+/* ---------- the run's settings (the gear, solo) ---------- */
 function drawSettings(){
   $('setLaps').hidden = S.mode !== 'track';
   $('setDens').hidden = S.mode !== 'traffic';
@@ -130,6 +147,7 @@ for(const r of document.querySelectorAll('#setDens input')) r.addEventListener('
 function leave(){
   S.open = false;
   for(const p of ['garPaintPop', 'garSetPop']) if($(p).matches(':popover-open')) $(p).hidePopover();
+  mapPicker.close();
   menuPixels(false);
 }
 $('garGo').addEventListener('click', () => {
@@ -144,22 +162,22 @@ function back(){
   leave(); b && b();
 }
 
-export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'forward', onGo, onBack }){
-  Object.assign(S, { kind, mode, onGo, onBack, paint, ref: carById(car).id, open: true });
+export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'forward', onGo, onBack, onMap }){
+  Object.assign(S, { kind, mode, onGo, onBack, onMap, paint, ref: carById(car).id, open: true });
   S.idx = Math.max(0, CARS.findIndex(c => c.id === S.ref));
   const solo = kind === 'solo';
   $('garTitle').textContent = solo ? (mode === 'traffic' ? 'Трасса' : 'Дрифт') : 'Гараж';
   $('garSet').hidden = !solo;
+  $('garMap').hidden = !(solo && mode === 'track');        // «Трасса» has one endless road
+  drawMap();
   $('garGo').textContent = solo ? 'Поехали' : 'Выбрать';
   $('garBack').setAttribute('aria-label', solo ? 'Назад к выбору режима' : 'Назад в лобби без изменений');
   $('pGarage').classList.remove('painting');
   drawSettings(); drawCar();
   stand.setCar(S.ref, paint, 0);
   menuPixels(true);
-  captureBackdrop();                      // the track, once, as it stands behind the menu now
   return showPanel('pGarage', dir);
 }
-addEventListener('resize', () => { if(S.open) captureBackdrop(); });
 
 // Keys: ← → through the cars, Esc back (after closing an open popover first), Enter the
 // main button. Keys typed into a field or meant for a focused control are left alone.
@@ -190,7 +208,7 @@ addEventListener('keydown', e => {
 
 export const garage = {
   get open(){ return S.open && !$('pGarage').hidden; },
-  frame(now){ drawBackdrop(); stand.frame(now); },
+  frame(now){ drawBackdrop(stand.measure()); stand.frame(now); },
   close(){ if(S.open) leave(); },          // (S.open, not .open: also while its screen is still on its way in)          // a run starts (online) or the room is gone: no callback
   stand,
   get pick(){ return { car: CARS[S.idx].id, paint: S.paint }; },

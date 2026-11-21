@@ -3,6 +3,7 @@ import { G, NET, drift } from './state.js';
 import { car } from './player.js';
 import { thud } from './core/audio.js';
 import { popup, flash, fmtN, fmtT } from './ui/hud.js';
+import { saveLap } from './records.js';
 
 export function resetToTrack(){ G.mode.respawn(car); dropDrift(); flash('На трассе'); }
 
@@ -23,8 +24,16 @@ export function scoring(dt){
   const ang=Math.atan2(Math.abs(car.vR),Math.max(.01,Math.abs(car.vF)))*180/Math.PI;
   // online, after the finish the car rolls on by itself: that slide scores nothing (it used
   // to be added to the score on screen after the server had already taken the final one)
+  // Off the asphalt nothing scores: the grass beside the drift track and, on the highway,
+  // the shoulder (a slide there earns no points and no ×2 on near misses).
   const drifting=speed>9 && car.vF>3 && ang>10 && !car.off && !(NET.online && NET.finished);
   drift.ang=ang;
+  // in the air after a crest (maps with heights) nothing scores, and a drift under way
+  // waits for the landing instead of running out of grace
+  if(car.air) return {drifting:false,ang,speed};
+  // a corner taken through a shortcut (drift maps, modes/track/geometry.js) scores
+  // nothing: the slide that carried the car into it is lost too
+  if(car.cut>=0){ if(drift.active) dropDrift(); return {drifting:false,ang,speed}; }
   if(drifting){
     drift.active=true; drift.grace=.75; drift.time+=dt;
     drift.pts+=(Math.min(ang,65)-6)*speed*.22*dt;
@@ -43,7 +52,8 @@ export function finishLap(){
     if(G.lap>NET.laps){ NET.finished=true; G.lap=NET.laps; bank(); if(NET.room) NET.room.send('score',{score:G.score}); }
     return;
   }
-  let rec=false; if(!G.best||t<G.best){ G.best=t; rec=true; try{localStorage.setItem('nightdrift.best',String(t));}catch(e){} }
+  // the active map's lap record (records.js)
+  let rec=false; if(G.mode && G.mode.mapId && saveLap(G.mode.mapId, t)){ G.best=t; rec=true; }
   if(!G.runBest||t<G.runBest) G.runBest=t;
   if(rec) G.runRecord=true;
   // solo drift has N laps: after the last one the run ends (main.js shows the finish)
@@ -62,5 +72,13 @@ function onTrafficHit(hit){
   if(G.mode.breakCombo) G.mode.breakCombo();
 }
 
-// What the physics step reports back to the game: wall hits, completed laps, traffic hits.
-export const physicsHooks = { onWall: crash, onLap: finishLap, onTrafficHit };
+// Landing after a jump (maps with heights, modes/track/geometry.js): power is how fast
+// the car hit the road (m/s). A soft one is only the suspension; a hard one shakes the
+// camera and thumps (the speed it costs is taken in geometry.js). The drift carries on.
+function onLand(power){
+  if(power<3) return;
+  G.shake=Math.max(G.shake||0, Math.min(.8,(power-2)/10)); thud(power*1.2);
+}
+
+// What the physics step reports back to the game: wall hits, completed laps, traffic hits, landings.
+export const physicsHooks = { onWall: crash, onLap: finishLap, onTrafficHit, onLand };
