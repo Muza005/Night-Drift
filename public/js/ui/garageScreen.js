@@ -1,8 +1,9 @@
 // The garage screen (#pGarage): the car on the stand, ‹ › through the cars (no wrapping),
 // its five bars compared with the car you came with, the paint palette and, solo, the
-// run's settings (the gear) and "Поехали". From the lobby it is "Гараж" with "Выбрать".
+// run's settings (the gear), the map («Дрифт» only) and "Поехали". From the lobby it is
+// "Гараж" with "Выбрать".
 //
-//   openGarage({ kind: 'solo' | 'lobby', mode, car, paint, dir, onGo(car, paint), onBack() })
+//   openGarage({ kind: 'solo' | 'lobby', mode, car, paint, dir, onGo(car, paint), onBack(), onMap(id) })
 //   garage.open        is it on screen
 //   garage.frame(now)  the main loop calls this instead of drawing the track while it is open
 //
@@ -13,6 +14,8 @@ import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, pain
 import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
 import { createStand } from './stand.js';
 import { showPanel, hex, el } from './hud.js';
+import { openMapPicker, mapPicker } from './mapPicker.js';
+import { MAPS } from '../modes/track/maps/index.js';
 
 const LS = {
   get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
@@ -23,7 +26,7 @@ export const MIN_LAPS = 1, MAX_LAPS = 10, DEFAULT_LAPS = 3;
 { const n = parseInt(LS.get('nightdrift.laps'), 10); G.soloLaps = n >= MIN_LAPS && n <= MAX_LAPS ? n : DEFAULT_LAPS; }
 
 const stand = createStand({ renderer, el: $('garStand') });
-const S = { open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null };
+const S = { open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null, onMap: null };
 const NAMES = garageBars(CARS[0].stats).map(b => b[0]);
 
 /* ---------- the bars ---------- */
@@ -104,6 +107,20 @@ for(const [pop, btn] of [['garPaintPop', 'garPaint'], ['garSetPop', 'garSet']]){
   $(btn).setAttribute('aria-expanded', 'false');
 }
 
+/* ---------- the map (solo «Дрифт») ----------
+   «Карта» with the map's name opens the picker; a pick is the next run's map at once
+   (onMap: the caller switches the track and keeps it). */
+function drawMap(){
+  const name = (MAPS[G.soloMap] || MAPS.neon).name;
+  $('garMapName').textContent = name;
+  $('garMap').setAttribute('aria-label', `Карта: ${name}. Сменить карту`);
+}
+$('garMap').addEventListener('click', () => {
+  if(!S.open || $('garMap').hidden) return;
+  openMapPicker({ current: G.soloMap, source: $('garMap'),
+    onPick(id){ if(S.onMap) S.onMap(id); drawMap(); $('garLive').textContent = 'Карта: ' + MAPS[id].name; } });
+});
+
 /* ---------- the run's settings (the gear, solo) ---------- */
 function drawSettings(){
   $('setLaps').hidden = S.mode !== 'track';
@@ -130,6 +147,7 @@ for(const r of document.querySelectorAll('#setDens input')) r.addEventListener('
 function leave(){
   S.open = false;
   for(const p of ['garPaintPop', 'garSetPop']) if($(p).matches(':popover-open')) $(p).hidePopover();
+  mapPicker.close();
   menuPixels(false);
 }
 $('garGo').addEventListener('click', () => {
@@ -144,12 +162,14 @@ function back(){
   leave(); b && b();
 }
 
-export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'forward', onGo, onBack }){
-  Object.assign(S, { kind, mode, onGo, onBack, paint, ref: carById(car).id, open: true });
+export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'forward', onGo, onBack, onMap }){
+  Object.assign(S, { kind, mode, onGo, onBack, onMap, paint, ref: carById(car).id, open: true });
   S.idx = Math.max(0, CARS.findIndex(c => c.id === S.ref));
   const solo = kind === 'solo';
   $('garTitle').textContent = solo ? (mode === 'traffic' ? 'Трасса' : 'Дрифт') : 'Гараж';
   $('garSet').hidden = !solo;
+  $('garMap').hidden = !(solo && mode === 'track');        // «Трасса» has one endless road
+  drawMap();
   $('garGo').textContent = solo ? 'Поехали' : 'Выбрать';
   $('garBack').setAttribute('aria-label', solo ? 'Назад к выбору режима' : 'Назад в лобби без изменений');
   $('pGarage').classList.remove('painting');

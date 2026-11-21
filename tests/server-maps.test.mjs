@@ -40,6 +40,29 @@ test('the host picks the map in the lobby; the guest cannot; unknown and hidden 
   } finally { await leaveAll([A, B]); }
 });
 
+test('a new map takes back every «Готово»; the same map, a refused one or other settings do not; a late joiner gets the map', async () => {
+  const A = await join(plain);
+  const cl = () => new Colyseus.Client(`ws://localhost:${plain.port}`);
+  const B = quiet(await cl().joinById(A.roomId, { name: 'B' })), C = quiet(await cl().joinById(A.roomId, { name: 'C' }));
+  const ready = () => [...A.state.players.values()].filter(p => p.ready).length;
+  try {
+    await sleep(200);
+    B.send('ready', { value: true }); C.send('ready', { value: true }); await sleep(200);
+    assert.equal(ready(), 2, 'both guests are ready');
+    A.send('config', { map: 'neon' }); A.send('config', { map: 'nope' }); A.send('config', { laps: 4 }); await sleep(250);
+    assert.equal(ready(), 2, 'the same map, an unknown one and the laps keep «Готово»');
+    B.send('config', { map: 'serpantin' }); await sleep(250);
+    assert.equal(ready(), 2, 'a guest cannot change the map (nor reset anything)');
+    A.send('config', { map: 'serpantin' }); await sleep(250);
+    assert.equal(A.state.map, 'serpantin');
+    assert.equal(ready(), 0, 'a new map: nobody is ready any more');
+    assert.equal(B.state.map, 'serpantin', 'the guests see the new map');
+    const D = quiet(await cl().joinById(A.roomId, { name: 'D' })); await sleep(200);
+    assert.equal(D.state.map, 'serpantin', 'a player who comes later gets the room\'s map');
+    await leaveAll([D]);
+  } finally { await leaveAll([A, B, C]); }
+});
+
 test('the shortest lap the server believes follows the map', { timeout: 40000 }, async () => {
   assert.ok(minLapMs('_testhill') < 12500 && minLapMs('neon') > 12500, `${minLapMs('_testhill')} / ${minLapMs('neon')} ms`);
   assert.equal(minLapMs('__proto__'), 5000);

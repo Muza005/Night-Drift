@@ -220,7 +220,12 @@ class RaceRoom extends Room {
     this.onMessage('config', (client, m) => {
       if (client.sessionId !== this.state.hostId || !isObj(m) || !this.betweenRuns()) return;
       if (MODES.includes(m.mode)) this.state.mode = m.mode;
-      if (this.maps.mapAllowed(m.map, ALLOW_HIDDEN_MAPS)) this.state.map = m.map;   // an unknown or hidden id is ignored
+      // an unknown or hidden id is ignored; a new map takes back everyone's «Готово»
+      // (they said yes to the other track)
+      if (this.maps.mapAllowed(m.map, ALLOW_HIDDEN_MAPS) && m.map !== this.state.map) {
+        this.state.map = m.map;
+        for (const p of this.state.players.values()) p.ready = false;
+      }
       if (Number.isInteger(m.laps) && m.laps >= MIN_LAPS && m.laps <= MAX_LAPS) this.state.laps = m.laps;
       if (okDuration(m.duration)) this.state.duration = m.duration;
       if (DENSITIES.includes(m.density)) this.state.density = m.density;

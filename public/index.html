@@ -408,7 +408,7 @@ body{margin:0}
           </g>
         </svg></span>
         <span class="tile-name">Дрифт</span>
-        <span class="tile-desc">13 поворотов ночного города. Держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
+        <span class="tile-desc">Шесть карт на выбор, от города до горного перевала. Держи занос: угол и скорость дают очки, удар о стену их сжигает.</span>
         <span class="tile-rec" id="bestTrack">Лучший круг —</span>
       </button>
       <button type="button" class="tile mode-tile" id="mTraffic" data-mode="traffic" style="--tile-accent:var(--c-cyan)">
@@ -449,6 +449,7 @@ body{margin:0}
       <button type="button" class="icon-btn" id="garBack" aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <h1 id="garTitle">Гараж</h1>
       <button type="button" class="icon-btn gar-set" id="garSet" popovertarget="garSetPop" aria-label="Настройки заезда"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M18.93 13L21.22 14.28L20.14 16.91L17.6 16.2A7 7 0 0 1 16.2 17.6L16.91 20.14L14.28 21.22L13 18.93A7 7 0 0 1 11 18.93L9.72 21.22L7.09 20.14L7.8 17.6A7 7 0 0 1 6.4 16.2L3.86 16.91L2.78 14.28L5.07 13A7 7 0 0 1 5.07 11L2.78 9.72L3.86 7.09L6.4 7.8A7 7 0 0 1 7.8 6.4L7.09 3.86L9.72 2.78L11 5.07A7 7 0 0 1 13 5.07L14.28 2.78L16.91 3.86L16.2 6.4A7 7 0 0 1 17.6 7.8L20.14 7.09L21.22 9.72L18.93 11A7 7 0 0 1 18.93 13Z"/><circle cx="12" cy="12" r="3"/></g></svg></button>
+      <button type="button" class="pill-btn map-btn" id="garMap" aria-haspopup="listbox" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 17.5c-2-2.2-1.6-6 .9-7.6 2-1.3 3.6.2 5.6-1.6 1.7-1.6 1.1-4.3 3.6-4.6 2.6-.3 4.4 2.4 3.9 5.4-.4 2.3-2.6 2.9-2.7 5.1-.1 2.3 2 3.1.9 4.8-1.3 2-5.2 1.3-7.4.9-2.1-.4-3.6-.9-4.8-2.4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M8.6 15.8h3.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><span class="map-btn-lbl">Карта</span><span class="map-btn-name" id="garMapName">Ночной город</span></button>
       <button type="button" class="pill-btn" id="garPaint" popovertarget="garPaintPop"><span class="swatch" id="garSwatch" aria-hidden="true"></span>Цвет</button>
     </header>
     <div class="gar-head">
@@ -486,6 +487,13 @@ body{margin:0}
       </fieldset>
     </div>
 
+    <!-- The map picker: a card per drift map (js/ui/mapPicker.js). It moves into the screen
+         it is opened from: the garage (solo «Дрифт») or the lobby (the host). -->
+    <div class="pop map-pop" id="mapPop" popover aria-labelledby="mapPopTitle">
+      <h3 id="mapPopTitle">Карта</h3>
+      <div class="map-grid" id="mapGrid" role="listbox" aria-labelledby="mapPopTitle"></div>
+    </div>
+
     <div class="pop paint-pop" id="garPaintPop" popover aria-labelledby="paintTitle">
       <h3 id="paintTitle">Цвет: <span id="paintName">Заводской</span></h3>
       <div class="swatches" id="garSwatches" role="group" aria-labelledby="paintTitle"></div>
@@ -510,6 +518,7 @@ body{margin:0}
       <button type="button" class="pill-btn" id="leaveLobby"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Выйти</button>
       <h1 id="lobTitle">Лобби <span class="lob-mode" id="lobMode">Дрифт</span></h1>
       <button type="button" class="pill-btn" id="lobCar" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>Авто</button>
+      <button type="button" class="pill-btn map-btn" id="lobMapBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Карта: сменить карту" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 17.5c-2-2.2-1.6-6 .9-7.6 2-1.3 3.6.2 5.6-1.6 1.7-1.6 1.1-4.3 3.6-4.6 2.6-.3 4.4 2.4 3.9 5.4-.4 2.3-2.6 2.9-2.7 5.1-.1 2.3 2 3.1.9 4.8-1.3 2-5.2 1.3-7.4.9-2.1-.4-3.6-.9-4.8-2.4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M8.6 15.8h3.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><span class="map-btn-word">Карта</span></button>
     </header>
     <div class="lob-body">
       <div class="lob-players">
@@ -564,10 +573,15 @@ body{margin:0}
             <label><input type="radio" name="lobDens" value="high"><span>Высокий</span></label>
           </div>
         </fieldset>
+        <div class="lob-map" id="lobMap">
+          <span class="map-thumb" id="lobMapThumb"></span>
+          <span class="lob-map-txt"><span class="set-name">Карта</span><b class="lob-map-name" id="lobMapName">Ночной город</b></span>
+        </div>
       </div>
       <button type="button" class="cta" id="startRace">Старт</button>
     </div>
     <p class="status" id="lobbyStatus" role="status"></p>
+    <p class="vh" id="lobMapLive" role="status"></p>
 
     <div class="pop kick-pop" id="kickPop" popover aria-labelledby="kickQ">
       <p id="kickQ">Выгнать игрока?</p>

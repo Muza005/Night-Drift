@@ -19,18 +19,29 @@ import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
 import { P, TG, Y, N, BRIDGE, START, FLAT, MAP, SHORTCUTS, SAME_LEVEL, LEVELS, placeAt, placeOnCut, placeGrid, constrainToTrack, keepInWalls, nearest, setMap, onMapChange, carPose } from './geometry.js';
-import { MAPS, DEFAULT_MAP } from './maps/index.js';
+import { MAPS, MAP_IDS, DEFAULT_MAP } from './maps/index.js';
 import { group } from './scene.js';
 import { chase } from './chase.js';
 
-// ?map=<id> opens another map for solo runs (the hidden test map: ?map=_testhill); stage 6
-// brings the picker. Online the room's map wins (net.js calls G.setMap with the room's
-// map and G.setMap(null) when the player leaves the room: back to the solo map).
-const soloMap = (() => { let q=null; try{ q=new URLSearchParams(location.search).get('map'); }catch(e){}
-  return q && Object.hasOwn(MAPS, q) ? q : DEFAULT_MAP; })();
+// The solo map: the one picked in the garage (ui/mapPicker.js), remembered in localStorage
+// ('nightdrift.map'); ?map=<id> opens another one for this page load (development: the
+// hidden test map, ?map=_testhill). Online the room's map wins (net.js calls G.setMap with
+// the room's map and G.setMap(null) when the player leaves the room: back to the solo map).
+const MAP_KEY = 'nightdrift.map';
+let soloMap = (() => { let q=null, saved=null;
+  try{ q=new URLSearchParams(location.search).get('map'); }catch(e){}
+  try{ saved=localStorage.getItem(MAP_KEY); }catch(e){}
+  return q && Object.hasOwn(MAPS, q) ? q : saved && MAP_IDS.includes(saved) ? saved : DEFAULT_MAP; })();
 setMap(soloMap);
 G.soloMap = soloMap;
 G.setMap = id => { const before=MAP; setMap(id && Object.hasOwn(MAPS, id) ? id : soloMap); return MAP!==before; };
+// the garage's pick: kept, and the track switches to it at once (not while in a room)
+G.setSoloMap = id => {
+  if(!MAP_IDS.includes(id)) return false;
+  soloMap = G.soloMap = id;
+  try{ localStorage.setItem(MAP_KEY, id); }catch(e){}
+  return NET.room ? false : G.setMap(id);
+};
 
 /* minimap
    The road, then every bridge drawn again over it with a shadow beside it, so it reads as
@@ -103,6 +114,7 @@ export const trackMode = {
   ghostBounds(s, g){ keepInWalls(s, g.walls || (g.walls = {})); },   // another player's predicted car stays inside the walls
   // the active map (records.js keeps the records per map)
   get mapId(){ return MAP.id; },
+  get mapName(){ return MAP.name; },
   // cars this much apart in height are on different roads: no collision, no slipstream (net.js)
   get sameLevel(){ return SAME_LEVEL; },
   id: 'track',

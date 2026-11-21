@@ -136,7 +136,8 @@ let menuKind = 'solo';                   // which mode screen is open: 'solo' | 
 function renderRecords(){
   const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
   loadRecords();                         // (the solo map's: «Дрифт» shows the map it will start on)
-  $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : 'Лучшего круга пока нет';
+  // (with the map's name: the record is that map's)
+  $('bestTrack').textContent = trackMode.mapName + ' · ' + (G.best ? 'лучший круг ' + fmtT(G.best) : 'лучшего круга пока нет');
   $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) : 'Рекорда пока нет';
 }
 // Focus moves with the screens when they are changed, so the keyboard carries on where the
@@ -187,6 +188,8 @@ function openSoloGarage(dir){
   return openGarage({ kind:'solo', mode:G.mode.id, car:choice.car, paint:choice.paint, dir,
     onGo(carId, paint){ savePick(carId, paint); applyLook(carId, paint); startRace(); },
     onBack(){ openModes('solo','back'); },
+    // a map picked in the garage: the track switches to it now, its records come with it
+    onMap(id){ if(G.setSoloMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } loadRecords(); },
   }).then(()=>moveFocus($('garGo')));
 }
 $('mTrack').addEventListener('click',()=>pick('track'));

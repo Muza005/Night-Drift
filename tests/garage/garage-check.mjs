@@ -8,6 +8,9 @@
 // the palette opens and closes on a click elsewhere, a repaint is immediate, the bars
 // compare with the car you came with, keys (← → Esc Enter), and the solo run starting
 // with the picked car, its model and the gear settings; drift ends after its laps.
+// The map (stage 6): «Карта» in solo «Дрифт» only; the picker's cards (blueprint, length,
+// difficulty, badges, my records), keys (arrows, Enter, Esc), the pick remembered over a
+// reload, and the run starting on that map.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -39,7 +42,8 @@ try {
   await ctx.route(/GLTFLoader\.js/, r => r.fulfill({ path: path.join(ROOT, 'node_modules/three/examples/js/loaders/GLTFLoader.js'), contentType: 'text/javascript' }));
   await ctx.route(/unpkg\.com\/colyseus\.js/, r => r.fulfill({ path: path.join(ROOT, 'node_modules/colyseus.js/dist/colyseus.js'), contentType: 'text/javascript' }));
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
-  await ctx.addInitScript(() => { try { localStorage.clear(); } catch {} });   // a first visit: defaults
+  // a first visit: defaults (once: a reload later keeps what was picked)
+  await ctx.addInitScript(() => { try { if (!sessionStorage.getItem('seeded')) { localStorage.clear(); sessionStorage.setItem('seeded', '1'); } } catch {} });
   const page = await ctx.newPage();
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(m.text()); });
@@ -101,9 +105,43 @@ try {
   await page.keyboard.press('Escape'); await sleep(300);
   check('Esc closes the settings, the garage stays', !(await $('#pGarage', e => e.hidden)) && !(await page.evaluate(() => document.getElementById('garSetPop').matches(':popover-open'))));
 
+  // the map: «Карта» with the map's name, the picker, keys
+  check('«Карта» in solo «Дрифт», with the map\'s name', !(await $('#garMap', e => e.hidden)) && await $('#garMapName', e => e.textContent) === 'Ночной город');
+  await page.click('#garMap'); await sleep(350);
+  const cards = await page.evaluate(() => [...document.querySelectorAll('#mapGrid .map-card')].map(c => ({ id: c.dataset.map, sel: c.getAttribute('aria-selected'), svg: !!c.querySelector('svg.bp .bp-road'), start: !!c.querySelector('.bp-arrow'), bridge: c.querySelectorAll('.bp-shadow').length, cut: c.querySelectorAll('.bp-cut').length, name: c.querySelector('.map-name').textContent, tags: [...c.querySelectorAll('.map-tag')].map(t => t.textContent).join(','), rec: [...c.querySelectorAll('.map-rec .num')].map(n => n.textContent).join(' ') })));
+  const focus0 = await page.evaluate(() => document.activeElement.dataset.map);
+  check('the picker opens: six maps, «Ночной город» picked and focused', await page.evaluate(() => document.getElementById('mapPop').matches(':popover-open')) && cards.length === 6 && cards[0].sel === 'true' && focus0 === 'neon' && await $('#garMap', e => e.getAttribute('aria-expanded')) === 'true', JSON.stringify(cards.map(c => c.id)));
+  check('every card: a blueprint with the start arrow, a name, no record yet', cards.every(c => c.svg && c.start && c.name && c.rec === '— —'));
+  const by = Object.fromEntries(cards.map(c => [c.id, c]));
+  check('bridges drawn over (a shadow), shortcuts dashed, the badges', by.estakada.bridge > 0 && by.neon.bridge === 0 && by.serpantin.cut === 3 && by.razvyazka.cut === 4 && by.serpantin.tags === 'срезка' && by.parking.tags === 'этажи' && by.razvyazka.tags === 'мост,уклоны,срезка' && by.neon.tags === '', JSON.stringify(cards.map(c => c.id + ':' + c.tags)));
+  check('aria: a listbox of options, one selected', await page.evaluate(() => document.getElementById('mapGrid').getAttribute('role') === 'listbox' && document.querySelectorAll('#mapGrid [role=option][aria-selected=true]').length === 1));
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+  const f2 = await page.evaluate(() => document.activeElement.dataset.map);
+  await page.keyboard.press('ArrowDown');
+  const f3 = await page.evaluate(() => document.activeElement.dataset.map);
+  await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
+  const f4 = await page.evaluate(() => document.activeElement.dataset.map);
+  check('arrows move between the cards (→ → ↓, ← stops at the edge)', f2 === 'serpantin' && f3 === 'razvyazka' && f4 === 'parking', [f2, f3, f4].join(' '));
+  await page.keyboard.press('Escape'); await sleep(300);
+  check('Esc closes the picker: no change, the garage stays, focus back on «Карта»', !(await page.evaluate(() => document.getElementById('mapPop').matches(':popover-open'))) && !(await $('#pGarage', e => e.hidden)) && await page.evaluate(() => __nd.G.soloMap) === 'neon' && await page.evaluate(() => document.activeElement.id) === 'garMap');
+  await page.click('#garMap'); await sleep(300);
+  const t1 = await page.evaluate(() => performance.now());
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.getElementById('garMapName').textContent === 'Паркинг');
+  const switched = await page.evaluate(async t => { const g = await import('/js/modes/track/geometry.js'); return { map: g.MAP.id, ms: performance.now() - t, saved: localStorage.getItem('nightdrift.map'), open: document.getElementById('mapPop').matches(':popover-open'), focus: document.activeElement.id }; }, t1);
+  check('Enter picks «Паркинг»: the button says it, the track is switched, it is remembered', switched.map === 'parking' && switched.saved === 'parking' && !switched.open && switched.focus === 'garMap', JSON.stringify(switched));
+
   // Esc again: back to the modes, nothing saved
   await page.keyboard.press('Escape'); await sleep(500);
   check('Esc: back to the mode cards, the pick dropped', !(await $('#pModes', e => e.hidden)) && await page.evaluate(() => localStorage.getItem('nightdrift.car')) === null);
+  check('the «Дрифт» card shows the picked map\'s record line', /^Паркинг · /.test(await $('#bestTrack', e => e.textContent)), await $('#bestTrack', e => e.textContent));
+  // «Трасса» has no map
+  await page.click('#mTraffic'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
+  check('«Трасса»: no «Карта» in its garage', await $('#garMap', e => e.hidden));
+  await page.keyboard.press('Escape'); await sleep(500);
+  // a reload keeps the map
+  await page.reload(); await page.waitForFunction(() => window.__nd);
+  await page.click('#goSolo'); await sleep(450);
 
   // again, pick the Dodge in red and go
   await page.click('#mTrack'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
@@ -118,6 +156,8 @@ try {
   check('the run starts with the picked car, its model and paint', run.car === 'muscle' && run.model === 'muscle' && run.paint === 0xd3202a && run.wheels === 4, JSON.stringify(run));
   check('…and the pick is remembered', run.saved[0] === 'muscle' && run.saved[1] === String(0xd3202a));
   check('one lap set: the HUD says 1 / 1', run.lap === '1 / 1');
+  const onMap = await page.evaluate(async () => { const g = await import('/js/modes/track/geometry.js'); return [g.MAP.id, __nd.G.soloMap]; });
+  check('after a reload the run starts on the picked map, «Паркинг»', onMap.join() === 'parking,parking', onMap.join());
 
   // the last lap done: the finish screen; «В гараж» goes back to the garage
   await page.waitForFunction(() => __nd.G.state === 'race', null, { timeout: 10000 });
@@ -126,6 +166,11 @@ try {
   check('after the last lap: the finish screen', /Финиш/.test(await $('#overTitle', e => e.textContent)) && /0:41\.20/.test(await $('#overStats', e => e.textContent)));
   await page.click('#overMenu'); await sleep(600);
   check('«В гараж»: back to the garage with that car', !(await $('#pGarage', e => e.hidden)) && await $('#garName', e => e.textContent) === 'Dodge');
+  // the run's records are «Паркинг»'s, and its card says so
+  await page.click('#garMap'); await sleep(300);
+  const recs = await page.$$eval('#mapGrid .map-card', cs => Object.fromEntries(cs.map(c => [c.dataset.map, [...c.querySelectorAll('.map-rec .num')].map(n => n.textContent).join(' ')])));
+  check('the card shows the new record on «Паркинг», the others none', /^0:41\.20 /.test(recs.parking) && recs.neon === '— —', JSON.stringify(recs));
+  await page.keyboard.press('Escape'); await sleep(200);
 
   check('no errors in the page', errors.length === 0, errors.slice(0, 3).join(' | '));
   await ctx.close();
