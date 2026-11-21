@@ -23,7 +23,7 @@ import { choice } from '../ui/garage.js';
 import { carById, paintHex } from '../core/cars.js';
 import { setPaint } from '../core/carModels.js';
 import { canvas, cv, tex, scene, camera } from '../core/render.js';
-import { wake, stepDraft } from '../core/draft.js';
+import { wake, stepDraft, createTrail, trailPush, trailReset } from '../core/draft.js';
 import { createWake, updateWake, disposeWake } from '../core/draftfx.js';
 import { makeCar, dressCar, disposeCar } from '../core/carModel.js';
 import { addMark, emitSmoke, clearMarks } from '../core/fx.js';
@@ -233,8 +233,8 @@ function addGhost(id,p){
   if(NET.ghosts.has(id)) return;
   const ac=accent(id), m=makeCar(look(p),false), label=makeLabel(p.name,ac); m.root.add(label); m.root.visible=false;
   m.under.material.color.setHex(ac);
-  const fx=createWake(); scene.add(fx.root);              // its slipstream lines (core/draftfx.js)
-  const g={id,p,m,fx,label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0};
+  const fx=createWake(); scene.add(fx.root);              // its slipstream air (core/draftfx.js)
+  const g={id,p,m,fx,trail:createTrail(),label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0};
   NET.ghosts.set(id,g);
   dressCar(m,p.car,p.color);                              // their car's own model (it loads once)
 }
@@ -342,7 +342,7 @@ export function updateGhosts(dt){
   for(const g of NET.ghosts.values()){
     const b=g.buf, m=g.m;
     m.root.visible=show && b.length>0 && g.p.connected;
-    if(!m.root.visible){ updateWake(g.fx,null,g.x,g.z,dt); continue; }
+    if(!m.root.visible){ trailReset(g.trail); updateWake(g.fx,null,null,null,dt,camera.position); continue; }
     // a crashed car blinks (its parts, not the car: the car still counts as on the road):
     // fast while stopped, slower while it can't be hit yet
     const blink = nowS < g.p.ghostUntil;
@@ -386,10 +386,12 @@ export function updateGhosts(dt){
     // the cars around ours are named in the standings)
     { const d=Math.hypot(camera.position.x-s.x, camera.position.y-2.8, camera.position.z-s.z);
       g.label.material.opacity=Math.max(0,Math.min(1,(d-8)/8)); }
-    // its pocket, seen from our car: the white lines show when we are close behind it
-    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=(G.mode.sameLevel||3)) ? wake(car,g) : null;   // not across a bridge or a floor
+    // its pocket follows the path it drove (its trail); seen from our car, the white air
+    // shows when we are close behind it
+    trailPush(g.trail,g.x,g.z,g.y,g.h,dt);
+    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=(G.mode.sameLevel||3)) ? wake(car,g,g.trail) : null;   // not across a bridge or a floor
     if(wk && wk.inside) inPocket=true;
-    updateWake(g.fx,wk,s.x,s.z,dt,g.y);
+    updateWake(g.fx,wk,g,g.trail,dt,camera.position,scene.fog&&scene.fog.density);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);
     m.pivots.forEach(pv=>pv.rotation.y=-s.steer*.5);
     m.under.material.opacity=.4+s.slide*.35;
