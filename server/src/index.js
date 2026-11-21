@@ -66,6 +66,13 @@ async function carsLib() {
   if (!CARS) CARS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'core', 'cars.js')).href);
   return CARS;
 }
+// Car-to-car hits: the limits of public/js/net/bump.js (restitution, friction, spin, push,
+// hop), shared with the game so the server checks a hit against the same model.
+let BUMPS = null;
+async function bumpLib() {
+  if (!BUMPS) BUMPS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'net', 'bump.js')).href);
+  return BUMPS;
+}
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 class Player extends Schema {
@@ -155,6 +162,8 @@ class RaceRoom extends Room {
     this.maxClients = MAX_PLAYERS;
     this.cars = await carsLib();
     this.maps = await mapsLib();
+    this.bumps = await bumpLib();
+    this.bumpRate = new Map();   // "from>to" -> { tokens, t }: how many hits one player may still send another
     this.roomId = await freeCode();
     this.setState(new RaceState());
     if (options && MODES.includes(options.mode)) this.state.mode = options.mode;
@@ -329,22 +338,48 @@ class RaceRoom extends Room {
       if (p && m) p.score = this.acceptScore(p, finite(m.score, 0, 1e8, p.score), Date.now());
     });
 
-    // Car-to-car hits: the player who noticed the contact sends the other car's share of
-    // the impulse, and the server passes it on. Values are clamped to what a real hit
-    // between two cars can produce, so a modified client can't launch anyone off the map.
+    // Car-to-car hits: the player who decided the hit (net/bump.js: the faster car) sends
+    // the other car's share, and the server passes it on. A modified client can't launch
+    // anyone off the map:
+    // - only between two racing cars that are close (positions here are a ping old), neither
+    //   finished nor a blinking crashed car;
+    // - the velocity change can't be more than a hit between these two cars at their last
+    //   reported speeds can give (restitution, friction and masses of bump.js, closing
+    //   speed at most the sum of the two speeds, +3 m/s for speeds a ping old), and never
+    //   more than MAX_DV; spin and hop only as much as that hit can give, push within PUSH;
+    // - at most 10 hits a second from one player to another (a burst of 3), the game sends
+    //   one per 100 ms while two cars scrape.
     this.onMessage('bump', (client, m) => {
-      if (this.state.phase !== 'race' || !m) return;
+      if (this.state.phase !== 'race' || !isObj(m) || typeof m.to !== 'string') return;
       const from = this.state.players.get(client.sessionId), to = this.state.players.get(m.to);
-      if (!from || !to || from.finished || to.finished) return;
+      if (!from || !to || m.to === client.sessionId || from.finished || to.finished) return;
       const now = Date.now();
       if (now < from.ghostUntil || now < to.ghostUntil) return;   // a crashed, blinking car can't push or be pushed
       if (Math.hypot(from.x - to.x, from.z - to.z) > 25) return;   // they weren't even close (positions here are a ping old)
       const target = this.clients.find(c => c.sessionId === m.to);
       if (!target) return;
+      const key = client.sessionId + '>' + m.to, r = this.bumpRate.get(key) || { tokens: 3, t: now };
+      r.tokens = Math.min(3, r.tokens + (now - r.t) / 100); r.t = now;
+      if (r.tokens < 1) { this.bumpRate.set(key, r); return; }
+      r.tokens -= 1; this.bumpRate.set(key, r);
+      const B = this.bumps.BUMP, mass = this.bumps.carMass;
+      const mf = mass(from.car), mt = mass(to.car);
+      const closing = Math.hypot(from.vx, from.vz) + Math.hypot(to.vx, to.vz) + 3;
+      const most = Math.min(B.MAX_DV, (1 + B.E) * Math.hypot(1, B.MU) * closing * mf / (mf + mt));
+      let jx = finite(m.jx, -B.MAX_DV, B.MAX_DV), jz = finite(m.jz, -B.MAX_DV, B.MAX_DV);
+      const j = Math.hypot(jx, jz); if (j > most) { jx *= most / j; jz *= most / j; }
+      let dx = finite(m.dx, -B.PUSH, B.PUSH), dz = finite(m.dz, -B.PUSH, B.PUSH);
+      const d = Math.hypot(dx, dz); if (d > B.PUSH) { dx *= B.PUSH / d; dz *= B.PUSH / d; }
+      // spin and hop come only with a hit's strength: the spin of a velocity change of |j|
+      // at the far end of the car (lever arm OFF + R, SPIN_K of it taken, +0.1 slack); a hop
+      // only from HOP of closing speed, whose share for this car is at least ~0.9 of
+      // (1 + E) × HOP × mf / (mf + mt)
+      const jj = Math.hypot(jx, jz), spinMost = Math.min(B.SPIN, (B.OFF + B.R) * B.SPIN_K / B.I * jj + 0.1);
+      const hops = closing >= B.HOP && jj >= 0.9 * (1 + B.E) * B.HOP * mf / (mf + mt);
       target.send('bump', {
-        from: client.sessionId,
-        jx: finite(m.jx, -30, 30), jz: finite(m.jz, -30, 30), w: finite(m.w, -4, 4),
-        dx: finite(m.dx, -1.5, 1.5), dz: finite(m.dz, -1.5, 1.5),
+        from: client.sessionId, jx, jz, dx, dz,
+        w: finite(m.w, -spinMost, spinMost), vy: hops ? finite(m.vy, 0, B.HOP_MAX) : 0,
+        t: finite(m.t, now - 1500, now, now),     // when the hit happened (the sender's synced clock)
       });
     });
   }
@@ -397,6 +432,7 @@ class RaceRoom extends Room {
     this.state.players.delete(id);
     this.lapStamp.delete(id);
     this.lastState.delete(id);
+    for (const k of this.bumpRate.keys()) if (k.startsWith(id + '>') || k.endsWith('>' + id)) this.bumpRate.delete(k);
     this.broadcast('event', { text: p.name + ' ' + how });
     if (this.state.hostId === id) {
       // a player who is connected first (one who is reconnecting may never come back), then by order
@@ -489,7 +525,7 @@ class RaceRoom extends Room {
       p.finished = false; p.finishTime = 0; p.place = 0;
       p.wreckUntil = 0; p.ghostUntil = 0; p.misses = 0; p.wrecks = 0; p._scoreAt = 0;
     });
-    this.lapStamp.clear(); this.lastState.clear();
+    this.lapStamp.clear(); this.lastState.clear(); this.bumpRate.clear();
     s.phase = 'countdown';
     s.startAt = Date.now() + COUNTDOWN_MS;
     s.endAt = s.mode === 'traffic' ? s.startAt + s.duration * 1000 : 0;

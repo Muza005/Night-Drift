@@ -91,6 +91,8 @@ try {
   check('both ready: «Старт» lights, with its one flash', await A.$eval('#startRace', b => b.classList.contains('armed')));
   await C.click('#startRace');                    // C takes it back…
   await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  // the server's patch reaches A and C at slightly different moments: give C's own up to 2 s
+  await C.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-pressed') === 'false', null, { timeout: 2000 }).catch(() => {});
   check('«Готово» pressed again takes it back: «Старт» goes off', await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false');
   await C.click('#startRace');                    // …and presses it again
   await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');

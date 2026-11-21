@@ -33,6 +33,7 @@ import { crash, bank, dropDrift } from '../game.js';
 import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note, cancelPanels } from '../ui/hud.js';
 import { renderLobby as drawLobby, openLobby, leaveLobby, openRoomGarage } from '../ui/lobbyScreen.js';
 import { roster, seatOf, seatHex } from '../ui/seats.js';
+import { carMass, keepOut, newMem, collideStep, takeOut, receive, catchUp, kickStart, kickAt, kickUpdate } from './bump.js';
 
 const angDiff=(a,b)=>{ const t=Math.PI*2; return (((b-a+Math.PI)%t)+t)%t-Math.PI; };
 
@@ -271,67 +272,45 @@ function predict(s0,s1,nowS){
   const turn=w*age, c=Math.cos(-turn/2), sn=Math.sin(-turn/2);
   return {x:s1.x+(s1.vx*c-s1.vz*sn)*age, z:s1.z+(s1.vx*sn+s1.vz*c)*age, h:s1.h+turn};
 }
-// Our local guess of how an opponent reacts to a hit we just gave them, used until their
-// own updates (which include the real reaction) arrive. Velocity fades like tyre grip would.
-function kickDisp(g,nowS){
-  const K=g.kick; if(!K) return {x:0,z:0,h:0,vx:0,vz:0,w:0};
-  const tau=Math.max(0,(nowS-K.t)/1000), e=Math.exp(-K.k*tau), f=(1-e)/K.k;
-  return {x:K.bx+K.vx*f, z:K.bz+K.vz*f, h:K.bh+K.w*f, vx:K.vx*e, vz:K.vz*e, w:K.w*e};
-}
+// g.kick: our local guess of how an opponent reacts to a hit we just decided (bump.js
+// kickStart/kickAt), drawn until their own updates show the real reaction.
 
 /* ---------- car-to-car collisions ----------
-   Each car is two overlapping circles (front and rear), which follows the long box shape
-   closely and is cheap to test. Each player resolves the hit for their own car against
-   the predicted position of the other car, and also sends the other car's half of the hit
-   through the server. Whoever notices the contact first decides it; the second notice
-   within 0.3 s is ignored, so a hit is never applied twice. */
-const CAR_R=1.05, CAR_OFF=1.15, CAR_I=1.87, BOUNCE=.3;
-function carCircles(x,z,h){ const fx=Math.sin(h), fz=Math.cos(h); return [[x+fx*CAR_OFF,z+fz*CAR_OFF],[x-fx*CAR_OFF,z-fz*CAR_OFF]]; }
-const clampN=(v,a)=>Math.max(-a,Math.min(a,v));
-export function collideGhosts(){
+   The maths and the rule of who decides a hit are in bump.js: the player driving into the
+   other decides it (one judge per hit), changes its own car and sends the other car's share
+   through the server; the other player applies only that, lined up with what the judge
+   already shows. While it waits, the other car is drawn out of its own (updateGhosts). */
+// Can our car and g touch right now? (both racing, neither a blinking crashed car, same level)
+function touchable(g,nowS){
+  return NET.online && NET.room && G.state==='race' && !NET.finished && !(G.mode.isGhost && G.mode.isGhost())
+    && g.m.root.visible && !g.p.finished && g.vx!==undefined && nowS>=g.p.ghostUntil
+    && Math.abs((g.y||0)-(car.y||0))<=(G.mode.sameLevel||3);
+}
+// one physics substep (dt s): main.js calls it after each physics step
+export function collideGhosts(dt=1/120){
   if(!NET.online || !NET.room || G.state!=='race' || NET.finished) return;
-  if(G.mode.isGhost && G.mode.isGhost()) return;          // our car crashed and is blinking: nothing touches it
-  const now=performance.now(), nowS=serverNow();
+  catchUp(car,dt);                                         // a hit we got: its reaction lined up with the judge's picture
+  const now=performance.now(), tS=serverNow(), me=NET.room.sessionId, mMe=carMass(car.carId);
   for(const g of NET.ghosts.values()){
-    if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
-    if(nowS < g.p.ghostUntil) continue;                     // their car crashed and is blinking
-    if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
-    if(Math.abs((g.y||0)-(car.y||0))>(G.mode.sameLevel||3)) continue;   // one on a bridge, the other under it (or on another floor)
-    let best=null;
-    for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
-      const dx=a[0]-b[0], dz=a[1]-b[1], d=Math.hypot(dx,dz);
-      if(d<2*CAR_R && (!best||d<best.d)) best={d,dx,dz,b};
-    }
-    if(!best) continue;
-    const d=Math.max(best.d,1e-3), nx=best.dx/d, nz=best.dz/d, pen=2*CAR_R-d;
-    car.x+=nx*pen*.5; car.z+=nz*pen*.5;              // the other car moves the other half
-    const vn=(car.vx-g.vx)*nx+(car.vz-g.vz)*nz;
-    if(vn>=0) continue;                                // already moving apart
-    const cx=best.b[0]+nx*CAR_R, cz=best.b[1]+nz*CAR_R; // contact point
-    const j=-(1+BOUNCE)*vn/2, Jx=nx*j, Jz=nz*j;        // equal masses
-    car.vx+=Jx; car.vz+=Jz;
-    car.spinV=clampN(car.spinV+((cz-car.z)*Jx-(cx-car.x)*Jz)/CAR_I*.6,4);
-    NET.hitAt[g.id]=now;
-    if(-vn>3) crash(-vn);
-    if(now-(NET.sentAt[g.id]||0)>250){
-      NET.sentAt[g.id]=now;
-      const w=clampN(((cz-g.z)*-Jx-(cx-g.x)*-Jz)/CAR_I*.6,4);
-      NET.room.send('bump',{to:g.id,jx:-Jx,jz:-Jz,w,dx:-nx*pen*.5,dz:-nz*pen*.5});
-      // Show the opponent reacting right away instead of after a round trip.
-      const nowS=serverNow(), kd=kickDisp(g,nowS);
-      g.kick={t:nowS,k:3,bx:kd.x,bz:kd.z,bh:kd.h,vx:kd.vx-Jx,vz:kd.vz-Jz,w:kd.w+w};
-    }
+    const mem=g.mem||(g.mem=newMem());
+    // a scrape's impulses are sent together, one message per SEND_GAP at most
+    const out=takeOut(mem,now); if(out) NET.room.send('bump',{to:g.id,...out});
+    if(!touchable(g,tS) || Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
+    const r=collideStep(car,g,mem,{now,tS,mMe,mOther:carMass(g.car),air:!!G.mode.hops});
+    if(!r || !r.other) continue;
+    if(r.impact>3) crash(r.impact);
+    // show the other car reacting right away instead of after a round trip
+    g.kick=kickStart(g.kick,g,r.other,r.push,tS);
   }
 }
 function onBump(m){
   if(G.state!=='race' || NET.finished || !m) return;
   if(G.mode.isGhost && G.mode.isGhost()) return;
-  const now=performance.now();
-  if(now-(NET.hitAt[m.from]||0)<300) return;        // we already handled this contact ourselves
-  NET.hitAt[m.from]=now;
-  car.vx+=m.jx; car.vz+=m.jz; car.spinV=clampN(car.spinV+m.w,4);
-  car.x+=m.dx; car.z+=m.dz;
-  const hit=Math.hypot(m.jx,m.jz)*1.5; if(hit>3) crash(hit);
+  const g=NET.ghosts.get(m.from); if(!g) return;
+  const mem=g.mem||(g.mem=newMem());
+  const hit=receive(car,m,mem,{now:performance.now(),tS:serverNow(),mMe:carMass(car.carId),mOther:carMass(g.car),meId:NET.room&&NET.room.sessionId,fromId:m.from,rtt:NET.rtt,air:!!G.mode.hops});
+  if(mem.undone) g.kick=null;                               // their hit stands, not ours: their car as they report it
+  if(hit>3) crash(hit);
 }
 export function updateGhosts(dt){
   const show=NET.online && (G.state==='count'||G.state==='race'||G.state==='results');
@@ -361,16 +340,17 @@ export function updateGhosts(dt){
     // car itself never trails behind the prediction.
     if(!g.off) g.off={x:0,z:0,h:0};
     if(g.last && g.last!==s1){
-      const O=predict(g.lastPrev,g.last,nowS), ko=kickDisp(g,nowS);
-      // The opponent's own updates include our hit once they have had time to react;
-      // from then on stop adding our local guess of that hit.
-      if(g.kick && s1.t>g.kick.t+(NET.rtt||250)+80) g.kick=null;
-      const kn=kickDisp(g,nowS);
+      const O=predict(g.lastPrev,g.last,nowS), ko=kickAt(g.kick,nowS,g.last.t);
+      // The opponent's own updates include our hit once they have reacted (their velocity
+      // jumps by the hit's change): from then on only the distance their car is still
+      // making up is added (bump.js kickUpdate), until it is all in their updates.
+      g.kick=kickUpdate(g.kick,g.last,s1,NET.rtt);
+      const kn=kickAt(g.kick,nowS,s1.t);
       g.off.x+=O.x+ko.x-T.x-kn.x; g.off.z+=O.z+ko.z-T.z-kn.z; g.off.h+=angDiff(T.h+kn.h,O.h+ko.h);
     }
     g.last=s1; g.lastPrev=s0;
-    { const kd=kickDisp(g,nowS); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
-      g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; }
+    const kd=kickAt(g.kick,nowS,s1.t); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
+    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz;   // (rv: as reported, without our guess)
     if(Math.hypot(g.off.x,g.off.z)>12){ g.off.x=g.off.z=g.off.h=0; }
     const k=Math.exp(-10*dt); g.off.x*=k; g.off.z*=k; g.off.h*=k;
     // height: their reported height carried on by their vertical speed (in a jump it is the
@@ -379,8 +359,10 @@ export function updateGhosts(dt){
     const s={x:T.x+g.off.x,z:T.z+g.off.z,h:T.h+g.off.h,vf:s1.vf,steer:s1.steer,slide:s1.slide,
       y:s1.vy?s1.y+s1.vy*age-4.905*age*age:s1.y, idx:s1.idx};
     if(G.mode.ghostBounds) G.mode.ghostBounds(s,g);        // never through a wall or a rail (the prediction does not know them)
+    // a hit theirs to decide: drawn against our car, not inside it, until it comes (bump.js)
+    if(g.mem && touchable(g,nowS)) keepOut(s,car,g.mem,performance.now(),NET.rtt);
     g.x=s.x; g.z=s.z; g.h=s.h; g.y=s.y||0;
-    m.root.position.set(s.x,g.y,s.z); m.root.rotation.y=s.h;
+    m.root.position.set(s.x,g.y+(G.mode.hops?0:kd.y),s.z); m.root.rotation.y=s.h;   // (with heights their own hop comes in y)
     // a name tag right at the camera (that car is just behind ours) would fill the screen:
     // it fades out closer than 16 m and is gone by 8 m (the tags are for cars further off;
     // the cars around ours are named in the standings)

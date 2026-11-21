@@ -12,7 +12,10 @@
 // 1. Starts the game server and a proxy that adds ~150 ms of ping with jitter
 //    (75 ± 25 ms each way), the way a player in Tashkent sees a Frankfurt server.
 // 2. Opens two players in Chrome. Player A creates a room, B joins, A starts the race.
-// 3. Bump: A drives straight into B. B must be pushed (the hit has to reach B).
+// 3. Bump: A drives straight into B. B must be pushed (the hit has to reach B), and A's
+//    picture of B must not jump: from the frame of the hit on, how much B's drawn speed
+//    changes from one frame to the next (in metres per 60 fps frame), apart from the
+//    frames of the hit itself (stage 8: one judge per hit, A's picture lined up with B's).
 // 4. Prediction: A drives a scripted route for 20 s. On every frame we compare where B
 //    draws A with where A really was at that moment.
 // It fails if the hit does not reach B or if B's picture of A drifts too far.
@@ -45,6 +48,9 @@ const URL_UNDER_TEST = opt('url', `http://localhost:${PORT}/index.html`);
 // A real GPU at 60 fps gives smaller errors. MIN_BUMP: B has no input, so any speed
 // above zero means the hit reached B; a glancing hit gives ~2 m/s, a square one ~8.
 const LIMIT_MEAN = 2.0, LIMIT_P95 = 4.0, MIN_BUMP = 0.5;
+// The jump of A's picture of B around the hit: judged on the GPU only (--headed: 60 fps;
+// at the 4-5 fps of software rendering one frame is a fifth of a second of motion).
+const LIMIT_JUMP = 0.5;
 const CHROME = opt('chrome', process.env.CHROME_PATH);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -137,15 +143,31 @@ async function runOnce(browser) {
     await A.bringToFront(); await A.click('#c'); await sleep(600);
 
     step = 'bump';
-    // Bump: aim A at B and drive into it.
-    await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z); });
+    // Bump: aim A at B and drive into it. A records its own velocity and its picture of B
+    // every frame, with the frame's time.
+    await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z);
+      window.__hit = []; const tick = ts => { if (!window.__hit) return; requestAnimationFrame(tick);
+        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'B') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz]); };
+      requestAnimationFrame(tick); });
     await A.keyboard.down('w');
     let bump = 0;
     // Software rendering runs a few frames a second, and below 20 fps the game runs in slow
     // motion: A may need many seconds to cover the few metres. Drive until the hit lands
     // (or 12 s have passed), then a moment more for it to reach B.
     for (let i = 0; i < 120; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); if (bump > MIN_BUMP) break; }
-    await A.keyboard.up('w'); await sleep(1000); await A.keyboard.press('r'); await sleep(500);
+    await A.keyboard.up('w'); await sleep(1000);
+    const hitRec = await A.evaluate(() => { const r = window.__hit; window.__hit = null; return r; });
+    if (process.env.SYNC_HIT_DUMP) (await import('node:fs')).writeFileSync(process.env.SYNC_HIT_DUMP, JSON.stringify(hitRec));
+    await A.keyboard.press('r'); await sleep(500);
+    // A's own hit: a jump of its velocity (driving changes it by < 0.5 m/s per frame); then
+    // B's drawn speed change per frame from there on, the hit's own frames apart
+    let hitAt = -1, jump = 0;
+    for (let i = 1; i < hitRec.length && hitAt < 0; i++) if (Math.hypot(hitRec[i][3] - hitRec[i - 1][3], hitRec[i][4] - hitRec[i - 1][4]) > 1.5) hitAt = i;
+    if (hitAt > 0) for (let i = hitAt + 2; i < hitRec.length; i++) {
+      const d1 = Math.max(4, hitRec[i][0] - hitRec[i - 1][0]), d0 = Math.max(4, hitRec[i - 1][0] - hitRec[i - 2][0]);
+      jump = Math.max(jump, Math.hypot((hitRec[i][1] - hitRec[i - 1][1]) / d1 - (hitRec[i - 1][1] - hitRec[i - 2][1]) / d0,
+        (hitRec[i][2] - hitRec[i - 1][2]) / d1 - (hitRec[i - 1][2] - hitRec[i - 2][2]) / d0) * 1000 / 60);
+    }
 
     step = 'prediction drive';
     // Prediction: A drives, both record every frame.
@@ -203,6 +225,7 @@ async function runOnce(browser) {
       rtt: Math.round(rtt), fps: Math.round(fps), clock,
       speedKmh: Math.round(ra.reduce((s, r) => s + r[3], 0) / ra.length * 3.6),
       mean: +mean.toFixed(2), p95: +errs[Math.floor(errs.length * 0.95)].toFixed(2), bump: +bump.toFixed(2), errors,
+      jump: hitAt > 0 ? +jump.toFixed(2) : null,
       bots: botErr.length ? { n: botErr.length, mean: +(botErr.reduce((s, e) => s + e, 0) / botErr.length).toFixed(3), p95: +botErr[Math.floor(botErr.length * 0.95)].toFixed(3),
         raw: +(botRaw.reduce((s, e) => s + e, 0) / botRaw.length).toFixed(3) } : null,
     };
@@ -222,6 +245,8 @@ try {
     const r = await runOnce(browser);
     const bad = [];
     if (r.bump < MIN_BUMP) bad.push(`hit did not reach player B (B speed ${r.bump} m/s)`);
+    if (HEADED && r.jump === null) bad.push('A never felt its hit on B');
+    if (HEADED && r.jump > LIMIT_JUMP) bad.push(`A's picture of B jumped ${r.jump} m in a frame after the hit > ${LIMIT_JUMP} m`);
     if (r.mean > LIMIT_MEAN) bad.push(`mean error ${r.mean} m > ${LIMIT_MEAN} m`);
     if (r.p95 > LIMIT_P95) bad.push(`p95 error ${r.p95} m > ${LIMIT_P95} m`);
     if (r.errors.length) bad.push('page errors: ' + r.errors.join('; '));
@@ -231,7 +256,7 @@ try {
       else if (r.bots.mean > LIMIT_BOT_MEAN || r.bots.p95 > LIMIT_BOT_P95) bad.push(`players disagree on bots: mean ${r.bots.mean} m, p95 ${r.bots.p95} m`);
     }
     console.log(`run ${i + 1}: ping ${r.rtt} ms, ${r.fps} fps, clock error A ${r.clock[0]} ms B ${r.clock[1]} ms, A at ${r.speedKmh} km/h → B sees A off by ` +
-      `mean ${r.mean} m, p95 ${r.p95} m; bump pushed B to ${r.bump} m/s` +
+      `mean ${r.mean} m, p95 ${r.p95} m; bump pushed B to ${r.bump} m/s, A's picture of B jumped at most ${r.jump} m in a frame after it` +
       (r.bots ? `; bots: A and B differ by mean ${r.bots.mean} m, p95 ${r.bots.p95} m at the same server moment, ${r.bots.raw} m with the clock error (${r.bots.n} samples)` : '') +
       `  ${bad.length ? 'FAIL: ' + bad.join(', ') : 'ok'}`);
     if (bad.length) failed = true;

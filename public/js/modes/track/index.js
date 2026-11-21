@@ -117,6 +117,9 @@ export const trackMode = {
   get mapName(){ return MAP.name; },
   // cars this much apart in height are on different roads: no collision, no slipstream (net.js)
   get sameLevel(){ return SAME_LEVEL; },
+  // a hard hit by another car lifts ours off the road (net/bump.js) where the road has
+  // heights: the flight of geometry.js flies it (a flat map has no vertical motion)
+  get hops(){ return !FLAT; },
   id: 'track',
 
   show(){ group.visible=true; $('map').hidden=false; },

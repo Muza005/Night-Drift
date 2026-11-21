@@ -15,6 +15,7 @@ import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
+import { lift } from './net/bump.js';
 import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
 import { openGarage, garage } from './ui/garageScreen.js';
 import { lobby } from './ui/lobbyScreen.js';
@@ -310,7 +311,7 @@ function frame(now){
   audioDraft(G.state==='race' ? NET.draft.level : 0);
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
-    const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
+    const h=dt/2; physics(h); collideGhosts(h); physics(h); collideGhosts(h);
     // a crash in one of the two steps ends the run right there: no drift or near miss is
     // scored for the frame of the crash (the drift meter used to come back on and stay)
     if(G.state==='race'){
@@ -327,7 +328,9 @@ function frame(now){
   const fx=Math.sin(car.h), fz=Math.cos(car.h), rx=Math.cos(car.h), rz=-Math.sin(car.h);
   // on a map with heights: the car's height, and pitch and roll from the road under it
   const pose=G.mode.pose?G.mode.pose(car,dt):null, cy=pose?pose.y:0;
-  car.root.position.set(car.x,cy,car.z);
+  // a hard hit by another player's car lifts it a moment (net/bump.js): on maps with heights
+  // that is a real hop (car.air, in pose.y); elsewhere only drawn
+  car.root.position.set(car.x,cy+lift(car,dt),car.z);
   // a landing squashes the body toward the road (scaled from the ground up, so the wheels
   // never sink into it)
   if(pose){ car.root.rotation.set(pose.pitch,car.h,pose.roll,'YXZ'); car.body.scale.y=1-pose.squash*.5; }
