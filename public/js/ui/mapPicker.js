@@ -150,7 +150,7 @@ function neighbour(from, key){
   const dir = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[key];
   let best = null, bs = Infinity;
   for(const { c } of S.cards.values()){
-    if(c === from || !c.checkVisibility()) continue;
+    if(c === from || !(c.checkVisibility ? c.checkVisibility() : c.getClientRects().length)) continue;   // (checkVisibility: Safari 17.4+)
     const r = c.getBoundingClientRect();
     const gap = dir[0] > 0 ? r.left - a.right : dir[0] < 0 ? a.left - r.right : dir[1] > 0 ? r.top - a.bottom : a.top - r.bottom;
     if(gap < -t) continue;

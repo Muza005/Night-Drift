@@ -37,11 +37,17 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #lapbox .lapn{font-family:var(--f-display);font-weight:800;font-size:18px}
 #lapbox .lapt{font-size:22px;font-weight:700}
 #lapbox .best{font-size:12px;color:var(--amber)}
-#lapbox .ping{font-size:11px;color:var(--dim)}
+/* the ping shares the first row with «Круг» (below it the buttons would cover it); the box grows to fit both */
+#lapbox{grid-template-columns:auto auto;column-gap:12px}
+#lapbox>*{grid-column:1/-1}
+#lapbox>.lbl{grid-column:1;grid-row:1}
+#lapbox>.ping{grid-column:2;grid-row:1;justify-self:end;align-self:center;font-size:11px;color:var(--dim)}
 #lapbox .ping.bad{color:var(--rose)}
 .btns{position:absolute;top:calc(var(--top) + 118px);left:var(--lft);display:flex;gap:8px;pointer-events:auto}
 .btns button{font:600 12px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:999px;padding:7px 13px;cursor:pointer}
 .btns button:focus-visible,.cta:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+/* a finger's 44 px on a touch screen, without moving the buttons (see screens.css: touch targets) */
+@media (pointer:coarse){.btns button{position:relative}.btns button::before{content:'';position:absolute;inset:min(0px,calc((100% - 44px) / 2))}}
 
 #scorebox{position:absolute;top:var(--top);right:var(--rgt);display:grid;gap:8px;justify-items:end}
 #scorebox .sc{padding:10px 14px;text-align:right}

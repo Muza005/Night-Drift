@@ -242,11 +242,13 @@ function drawMap(s){
   $('lobMapName').textContent = m.name;
   if(!(track && host) && mapPicker.open) mapPicker.close();     // the host is gone or the mode changed
   // a new map in this room (not the first look at it): the guests are told
+  // («Готово» is mentioned only to a guest who had pressed it: S.ready is from the last look)
   if(S.mapRoom === NET.room && S.map && S.map !== m.id && !host && track){
-    note(`Хост сменил карту на «${m.name}». «Готово» сброшено.`, { short: true });
-    $('lobMapLive').textContent = `Новая карта: ${m.name}. «Готово» снято.`;
+    note(`Хост сменил карту на «${m.name}».` + (S.ready ? ' «Готово» сброшено.' : ''), { short: true });
+    $('lobMapLive').textContent = `Новая карта: ${m.name}.` + (S.ready ? ' «Готово» снято.' : '');
   }
-  S.map = m.id; S.mapRoom = NET.room;
+  const me = s.players.get(meId());
+  S.map = m.id; S.mapRoom = NET.room; S.ready = !!(me && me.ready);
 }
 $('lobMapBtn').addEventListener('click', () => {
   const s = state(); if(!s || !isHost() || !between() || s.mode === 'traffic') return;
@@ -317,7 +319,11 @@ export function openLobby(dir){
   S.open = true;
   menuPixels(true);
   renderLobby();
-  return showPanel('pLobby', dir);
+  const shown = showPanel('pLobby', dir);
+  // back from the results, focus was on a button that is gone now: it goes to the main button
+  const land = () => { const a = document.activeElement; if(S.open && (!a || a === document.body || !a.checkVisibility?.())) $('startRace').focus({ preventScroll: true }); };
+  Promise.resolve(shown).then(land, land);
+  return shown;
 }
 export function closeLobby(){
   if(!S.open) return;

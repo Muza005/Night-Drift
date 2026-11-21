@@ -852,3 +852,15 @@ body.touch #pOver .tip, body.touch #pPause .tip { display: none; }
   .res td:nth-child(4) { border-right: 1px solid var(--edge); border-radius: 0 18px 18px 0; }
   .res .me td:nth-child(4) { border-color: rgba(62, 240, 255, 0.35); }
 }
+
+/* ---------- touch targets ----------
+   On a touch screen every control takes a finger of at least 44 × 44 px, whatever size it
+   is drawn at (a phone held sideways draws some at 36-40 px to leave the stand its
+   height). An invisible ::before grows the hit area by what is missing, the layout stays. */
+@media (pointer: coarse) {
+  .icon-btn, .pill-btn, .seg-radio label, button.pl-who { position: relative; }
+  .icon-btn::before, .pill-btn::before, .seg-radio label::before, button.pl-who::before {
+    content: ""; position: absolute;
+    inset: min(0px, calc((100% - 44px) / 2));
+  }
+}

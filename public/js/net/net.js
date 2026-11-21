@@ -440,7 +440,7 @@ const PIN_MAX=6;   // m: the most the keep-out push may move a car from its pred
 function drawNetDebug(dt){
   if((dbgT-=dt)>0) return; dbgT=.25;
   if(!dbgBox){ dbgBox=document.createElement('pre'); dbgBox.id='netDebug';
-    Object.assign(dbgBox.style,{position:'fixed',left:'8px',bottom:'8px',zIndex:99,margin:0,padding:'6px 8px',font:'12px/1.35 ui-monospace,monospace',color:'#e8ecff',background:'rgba(8,10,20,.72)',borderRadius:'6px',pointerEvents:'none',whiteSpace:'pre'});
+    Object.assign(dbgBox.style,{position:'fixed',left:'8px',bottom:'8px',zIndex:99,margin:0,padding:'6px 8px',font:'12px/1.35 ui-monospace,monospace',color:'#e8ecff',background:'rgba(8,10,20,.72)',borderRadius:'6px',pointerEvents:'none',whiteSpace:'pre-wrap',maxWidth:'calc(100vw - 16px)'});
     document.body.append(dbgBox); }
   const r=netReport(), f=(v,d=0)=>Number(v||0).toFixed(d);
   dbgBox.hidden=!NET.online;
