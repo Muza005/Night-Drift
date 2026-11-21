@@ -1,7 +1,8 @@
 // The map validator (track engine v2, modes/track/). Every map in maps/index.js must:
 //  - have a lap of a sensible length;
 //  - keep the centre-line radius at least WALL + 2 m (a car fits round the inside wall);
-//  - never cross itself without at least 6 m of height between the two roads;
+//  - never cross itself without at least 6 m of height between the two roads (on a map with
+//    stacked levels, a car park: 3.2 m clear under the slab or deck between them);
 //  - keep grades within 12 %, and the ramps up to a bridge within 8 %;
 //  - lean its banks into the turn;
 //  - start on a straight;
@@ -71,6 +72,7 @@ for (const id of IDS) {
       const d = Math.hypot(T.P[i].x - T.P[j].x, T.P[i].z - T.P[j].z);
       if (d >= 2 * T.WALL) continue;
       const dy = Math.abs(T.Y[i] - T.Y[j]);
+      if (MAPS[id].levels && dy < 6) { crossings++; continue; }     // stacked levels: checked below, by the slab between them
       if (!ex.crossing) assert.ok(dy >= 6, `${id}: points ${i} and ${j} are ${d.toFixed(1)} m apart with only ${dy.toFixed(1)} m of height between them`);
       crossings++;
     }
@@ -102,7 +104,11 @@ for (const id of IDS) {
     const hooks = { onWall() {}, onLap: () => laps.push(t), onLand() { jumps++; } };
     const I = { up: 0, down: 0, left: 0, right: 0, hb: 0 };
     while (laps.length < 2 && t < 240) {
-      const a = (car.idx + look) % T.N, far = (car.idx + look * 3) % T.N;
+      // it aims 26 points ahead, but never further round than 115° of turn (in a 12 m helix
+      // 42 m ahead lies behind the core)
+      let n = 0, turn = 0;
+      while (n < look) { const j = (car.idx + n) % T.N, k = (j + 1) % T.N; turn += Math.abs(ang(Math.atan2(T.TG[j].x, T.TG[j].z), Math.atan2(T.TG[k].x, T.TG[k].z))); if (turn > 2) break; n++; }
+      const a = (car.idx + Math.max(6, n)) % T.N, far = (car.idx + look * 3) % T.N;
       const toA = Math.atan2(T.P[a].x - car.x, T.P[a].z - car.z), err = ang(car.h, toA);
       const bend = Math.abs(ang(toA, Math.atan2(T.P[far].x - T.P[a].x, T.P[far].z - T.P[a].z)));
       const sp = Math.hypot(car.vx, car.vz), tooFast = sp > f * (20 + 45 * (1 - Math.min(1, bend / 1.2)));
@@ -455,3 +461,125 @@ test('«Перевал» and «Развязка»: every bridge passes over the 
   }
   T.setMap('neon');
 });
+
+// Stacked levels (stage 5, «Паркинг»): a car park whose floors and ramps pass over each
+// other one floor apart, with a slab or a deck between them.
+const { chase, CAM_ROOF } = await import('../public/js/modes/track/chase.js');
+const { layout, COL } = await import('../public/js/modes/track/building.js');
+for (const id of IDS.filter(id => MAPS[id].levels)) {
+  // the road surface of the piece of road that passes over or under (x, z), other than the
+  // stretch round track point i: [height, track point] for each
+  const roadsAt = (x, z, i) => {
+    const out = [];
+    for (let j = 0; j < T.N; j++) {
+      let dd = Math.abs(T.DIST[j] - T.DIST[i]); dd = Math.min(dd, T.TRACK_LEN - dd); if (dd < 4 * T.WALL) continue;
+      const rx = x - T.P[j].x, rz = z - T.P[j].z; if (rx * rx + rz * rz > (T.WALL + 1) ** 2) continue;
+      const along = rx * T.TG[j].x + rz * T.TG[j].z; if (along < -T.HL[(j - 1 + T.N) % T.N] / 2 - .01 || along > T.HL[j] / 2 + .01) continue;
+      const lat = rx * T.NM[j].x + rz * T.NM[j].z; if (Math.abs(lat) > T.WALL) continue;
+      out.push([T.Y[j] + lat * T.TB[j] + along * T.GR[j], j]);
+    }
+    return out;
+  };
+  test(`map ${id}: stacked levels: 3.2 m clear under every slab and deck`, () => {
+    T.setMap(id);
+    const { gap, slab } = MAPS[id].levels, b = MAPS[id].building;
+    let clear = Infinity, pairs = 0;
+    // across the whole width between the walls, wherever two roads lie over each other
+    for (let i = 0; i < T.N; i++) for (const o of [-T.WALL, -T.WALL / 2, 0, T.WALL / 2, T.WALL]) {
+      const x = T.P[i].x + T.NM[i].x * o, z = T.P[i].z + T.NM[i].z * o, y = T.Y[i] + o * T.TB[i];
+      for (const [yj, j] of roadsAt(x, z, i)) {
+        const dy = Math.abs(yj - y); pairs++;
+        assert.ok(dy - slab >= 3.2, `${id}: points ${i} and ${j} (${o.toFixed(1)} m off the centre): ${(dy - slab).toFixed(2)} m clear between the roads`);
+        clear = Math.min(clear, dy - slab);
+        // (a road right over another's centre line is that one's ceiling there: geometry.js CEIL)
+        if (o === 0 && yj > y) assert.ok(Math.abs(T.CEIL[i] - (dy - slab)) < .3 || T.CEIL[i] < dy - slab, `${id}: point ${i} has a road ${dy.toFixed(2)} m over it, its ceiling is ${T.CEIL[i].toFixed(2)} m`);
+      }
+    }
+    // the ceilings themselves: none lower than that; inside the building every road lies on a floor
+    let cmin = Infinity, inside = 0;
+    for (let i = 0; i < T.N; i++) {
+      cmin = Math.min(cmin, T.CEIL[i]);
+      if (T.P[i].x > b.x0 && T.P[i].x < b.x1 && T.P[i].z > b.z0 && T.P[i].z < b.z1) { inside++;
+        assert.ok(b.floors.some(f => Math.abs(T.Y[i] - f) < .02), `${id}: point ${i} at ${T.Y[i].toFixed(2)} m inside the building is between floors`); }
+    }
+    assert.ok(cmin >= 3.2, `${id}: a ceiling ${cmin.toFixed(2)} m over the road`);
+    assert.ok(T.SAME_LEVEL <= gap / 2 && T.SAME_LEVEL > 1, `${id}: cars ${T.SAME_LEVEL} m apart in height are on different floors`);
+    console.log(`${id}: ${pairs} places where roads lie over each other, at least ${clear.toFixed(2)} m clear; ceilings ${cmin.toFixed(2)} m and higher; ${inside} of ${T.N} points inside the building`);
+  });
+
+  test(`map ${id}: respawn and other players' cars land on their own floor`, () => {
+    T.setMap(id);
+    let n = 0, ghosts = 0;
+    for (let i = 0; i < T.N; i += 3) {
+      // only where another road passes over or under
+      const others = roadsAt(T.P[i].x, T.P[i].z, i); if (!others.length) continue;
+      for (const lat of [-(T.WALL - 1.3), 0, T.WALL - 1.3]) {
+        const x = T.P[i].x + T.NM[i].x * lat, z = T.P[i].z + T.NM[i].z * lat;
+        const car = { x, z, idx: others[0][1], y: T.Y[i] + lat * T.TB[i] };
+        const j = T.nearest(car, true); n++;
+        assert.ok(Math.abs(T.Y[j] - T.Y[i]) < .6 && Math.hypot(T.P[j].x - T.P[i].x, T.P[j].z - T.P[i].z) < 4, `${id}: a car at point ${i} (${lat.toFixed(1)} m off the centre, ${car.y.toFixed(1)} m up) respawns at point ${j} (${T.Y[j].toFixed(1)} m up)`);
+        // another player's car whose last known track point is the road over or under it
+        const memo = { idx: others[0][1] }, p = T.keepInWalls({ x, z, y: car.y }, memo); ghosts++;
+        assert.ok(Math.abs(T.Y[memo.idx] - T.Y[i]) < .6 && Math.abs(p.y - car.y) < .3, `${id}: another car at point ${i} is drawn at point ${memo.idx}, ${p.y.toFixed(2)} m up instead of ${car.y.toFixed(2)}`);
+      }
+    }
+    assert.ok(n > 100, `${id}: ${n} places tried`);
+    console.log(`${id}: ${n} respawns and ${ghosts} other players' cars over or under another road, every one on its own floor`);
+  });
+
+  test(`map ${id}: the race camera stays under the ceilings and clear of the columns`, () => {
+    T.setMap(id);
+    const { slab } = MAPS[id].levels, b = MAPS[id].building, L = layout();
+    assert.ok(L.columns.length > 100 && L.lines.length > 100 && L.lights.length > 100, `${id}: ${L.columns.length} columns, ${L.lines.length} bay lines, ${L.lights.length} lights`);
+    // no column on a road or in its run-off: every one stands outside the walls of the roads of its floor
+    for (const [x, z, y0, y1] of L.columns) for (let i = 0; i < T.N; i++) {
+      if (T.Y[i] < y0 - .5 || T.Y[i] > y1 - 1) continue;
+      assert.ok(Math.hypot(T.P[i].x - x, T.P[i].z - z) >= T.WALL + COL / 2 + .2, `${id}: a column at ${x.toFixed(1)}, ${z.toFixed(1)} stands ${Math.hypot(T.P[i].x - x, T.P[i].z - z).toFixed(1)} m from point ${i}`);
+    }
+    // the lowest ceiling over (x, z) above height y: a slab of the building, or a road's deck
+    const ceilingAt = (x, z, y) => {
+      let c = Infinity;
+      if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) for (const f of b.floors) if (f > y + 1) c = Math.min(c, f - slab);
+      for (let j = 0; j < T.N; j++) { const rx = x - T.P[j].x, rz = z - T.P[j].z; if (rx * rx + rz * rz > (T.WALL + 1.3) ** 2) continue;
+        // (the deck of the piece of road whose cross-section, out to the deck's edge, passes over (x, z))
+        const along = rx * T.TG[j].x + rz * T.TG[j].z; if (along < -T.HL[(j - 1 + T.N) % T.N] / 2 - .01 || along > T.HL[j] / 2 + .01) continue;
+        const lat = rx * T.NM[j].x + rz * T.NM[j].z; if (Math.abs(lat) > T.WALL + .3) continue;
+        const yj = T.Y[j] + lat * T.TB[j] + along * T.GR[j]; if (yj > y + 1.5) c = Math.min(c, yj - slab); }
+      return c;
+    };
+    // the validator's bot drives a lap; the camera follows it at 60 Hz
+    const car = {x:0,z:0,h:0,vx:0,vz:0,vF:0,vR:0,steer:0,idx:0,prog:0,off:false,spinV:0};
+    T.placeGrid(car, 0);
+    const rig = { pos: new THREE.Vector3(), look: new THREE.Vector3(), init: false };
+    const hooks = { onWall() {}, onLap() { laps++; }, onLand() {} }, I = { up: 0, down: 0, left: 0, right: 0, hb: 0 };
+    let laps = 0, t = 0, frames = 0, under = 0, worst = Infinity, nearCol = Infinity;
+    const dt = 1 / 120;
+    while (laps < 1 && t < 200) {
+      let n = 0, turn = 0;
+      while (n < 26) { const j = (car.idx + n) % T.N, k = (j + 1) % T.N; turn += Math.abs(ang(Math.atan2(T.TG[j].x, T.TG[j].z), Math.atan2(T.TG[k].x, T.TG[k].z))); if (turn > 2) break; n++; }
+      const a = (car.idx + Math.max(6, n)) % T.N, err = ang(car.h, Math.atan2(T.P[a].x - car.x, T.P[a].z - car.z));
+      const sp = Math.hypot(car.vx, car.vz);
+      I.left = err > .03 ? 1 : 0; I.right = err < -.03 ? 1 : 0; I.up = Math.abs(err) < .6 && sp < 24 ? 1 : 0;
+      stepCar(car, I, dt); T.constrainToTrack(car, dt, hooks); t += dt;
+      if (Math.round(t * 120) % 2) continue;
+      chase(car, 1 / 60, rig); frames++;
+      const c = rig.pos, top = ceilingAt(c.x, c.z, car.y);
+      if (top < Infinity) { under++; worst = Math.min(worst, top - c.y);
+        assert.ok(c.y <= top - .3, `${id}: at ${t.toFixed(1)} s (point ${car.idx}) the camera is ${(c.y - top).toFixed(2)} m from the ceiling`); }
+      for (const [x, z, y0, y1] of L.columns) if (c.y > y0 && c.y < y1) {
+        const d = Math.max(Math.abs(c.x - x), Math.abs(c.z - z)) - COL / 2; nearCol = Math.min(nearCol, d);
+        assert.ok(d > .3, `${id}: at ${t.toFixed(1)} s the camera is ${d.toFixed(2)} m from a column`); }
+    }
+    assert.equal(laps, 1, `${id}: the bot lapped`);
+    assert.ok(under > frames / 3, `${id}: ${under} of ${frames} frames under a ceiling`);
+    console.log(`${id}: the camera followed a ${t.toFixed(0)} s lap; ${under} of ${frames} frames under a ceiling, at least ${worst.toFixed(2)} m below it (keeps ${CAM_ROOF} m), at least ${nearCol.toFixed(2)} m from a column`);
+  });
+
+  test(`map ${id}: a careful driver laps it`, () => {
+    T.setMap(id);
+    const r = followRoute(route([]));
+    assert.equal(r.laps.length, 2, `${id}: ${r.laps.length} laps in ${r.t.toFixed(0)} s`);
+    assert.ok(r.worst < 2, `${id}: stuck ${r.worst.toFixed(1)} s`);
+    console.log(`${id}: route bot lap ${(r.laps[1] - r.laps[0]).toFixed(1)} s, ${r.walls} wall hits in two laps`);
+  });
+}

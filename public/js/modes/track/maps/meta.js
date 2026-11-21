@@ -7,8 +7,9 @@ export const MAP_META = {
   neon: { name: 'Ночной город', len: 1433.4, min: 1433.4, hidden: false },
   estakada: { name: 'Эстакада', len: 1972.2, min: 1972.2, hidden: false },
   serpantin: { name: 'Серпантин', len: 2473.6, min: 2332.5, hidden: false },
+  parking: { name: 'Паркинг', len: 1646.2, min: 1646.2, hidden: false },
   pereval: { name: 'Перевал', len: 2514.8, min: 2514.8, hidden: false },
-  razvyazka: { name: 'Развязка', len: 2803.3, min: 2442.1, hidden: false },
+  razvyazka: { name: 'Развязка', len: 2803.3, min: 2388.4, hidden: false },
   _testhill: { name: 'Тестовый холм', len: 923.6, min: 923.6, hidden: true },
 };
 export const DEFAULT_MAP = 'neon';

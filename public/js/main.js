@@ -23,11 +23,15 @@ import { applyLook } from './player.js';
 import { preloadAll } from './core/carModels.js';
 
 if (isTouch) document.body.classList.add('touch');
+import { records, saveScore, migrate } from './records.js';
 const LS = {
   get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
-{ const b=parseFloat(LS.get('nightdrift.best')); if(b>0) G.best=b; }
+// solo drift records per map (records.js): G.best (lap, s) and G.bestScore are the active map's
+migrate();
+function loadRecords(){ const r=records(trackMode.mapId); G.best=r.lap; G.bestScore=r.score; }
+loadRecords();
 
 /* ---------- modes ----------
    The drift track is built at start-up; the highway module loads the first time it is
@@ -99,7 +103,7 @@ $('bPause').addEventListener('click',()=>{ if(NET.online) leaveOnline(); else if
 function startRace(quick=false){
   audioInit();
   $('menu').hidden=true; canvas.focus();
-  G.mode.enter(car,{slot:0});
+  G.mode.enter(car,{slot:0}); loadRecords();
   G.raceT=0; G.lapT=0; G.lap=1; G.score=0; G.runBest=0; G.runRecord=false; G.runEnd=false; dropDrift(); clearMarks();
   G.state='count';
   if(quick){ G.cd=0.45; G.prevCount=1; $('count').textContent=''; }
@@ -131,6 +135,7 @@ let menuKind = 'solo';                   // which mode screen is open: 'solo' | 
 
 function renderRecords(){
   const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
+  loadRecords();                         // (the solo map's: «Дрифт» shows the map it will start on)
   $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : 'Лучшего круга пока нет';
   $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) : 'Рекорда пока нет';
 }
@@ -215,8 +220,11 @@ function showFinish(){
   overTitle('Финиш', G.soloLaps+' '+(G.soloLaps===1?'круг':G.soloLaps<5?'круга':'кругов'));
   $('overLbl').textContent = 'Очки дрифта';
   $('overScore').textContent = fmtN(G.score);
-  $('overRecord').hidden = !G.runRecord; $('overRecord').textContent = 'Рекорд круга';
-  $('overBest').textContent = G.runRecord ? '' : (G.best ? 'Рекорд круга ' + fmtT(G.best) : '');
+  // the map's records: the lap (finishLap keeps it) and the run's drift score
+  const scoreRec = saveScore(trackMode.mapId, G.score); if(scoreRec) G.bestScore = G.score;
+  $('overRecord').hidden = !G.runRecord && !scoreRec;
+  $('overRecord').textContent = G.runRecord && scoreRec ? 'Рекорд круга и очков' : G.runRecord ? 'Рекорд круга' : 'Рекорд очков';
+  $('overBest').textContent = [!G.runRecord && G.best ? 'Рекорд круга ' + fmtT(G.best) : '', !scoreRec && G.bestScore ? 'рекорд очков ' + fmtN(G.bestScore) : ''].filter(Boolean).join(' · ');
   const box=$('overStats'); box.replaceChildren();
   for(const [k,v] of [['Время', fmtT(G.raceT)], ['Лучший круг', G.runBest ? fmtT(G.runBest) : '—'], ['Круги', String(G.soloLaps)]]){
     const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;

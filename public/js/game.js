@@ -3,6 +3,7 @@ import { G, NET, drift } from './state.js';
 import { car } from './player.js';
 import { thud } from './core/audio.js';
 import { popup, flash, fmtN, fmtT } from './ui/hud.js';
+import { saveLap } from './records.js';
 
 export function resetToTrack(){ G.mode.respawn(car); dropDrift(); flash('На трассе'); }
 
@@ -51,7 +52,8 @@ export function finishLap(){
     if(G.lap>NET.laps){ NET.finished=true; G.lap=NET.laps; bank(); if(NET.room) NET.room.send('score',{score:G.score}); }
     return;
   }
-  let rec=false; if(!G.best||t<G.best){ G.best=t; rec=true; try{localStorage.setItem('nightdrift.best',String(t));}catch(e){} }
+  // the active map's lap record (records.js)
+  let rec=false; if(G.mode && G.mode.mapId && saveLap(G.mode.mapId, t)){ G.best=t; rec=true; }
   if(!G.runBest||t<G.runBest) G.runBest=t;
   if(rec) G.runRecord=true;
   // solo drift has N laps: after the last one the run ends (main.js shows the finish)

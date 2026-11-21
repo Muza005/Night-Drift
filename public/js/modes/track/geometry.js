@@ -18,6 +18,13 @@ export let MAP = null, N = 0, ROAD = 16, HALF = 8, WALL = 14, START = 0, TRACK_L
 // braking off the asphalt (1/s: the speed lost per second is this × the speed) and the
 // shortest legal lap (m: through every shortcut)
 export let VDRAG = .45, LAP_MIN = 0;
+// Stacked levels (maps' `levels: { gap, slab }`, «Паркинг»): roads pass over each other one
+// floor apart (gap, m) with a slab or a deck (slab, m thick) between them. LEVELS is the
+// map's field or null; YW weighs the height difference in nearest()'s full search (4 m per
+// m; 10 on a map with levels, so a car is never put on the floor above or below); SAME_LEVEL
+// is the height difference under which two cars are on the same road (collisions,
+// slipstream: 3 m; half a floor on a map with levels).
+export let LEVELS = null, YW = 4, SAME_LEVEL = 3;
 // per track point: position (y = road height), horizontal tangent and normal (NM points to
 // the driver's left), distance along the lap
 export const P = [], TG = [], NM = [], DIST = [];
@@ -29,6 +36,10 @@ export const Y = [], GR = [], BANK = [], TB = [], HL = [], RAD = [], BRIDGE = []
 // Shortcuts (maps' `shortcuts`, see buildShortcut) and the lap's checkpoints: the track
 // points a lap must pass in order (GATES), none of them on a stretch a shortcut skips.
 export const SHORTCUTS = [], GATES = [];
+// Per track point on a map with levels: how far above the road (its centre) the nearest
+// ceiling is: a floor slab of the building over it, or the deck of a road above it (m, to
+// the underside); Infinity under the open sky (and everywhere on other maps).
+export const CEIL = [];
 
 const listeners = [];
 export function onMapChange(fn){ listeners.push(fn); }
@@ -78,7 +89,28 @@ function buildGeometry(map){
   g.SHORTCUTS = (map.shortcuts || []).map((s, k) => buildShortcut(g, s, k));
   g.LAP_MIN = g.TRACK_LEN - g.SHORTCUTS.reduce((a, s) => a + Math.max(0, s.saves), 0);
   g.GATES = buildGates(g);
+  g.CEIL = buildCeil(g);
   return g;
+}
+// The ceilings (see CEIL): the slabs of the map's `building` (a box x0..x1, z0..z1 with
+// floors at the heights in `floors`) over a point inside it, and the decks of the roads
+// above it: a road whose cross-section (out to its walls) passes over the point, more
+// than 1 m higher; its deck's underside there.
+function buildCeil(g){
+  const { map, N, P, Y, NM, TG, TB, GR, HL, WALL } = g, out = new Array(N).fill(Infinity);
+  if(!map.levels) return out;
+  const slab = map.levels.slab || 0, b = map.building;
+  for(let i=0;i<N;i++){
+    let c = Infinity;
+    if(b && P[i].x>=b.x0 && P[i].x<=b.x1 && P[i].z>=b.z0 && P[i].z<=b.z1)
+      for(const f of b.floors) if(f>Y[i]+1) c=Math.min(c, f-slab-Y[i]);
+    for(let j=0;j<N;j++){ const dx=P[i].x-P[j].x, dz=P[i].z-P[j].z; if(dx*dx+dz*dz>(WALL+1)*(WALL+1) || Y[j]<Y[i]+1) continue;
+      const along=dx*TG[j].x+dz*TG[j].z; if(along<-HL[(j-1+N)%N]/2-.01 || along>HL[j]/2+.01) continue;
+      const lat=dx*NM[j].x+dz*NM[j].z; if(Math.abs(lat)>WALL+.3) continue;
+      c=Math.min(c, Y[j]+lat*TB[j]+along*GR[j]-slab-Y[i]); }
+    out[i]=c;
+  }
+  return out;
 }
 
 // A shortcut (map field `shortcuts: [{ from, to, points, width }]`): a narrow road (width
@@ -139,12 +171,13 @@ export function setMap(id){
   if(MAP === map) return MAP;
   const g = buildGeometry(map);
   MAP = map; SC = g.SC; ROAD = g.ROAD; HALF = g.HALF; WALL = g.WALL; N = g.N;
-  for(const k of ['P','TG','NM','DIST','Y','GR','BANK','TB','HL','RAD','BRIDGE','CP','SHORTCUTS','GATES']){ const a=ARRAYS[k]; a.length=0; for(const v of g[k]) a.push(v); }
+  LEVELS = map.levels || null; YW = LEVELS ? 10 : 4; SAME_LEVEL = LEVELS ? LEVELS.gap / 2 : 3;
+  for(const k of ['P','TG','NM','DIST','Y','GR','BANK','TB','HL','RAD','BRIDGE','CP','SHORTCUTS','GATES','CEIL']){ const a=ARRAYS[k]; a.length=0; for(const v of g[k]) a.push(v); }
   TRACK_LEN = g.TRACK_LEN; FLAT = g.FLAT; START = g.START; VDRAG = g.VDRAG; LAP_MIN = g.LAP_MIN;
   for(const fn of listeners) fn(MAP);
   return MAP;
 }
-const ARRAYS = { P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP, SHORTCUTS, GATES };
+const ARRAYS = { P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP, SHORTCUTS, GATES, CEIL };
 // the track point at control-point coordinate k
 export function sampleAt(k){
   const l=MAP.points.length; k=((k%l)+l)%l;
@@ -209,15 +242,16 @@ export function placeOnCut(car){
 }
 // The nearest track point. Local (±36 points from car.idx) every substep, so at a
 // crossing the car never jumps to the other road. A full search (after a jump to a new
-// place) also weighs the height difference when the car's height is known, so a car on a
-// bridge finds the bridge and not the road below it.
+// place) also weighs the height difference when the car's height is known (YW per m), so
+// a car on a bridge finds the bridge and not the road below it, and a car on a floor of
+// the car park its own floor.
 export function nearest(car,full){
   let bi=car.idx, bd=1e12; const from=full?0:-36, to=full?N:36;
   if(FLAT || car.y===undefined){
     for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, d=dx*dx+dz*dz; if(d<bd){bd=d;bi=j;} }
     return bi;
   }
-  for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, dy=(Y[j]-car.y)*4, d=dx*dx+dz*dz+dy*dy; if(d<bd){bd=d;bi=j;} }
+  for(let k=from;k<to;k++){ const j=full?k:(car.idx+k+N)%N; const dx=P[j].x-car.x, dz=P[j].z-car.z, dy=(Y[j]-car.y)*YW, d=dx*dx+dz*dz+dy*dy; if(d<bd){bd=d;bi=j;} }
   return bi;
 }
 
@@ -260,6 +294,9 @@ export function keepInWalls(p, memo){
   // car would be "bounced" off that piece's walls. A car is never this far from its own
   // piece of track: search the whole track again.
   { const dx=P[i].x-p.x, dz=P[i].z-p.z, far=WALL+12; if(dx*dx+dz*dz>far*far){ q0.idx=i; i=nearest(q0, true); } }
+  // (with stacked levels: nor beside its own walls or on another floor; a car never flies there)
+  if(LEVELS && q0.y!==undefined){ const dx=P[i].x-p.x, dz=P[i].z-p.z, w=WALL+1;
+    if(dx*dx+dz*dz>w*w || Math.abs(Y[i]-q0.y)>SAME_LEVEL){ q0.idx=i; i=nearest(q0, true); } }
   memo.idx=i;
   const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
   // on a shortcut: kept inside the shortcut's walls instead

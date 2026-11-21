@@ -6,7 +6,8 @@
 // local radius (geometry.js safeOffsets) and checked for folds, so on a hairpin tighter
 // than the offset the line narrows instead of looping over itself ("broken curbs").
 import { scene, cv, tex, glowTex, winTex } from '../../core/render.js';
-import { P, NM, TG, DIST, Y, TB, RAD, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, SHORTCUTS, safeOffsets, onMapChange } from './geometry.js';
+import { P, NM, TG, DIST, Y, TB, RAD, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, SHORTCUTS, CEIL, LEVELS, safeOffsets, onMapChange } from './geometry.js';
+import { buildParking, hazardMat } from './scene-parking.js';
 
 // Road texture: 512 px across the 16 m road (32 px/m), one tile = ROAD_TILE m along it.
 // Edge lines 5 px = 0.156 m, 0.5 m in from the asphalt edge; centre line 4 px = 0.125 m,
@@ -47,6 +48,16 @@ const cutTex = (() => {
   g.strokeStyle='rgba(255,194,61,.9)'; g.lineWidth=9; g.lineJoin='miter';
   g.beginPath(); g.moveTo(34,70); g.lineTo(64,40); g.lineTo(94,70); g.stroke();
   g.beginPath(); g.moveTo(34,150); g.lineTo(64,120); g.lineTo(94,150); g.stroke();
+  return tex(c,true);
+})();
+// A car park's floor (maps with levels, under a ceiling): pale concrete, white edge lines,
+// a dashed white centre line.
+const parkRoadTex = (() => {
+  const W=512, H=1024, pxV=H/ROAD_TILE;
+  const [c,g]=cv(W,H); g.fillStyle='#3d3f48'; g.fillRect(0,0,W,H);
+  const id=g.getImageData(0,0,W,H); for(let k=0;k<id.data.length;k+=4){const n=(Math.random()-.5)*20; id.data[k]+=n; id.data[k+1]+=n; id.data[k+2]+=n;} g.putImageData(id,0,0);
+  g.fillStyle='rgba(235,240,255,.85)'; g.fillRect(16,0,6,H); g.fillRect(W-22,0,6,H);
+  for(let m=0;m<ROAD_TILE;m+=6) g.fillRect(W/2-3,Math.round(m*pxV),6,Math.round(2.5*pxV));
   return tex(c,true);
 })();
 const checkerTex = (() => {
@@ -119,6 +130,11 @@ const lineMat=new THREE.MeshStandardMaterial({map:chk, roughness:.7});
 const cConcrete=new THREE.Color(0x4a4d5a);
 const zebraMat=new THREE.MeshStandardMaterial({map:zebraTex, transparent:true, alphaTest:.4, roughness:.6, emissive:0x9aa2c0, emissiveMap:zebraTex, emissiveIntensity:.35, side:THREE.DoubleSide, depthWrite:false});
 const cutMat=new THREE.MeshStandardMaterial({map:cutTex, roughness:.8, metalness:.05, side:THREE.DoubleSide});
+// a car park («Паркинг»): its floors, concrete barriers with the hazard band in place of neon
+const parkRoadMat=new THREE.MeshStandardMaterial({map:parkRoadTex, roughness:.85, side:THREE.DoubleSide});
+const parkRunoffMat=new THREE.MeshStandardMaterial({color:0x5d606c, roughness:.92, side:THREE.DoubleSide});
+const barrierMat=new THREE.MeshStandardMaterial({color:0x585b67, roughness:.85, side:THREE.DoubleSide});
+const hazardSide=hazardMat.clone(); hazardSide.side=THREE.DoubleSide;
 // forest and port decor
 const leafMat=new THREE.MeshStandardMaterial({color:0x123222, roughness:.9, emissive:0x0b2416, emissiveIntensity:.5});
 const trunkMat=new THREE.MeshStandardMaterial({color:0x2a1d14, roughness:1});
@@ -128,6 +144,7 @@ const THEMES = {
   city: { ground: groundTex, runoff: 0x17142a },
   forest: { ground: forestGroundTex, runoff: 0x13241a },
   port: { ground: portGroundTex, runoff: 0x1a1c25 },
+  parking: { ground: groundTex, runoff: 0x2a2c35 },
 };
 // An open strip along a shortcut (geometry.js SHORTCUTS: x, z, y, nx, nz, d per sample)
 // from offset o0 to o1, yOff above its road; skip(k): leave out the piece from sample k to k+1.
@@ -183,9 +200,15 @@ function build(){
   if(!flatMap) ground.position.set(cx,-.02,cz);   // («Ночной город» keeps its ground where it always was)
   ground.receiveShadow = true; B.add(ground);
 
-  for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10), runoffMat); m.receiveShadow=true; B.add(m); }
-  const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE), roadMat);
+  // (a car park: concrete off the street, on its floors, ramps and roof)
+  const deckRoad = i => LEVELS && (CEIL[i]<8 || Y[i]>.3) && (CEIL[(i+1)%N]<8 || Y[(i+1)%N]>.3);
+  for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10, null, LEVELS ? deckRoad : undefined), runoffMat); m.receiveShadow=true; B.add(m);
+    if(LEVELS){ const c=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10, null, i=>!deckRoad(i)), parkRunoffMat); c.receiveShadow=true; B.add(c); } }
+  // (a car park: its own floor under the ceilings, asphalt in the open)
+  const under = i => CEIL[i] < 8 && CEIL[(i+1)%N] < 8;
+  const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE, null, LEVELS ? under : undefined), roadMat);
   road.receiveShadow = true; B.add(road);
+  if(LEVELS){ const r = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE, null, i => !under(i)), parkRoadMat); r.receiveShadow = true; B.add(r); }
   const zebra = MAP.curb==='zebra';
   for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,zebra?()=>cConcrete:i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; B.add(m); }
   if(zebra){
@@ -206,8 +229,8 @@ function build(){
     // where a shortcut passes through
     const O=safeOffsets(s*WALL), In=O.map(o=>o-Math.sign(o)*.02);
     const gap=SHORTCUTS.length ? (()=>{ const g=new Uint8Array(N); for(let i=0;i<N;i++) g[i]=inCut(P[i].x+NM[i].x*O[i], P[i].z+NM[i].z*O[i], .3)?1:0; return i=>g[i]||g[(i+1)%N]; })() : null;
-    B.add(new THREE.Mesh(vribbon(O,0,.95,gap), wallMat));
-    B.add(new THREE.Mesh(vribbon(In,.78,.95,gap), neonMat[s]));
+    B.add(new THREE.Mesh(vribbon(O,0,.95,gap), LEVELS ? barrierMat : wallMat));
+    B.add(new THREE.Mesh(vribbon(In,LEVELS?.62:.78,.95,gap), LEVELS ? hazardSide : neonMat[s]));
   }
   // shortcuts: asphalt (where it is off the main road's asphalt and curbs), small red and
   // white curbs, run-off, walls with neon (where outside the main road's walls)
@@ -226,7 +249,9 @@ function build(){
 
   // Raised road: an embankment (sides down to the ground) where it is not a bridge; a
   // bridge is a deck 1.1 m thick on pillars, with a lit arch at each end.
-  if(!flatMap){
+  // (a car park: slabs, decks and columns instead, scene-parking.js)
+  if(MAP.building) buildParking(B, { ribbon, vribbon });
+  if(!flatMap && !MAP.building){
     const low=i=>Math.max(Y[i],Y[(i+1)%N])<.05;
     for(const s of [1,-1]) B.add(new THREE.Mesh(vribbon(s*(WALL+.02),-.05,0,i=>low(i)||BRIDGE[i]||BRIDGE[(i+1)%N],true), bankMat));
     const notBridge=i=>!(BRIDGE[i]&&BRIDGE[(i+1)%N]);
@@ -269,6 +294,10 @@ function build(){
       if(near.some(j=>Math.abs(j-i)>40 && Math.abs(j-i)<N-40)) continue;
       if(roadsNear(v.x,v.z,WALL+3).some(j=>Y[j]>base+2 && Y[j]<base+9.5)) continue;
       if(SHORTCUTS.length && inCut(v.x,v.z,2)) continue;
+      // a car park: none under a ceiling, none standing over a road below (the towers)
+      if(LEVELS && (CEIL[i]<1e9 || roadsNear(v.x,v.z,WALL+1.5).some(j=>Y[j]<base-1))) continue;
+      // nor in the street right against the car park's front (taller than its first floor)
+      if(MAP.building){ const bd=MAP.building, m=6; if(base<1 && v.x>bd.x0-m && v.x<bd.x1+m && v.z>bd.z0-m && v.z<bd.z1+m) continue; }
       // nor on or beside a bridge (its deck; the arches light it), where the post would graze the deck
       if(BRIDGE[i] || roadsNear(v.x,v.z,WALL+4).some(j=>BRIDGE[j] && Y[j]>base+1)) continue;
       spots.push([i,s,v,base]); }
@@ -279,7 +308,8 @@ function build(){
     const poolG=new THREE.PlaneGeometry(15,15).rotateX(-Math.PI/2);
     spots.forEach(([i,s,v,base],k)=>{ const n=NM[i];
       const ang=Math.atan2(n.x,n.z); e.set(0,ang,0); q.setFromEuler(e);
-      const bot=flatMap?0:Math.min(0,base); v.y=bot; m.compose(v,q,new THREE.Vector3(1,7.5+base-bot,1)); posts.setMatrixAt(k,m);
+      const bd=MAP.building, onRoof=bd && v.x>bd.x0 && v.x<bd.x1 && v.z>bd.z0 && v.z<bd.z1;
+      const bot=flatMap?0:onRoof?base:Math.min(0,base); v.y=bot; m.compose(v,q,new THREE.Vector3(1,7.5+base-bot,1)); posts.setMatrixAt(k,m);
       const hp=v.clone().addScaledVector(n,-s*1.1); hp.y=base+7.4; m.compose(hp,q,one); heads.setMatrixAt(k,m);
       const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:0xffb15a,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:.8}));
       sp.position.copy(hp); sp.scale.set(6,6,1); B.add(sp);
@@ -343,6 +373,8 @@ function build(){
       let ok=true, need=WALL+Math.max(w,d)*.75+5;
       for(let i=0;i<N;i+=3){ const dx=P[i].x-x, dz=P[i].z-z; if(dx*dx+dz*dz<need*need){ok=false;break;} }
       if(!ok || (SHORTCUTS.length && !clear(x,z,Math.max(w,d)*.75+5))) continue;
+      // (a car park: clear of the building and its towers, so it stands free in the city)
+      { const bd=MAP.building, r=Math.max(w,d)*.75+16; if(bd && ((x>bd.x0-r && x<bd.x1+r && z>bd.z0-r && z<bd.z1+r) || bd.towers.some(t=>Math.hypot(x-t.x,z-t.z)<t.r+WALL+r))) continue; }
       e.set(0,Math.random()*Math.PI,0); q.setFromEuler(e); m.compose(new THREE.Vector3(x,0,z),q,new THREE.Vector3(w,h,d)); city.setMatrixAt(placed++,m);
     }
     city.count=placed; city.castShadow=true; city.receiveShadow=true; B.add(city); }

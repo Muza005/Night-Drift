@@ -18,9 +18,10 @@ import { camera } from '../../core/render.js';
 import { rig } from '../../core/cameraRig.js';
 import { setT, fmtT, flash, hex } from '../../ui/hud.js';
 import { renderStandings } from '../../net/net.js';
-import { P, TG, Y, N, BRIDGE, START, FLAT, MAP, SHORTCUTS, placeAt, placeOnCut, placeGrid, constrainToTrack, keepInWalls, nearest, setMap, onMapChange, carPose } from './geometry.js';
+import { P, TG, Y, N, BRIDGE, START, FLAT, MAP, SHORTCUTS, SAME_LEVEL, LEVELS, placeAt, placeOnCut, placeGrid, constrainToTrack, keepInWalls, nearest, setMap, onMapChange, carPose } from './geometry.js';
 import { MAPS, DEFAULT_MAP } from './maps/index.js';
 import { group } from './scene.js';
+import { chase } from './chase.js';
 
 // ?map=<id> opens another map for solo runs (the hidden test map: ?map=_testhill); stage 6
 // brings the picker. Online the room's map wins (net.js calls G.setMap with the room's
@@ -36,7 +37,7 @@ G.setMap = id => { const before=MAP; setMap(id && Object.hasOwn(MAPS, id) ? id :
    passing over. On a map with heights a small gauge at the left shows how high my car is
    (between the map's lowest and highest road); under a bridge my arrow is drawn below it. */
 const map=$('map'), mg=map.getContext('2d');
-let mx, mz, trackPath, bridgePaths, cutPaths=[], yMin=0, yMax=0;
+let mx, mz, trackPath, bridgePaths, cutPaths=[], yMin=0, yMax=0, floorPaths=null;
 function buildMap(){
   let minX=1e9,maxX=-1e9,minZ=1e9,maxZ=-1e9; for(const p of P){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
   const mScale=250/Math.max(maxX-minX,maxZ-minZ), mOx=150-(minX+maxX)/2*mScale, mOz=150-(minZ+maxZ)/2*mScale;
@@ -48,6 +49,13 @@ function buildMap(){
     while(BRIDGE[j] && k++<N){ j=(j+1)%N; path.lineTo(mx(P[j].x),mz(P[j].z)); }
     bridgePaths.push({path, from:i, to:j}); }
   yMin=Math.min(...Y); yMax=Math.max(...Y);
+  // stacked levels («Паркинг»): the roads of each floor (within half a floor of its
+  // height), drawn bright for the floor my car is on over the rest drawn dim
+  floorPaths=null;
+  if(LEVELS){ const gap=LEVELS.gap, top=Math.round(yMax/gap);
+    floorPaths=[]; for(let f=0;f<=top;f++){ const path=new Path2D(), on=i=>Math.abs(Y[i]-f*gap)<gap/2;
+      for(let i=0;i<N;i++){ const j=(i+1)%N; if(!on(i)&&!on(j)) continue; if(!on((i-1+N)%N)||i===0) path.moveTo(mx(P[i].x),mz(P[i].z)); path.lineTo(mx(P[j].x),mz(P[j].z)); }
+      floorPaths.push(path); } }
   // shortcuts: thin yellow lines
   cutPaths=SHORTCUTS.map(sc=>{ const path=new Path2D(); for(let k=0;k<sc.n;k+=2) k?path.lineTo(mx(sc.x[k]),mz(sc.z[k])):path.moveTo(mx(sc.x[k]),mz(sc.z[k])); path.lineTo(mx(sc.x[sc.n-1]),mz(sc.z[sc.n-1])); return path; });
 }
@@ -60,13 +68,18 @@ function drawCar(car){
 function drawMap(car){
   mg.clearRect(0,0,300,300);
   mg.lineJoin='round'; mg.strokeStyle='rgba(62,240,255,.18)'; mg.lineWidth=16; mg.stroke(trackPath);
-  mg.strokeStyle='rgba(238,240,255,.75)'; mg.lineWidth=4; mg.stroke(trackPath);
+  if(floorPaths){
+    mg.strokeStyle='rgba(238,240,255,.22)'; mg.lineWidth=4; mg.stroke(trackPath);
+    const f=floorPaths[Math.max(0,Math.min(floorPaths.length-1,Math.round((car.y||0)/LEVELS.gap)))];
+    mg.strokeStyle='rgba(238,240,255,.9)'; mg.lineWidth=4; mg.stroke(f);
+  } else { mg.strokeStyle='rgba(238,240,255,.75)'; mg.lineWidth=4; mg.stroke(trackPath); }
   if(cutPaths.length){ mg.strokeStyle='rgba(255,194,61,.85)'; mg.lineWidth=2; mg.setLineDash([4,3]); for(const c of cutPaths) mg.stroke(c); mg.setLineDash([]); }
   const s=P[START]; mg.fillStyle='#ffc23d'; mg.beginPath(); mg.arc(mx(s.x),mz(s.z),6,0,7); mg.fill();
   // cars below the bridges first (the bridges then pass over them), cars on a bridge after;
   // another player's track point is the one keepInWalls found for them (g.walls)
   const up=i=>i!==undefined && bridgePaths.some(b=>onBridge(i,b));
-  const ghost=g=>{ mg.fillStyle=hex(g.accent); mg.beginPath(); mg.arc(mx(g.x),mz(g.z),7,0,7); mg.fill(); };
+  const ghost=g=>{ mg.globalAlpha=floorPaths && Math.abs((g.y||0)-(car.y||0))>SAME_LEVEL ? .35 : 1;
+    mg.fillStyle=hex(g.accent); mg.beginPath(); mg.arc(mx(g.x),mz(g.z),7,0,7); mg.fill(); mg.globalAlpha=1; };
   const ghosts=[...NET.ghosts.values()].filter(g=>g.m.root.visible);
   for(const g of ghosts) if(!up(g.walls&&g.walls.idx)) ghost(g);
   const mine=up(car.idx);
@@ -88,6 +101,10 @@ function drawMap(car){
 
 export const trackMode = {
   ghostBounds(s, g){ keepInWalls(s, g.walls || (g.walls = {})); },   // another player's predicted car stays inside the walls
+  // the active map (records.js keeps the records per map)
+  get mapId(){ return MAP.id; },
+  // cars this much apart in height are on different roads: no collision, no slipstream (net.js)
+  get sameLevel(){ return SAME_LEVEL; },
   id: 'track',
 
   show(){ group.visible=true; $('map').hidden=false; },
@@ -103,25 +120,16 @@ export const trackMode = {
   pose(car, dt){ return carPose(car, dt, car.pose || (car.pose = { y:0, pitch:0, roll:0, squash:0 })); },
   constrain(car, dt, hooks){ constrainToTrack(car, dt, hooks); },
 
-  // Chase camera: behind the car, leaning toward the direction of travel in a slide.
+  // Chase camera (chase.js): behind the car, leaning toward the direction of travel in a
+  // slide; on touch screens a bit closer; under the ceilings of «Паркинг».
   camera(car, dt){
-    const fx=Math.sin(car.h), fz=Math.cos(car.h);
-    const sp=Math.hypot(car.vx,car.vz);
-    let dx=fx, dz=fz;
-    if(sp>3 && car.vF>0){ dx=fx*.55+car.vx/sp*.45; dz=fz*.55+car.vz/sp*.45; const l=Math.hypot(dx,dz); dx/=l; dz/=l; }
-    // pulls back a little with speed (0.8 m and 11° more at 200 km/h); on touch screens a bit closer
-    const near=isTouch?.9:1, back=(7.6+sp*.016)*near, up=(3.1+sp*.0064)*near;
-    const tx=car.x-dx*back, tz=car.z-dz*back;
-    const camPos=rig.pos, camLook=rig.look;
-    const k=rig.init?1-Math.exp(-5.5*dt):1; rig.init=true;
-    const cy=car.y||0;
-    camPos.x+=(tx-camPos.x)*k; camPos.y+=(cy+up-camPos.y)*k; camPos.z+=(tz-camPos.z)*k;
-    camLook.x+=(car.x+fx*4-camLook.x)*k; camLook.y=cy+1.1; camLook.z+=(car.z+fz*4-camLook.z)*k;
-    camera.position.copy(camPos);
+    const sp=chase(car, dt, rig, isTouch?.9:1), camLook=rig.look;
+    camera.position.copy(rig.pos);
     // phone held upright: shift the picture up (the view is unchanged, only framed higher)
     // so the car sits above the speedometer and the touch buttons
     if(isTouch && innerWidth<innerHeight) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight*0.1, innerWidth, innerHeight); else if(camera.view && camera.view.enabled) camera.clearViewOffset();
-    if(G.shake>0){ camera.position.x+=(Math.random()-.5)*G.shake*.8; camera.position.y+=(Math.random()-.5)*G.shake*.5; G.shake=Math.max(0,G.shake-dt*2.5); }
+    if(G.shake>0){ camera.position.x+=(Math.random()-.5)*G.shake*.8; camera.position.y+=(Math.random()-.5)*G.shake*.5; G.shake=Math.max(0,G.shake-dt*2.5);
+      if(LEVELS) camera.position.y=Math.min(camera.position.y, rig.pos.y); }     // (never up into a ceiling)
     camera.lookAt(camLook);
     camera.fov=62+Math.min(11,sp*.2);
   },

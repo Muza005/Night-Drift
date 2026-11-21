@@ -296,7 +296,7 @@ export function collideGhosts(){
     if(!g.m.root.visible || g.p.finished || g.vx===undefined) continue;
     if(nowS < g.p.ghostUntil) continue;                     // their car crashed and is blinking
     if(Math.hypot(g.x-car.x,g.z-car.z)>6) continue;
-    if(Math.abs((g.y||0)-(car.y||0))>3) continue;          // one on a bridge, the other under it
+    if(Math.abs((g.y||0)-(car.y||0))>(G.mode.sameLevel||3)) continue;   // one on a bridge, the other under it (or on another floor)
     let best=null;
     for(const a of carCircles(car.x,car.z,car.h)) for(const b of carCircles(g.x,g.z,g.h)){
       const dx=a[0]-b[0], dz=a[1]-b[1], d=Math.hypot(dx,dz);
@@ -387,7 +387,7 @@ export function updateGhosts(dt){
     { const d=Math.hypot(camera.position.x-s.x, camera.position.y-2.8, camera.position.z-s.z);
       g.label.material.opacity=Math.max(0,Math.min(1,(d-8)/8)); }
     // its pocket, seen from our car: the white lines show when we are close behind it
-    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=3) ? wake(car,g) : null;   // not across a bridge
+    const wk=(drafting && nowS>=g.p.ghostUntil && !g.p.finished && Math.abs(g.y-(car.y||0))<=(G.mode.sameLevel||3)) ? wake(car,g) : null;   // not across a bridge or a floor
     if(wk && wk.inside) inPocket=true;
     updateWake(g.fx,wk,s.x,s.z,dt,g.y);
     m.spin+=s.vf*dt/.38; m.wheels.forEach(w=>w.rotation.x=m.spin);

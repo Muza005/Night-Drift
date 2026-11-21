@@ -21,9 +21,17 @@
 //                              the inside of hairpins, see geometry.js buildShortcut. A lap
 //                              through one counts (the lap is checked by checkpoints); in drift
 //                              mode a corner taken through one scores nothing
-//   decor                      { theme: 'city' | 'forest' | 'port' (ground, run-off colour and
-//                              scenery), city: buildings, trees: trees (forest), containers,
-//                              cranes (port), lamps: one lamp every this many track points }
+//   decor                      { theme: 'city' | 'forest' | 'port' | 'parking' (ground, run-off
+//                              colour and scenery), city: buildings, trees: trees (forest),
+//                              containers, cranes (port), lamps: one lamp every this many
+//                              track points (not under a ceiling) }
+//   levels                     { gap, slab }: stacked levels (a car park): roads may pass over
+//                              each other `gap` m apart with a slab or deck `slab` m thick
+//                              between them (geometry.js LEVELS, CEIL; tests/maps.test.mjs)
+//   building                   { x0, x1, z0, z1, floors, towers }: the car park drawn round
+//                              the roads (scene-parking.js): its footprint, the slab tops
+//                              (0: the ground) and the round ramp towers ({ x, z, r: centre and
+//                              radius of the road, to: the height of the top})
 //   hidden                     not offered to players (test maps)
 //   exempt                     rules of tests/maps.test.mjs this map may break, and why
 import neon from './neon.js';
@@ -31,9 +39,10 @@ import estakada from './estakada.js';
 import serpantin from './serpantin.js';
 import pereval from './pereval.js';
 import razvyazka from './razvyazka.js';
+import parking from './parking.js';
 import testhill from './_testhill.js';
 
-export const MAPS = { neon, estakada, serpantin, pereval, razvyazka, _testhill: testhill };
+export const MAPS = { neon, estakada, serpantin, parking, pereval, razvyazka, _testhill: testhill };
 export const DEFAULT_MAP = 'neon';
 // the maps players can pick, in menu order
 export const MAP_IDS = Object.keys(MAPS).filter(id => !MAPS[id].hidden);

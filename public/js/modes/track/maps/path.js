@@ -73,3 +73,17 @@ export function closeBy(segments, ia, ib, heading = 0) {
   const out = segments.map(s => [...s]); out[ia][1] += a; out[ib][1] += b;
   return out;
 }
+// The same for an open piece of a lap that must end at a given place (with the heading
+// its turns already give it): drawn from `from` ({ x, z, heading }), straights ia and ib
+// take whatever length brings its end to `to` ({ x, z }). Returns the corrected segments.
+export function reach(from, segments, ia, ib, to) {
+  if (segments[ia][0] !== 'S' || segments[ib][0] !== 'S') throw new Error('reach: segments ia and ib must be straights');
+  const e = trace({ x: from.x, z: from.z, heading: from.heading, segments, step: 1 }).end;
+  const h = k => { let th = from.heading; for (let j = 0; j < k; j++) if (segments[j][0] === 'R') th += segments[j][2]; return th * Math.PI / 180; };
+  const ua = [Math.cos(h(ia)), Math.sin(h(ia))], ub = [Math.cos(h(ib)), Math.sin(h(ib))];
+  const det = ua[0] * ub[1] - ua[1] * ub[0], gx = to.x - e.x, gz = to.z - e.z;
+  const a = (gx * ub[1] - gz * ub[0]) / det, b = (ua[0] * gz - ua[1] * gx) / det;
+  const out = segments.map(s => [...s]); out[ia][1] += a; out[ib][1] += b;
+  if (out[ia][1] < 0 || out[ib][1] < 0) throw new Error(`reach: straights ${ia} and ${ib} would be ${out[ia][1].toFixed(1)} and ${out[ib][1].toFixed(1)} m`);
+  return out;
+}

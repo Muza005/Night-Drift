@@ -93,6 +93,8 @@ export default {
   curb: 'zebra',
   start: { at: cp(60) },
   bridges: [{ from: cp(X1 - 42), to: cp(X1 + 42) }, { from: cp(X2 - 42), to: cp(X2 + 42) }],
-  shortcuts: [across(3, 60), across(9, 40), across(11, 40), across(13, 40)],
+  // (the turn-back's cut starts further out, 100 m before and 110 m after it: across the
+  // 140° turn from 60 m either side it saved 0.1 s, now ~1.9 s)
+  shortcuts: [across(3, 100, 110, 24), across(9, 40), across(11, 40), across(13, 40)],
   decor: { theme: 'port', containers: 240, cranes: 5, lamps: 16 },
 };
