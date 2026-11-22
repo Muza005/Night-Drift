@@ -7,25 +7,30 @@
 //   my car         on its stand; «Авто» opens the garage, «Выбрать» there sends the pick.
 //   the code       to give to friends, with a copy button.
 //   the settings   laps (drift) or minutes and traffic (highway): the host changes them,
-//                  everyone sees them.
+//                  everyone sees them. Under them, «Дрифт» only: the room's map (its
+//                  blueprint and name); the host picks it with «Карта» next to «Авто». A
+//                  new map: the guests get a short note, and the server takes back
+//                  everyone's «Готово».
 //   the button     «Старт» for the host, lit once every other player is ready (the server
 //                  checks it too); «Готово» for the others, pressed again to take it back.
 //
 // net/net.js owns the room and calls renderLobby() whenever it changes; this file only
-// draws it and sends what the player does. Nothing of the race is drawn behind it: a
-// still, blurred picture of the scene, and the stand.
+// draws it and sends what the player does. Nothing of the race is drawn behind it: the
+// drawn night city (core/render.js drawBackdrop), and the stand.
 import { $, G, NET, isTouch } from '../state.js';
 import { carById, classById, paintByCode } from '../core/cars.js';
-import { renderer, captureBackdrop, drawBackdrop, menuPixels } from '../core/render.js';
+import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
 import { createStand } from './stand.js';
-import { showPanel, el, hex, netStatus } from './hud.js';
+import { showPanel, el, hex, netStatus, note } from './hud.js';
+import { openMapPicker, mapPicker, blueprintSvg } from './mapPicker.js';
+import { MAPS } from '../modes/track/maps/index.js';
 import { openGarage, garage, MIN_LAPS, MAX_LAPS } from './garageScreen.js';
 import { savePick } from './garage.js';
 import { roster, seatHex, SEATS } from './seats.js';
 
 const MIN_MINS = 1, MAX_MINS = 10;
 const stand = createStand({ renderer, el: $('lobStand') });
-const S = { open: false, room: null, car: null, paint: null, armed: null, kickFor: null, editing: false };
+const S = { open: false, room: null, car: null, paint: null, armed: null, kickFor: null, editing: false, map: null, mapRoom: null };
 const rows = new Map();                 // sessionId → its row's elements
 
 const state = () => NET.room && NET.room.state;
@@ -227,6 +232,29 @@ for(const r of document.querySelectorAll('#cfgDens input')) r.addEventListener('
 for(const [a, b] of [['cfgLapsDown', 'cfgLapsUp'], ['cfgMinsDown', 'cfgMinsUp']]) for(const [x, y] of [[a, b], [b, a]])
   $(x).addEventListener('click', () => requestAnimationFrame(() => { if($(x).disabled && document.activeElement === $(x)) $(y).focus(); }));
 
+/* ---------- the map («Дрифт») ---------- */
+function drawMap(s){
+  const track = s.mode !== 'traffic', host = isHost(), m = MAPS[s.map] || MAPS.neon;
+  $('lobMap').hidden = !track;
+  $('lobMapBtn').hidden = !(track && host);
+  $('lobMapBtn').disabled = !between();
+  if($('lobMap').dataset.map !== m.id){ $('lobMapThumb').innerHTML = blueprintSvg(m.id); $('lobMap').dataset.map = m.id; }
+  $('lobMapName').textContent = m.name;
+  if(!(track && host) && mapPicker.open) mapPicker.close();     // the host is gone or the mode changed
+  // a new map in this room (not the first look at it): the guests are told
+  // («Готово» is mentioned only to a guest who had pressed it: S.ready is from the last look)
+  if(S.mapRoom === NET.room && S.map && S.map !== m.id && !host && track){
+    note(`Хост сменил карту на «${m.name}».` + (S.ready ? ' «Готово» сброшено.' : ''), { short: true });
+    $('lobMapLive').textContent = `Новая карта: ${m.name}.` + (S.ready ? ' «Готово» снято.' : '');
+  }
+  const me = s.players.get(meId());
+  S.map = m.id; S.mapRoom = NET.room; S.ready = !!(me && me.ready);
+}
+$('lobMapBtn').addEventListener('click', () => {
+  const s = state(); if(!s || !isHost() || !between() || s.mode === 'traffic') return;
+  openMapPicker({ current: s.map, source: $('lobMapBtn'), onPick(id){ if(id !== s.map) config({ map: id }); } });
+});
+
 /* ---------- the main button ---------- */
 function waiting(s){ let n = 0; s.players.forEach((o, id) => { if(id !== s.hostId && o.connected && !o.ready) n++; }); return n; }
 function drawButton(s){
@@ -239,7 +267,7 @@ function drawButton(s){
     // lit just now (not on the first look): one short flash, once
     if(lit && S.armed === false){ b.classList.remove('armed'); void b.offsetWidth; b.classList.add('armed'); }
     S.armed = lit;
-    netStatus('lobbyStatus', s.players.size < 2 ? 'Можно стартовать и одному. Друзьям — код слева внизу.' : n ? `Ждём «Готово»: ${n} ${plural(n, 'игрок', 'игрока', 'игроков')}.` : 'Все готовы. Можно стартовать.');
+    netStatus('lobbyStatus', s.players.size < 2 ? 'Можно стартовать и одному. Друзьям — код комнаты.' : n ? `Ждём «Готово»: ${n} ${plural(n, 'игрок', 'игрока', 'игроков')}.` : 'Все готовы. Можно стартовать.');
   } else {
     const on = !!(me && me.ready);
     b.textContent = 'Готово';
@@ -282,28 +310,30 @@ export function renderLobby(){
   const s = state(); if(!s) return;
   $('roomCode').textContent = NET.room.roomId;
   $('lobMode').textContent = s.mode === 'traffic' ? 'Трасса' : 'Дрифт';
-  drawPlayers(s); drawSettings(s); drawButton(s); drawCar(s);
+  drawPlayers(s); drawSettings(s); drawMap(s); drawButton(s); drawCar(s);
   $('lobCar').disabled = !between();
-  // the scene behind follows the room's mode (the picture of it is taken again)
-  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).then(() => { if(lobby.open) backdrop(); }, e => console.error('mode failed to load', s.mode, e));
+  // the game follows the room's mode (the city behind is the same for both)
+  if(G.setMode && G.mode.id !== s.mode) G.setMode(s.mode).catch(e => console.error('mode failed to load', s.mode, e));
 }
-function backdrop(){ if(G.menuView) G.menuView(); captureBackdrop(); }
 export function openLobby(dir){
   S.open = true;
   menuPixels(true);
   renderLobby();
-  backdrop();
-  return showPanel('pLobby', dir);
+  const shown = showPanel('pLobby', dir);
+  // back from the results, focus was on a button that is gone now: it goes to the main button
+  const land = () => { const a = document.activeElement; if(S.open && (!a || a === document.body || !a.checkVisibility?.())) $('startRace').focus({ preventScroll: true }); };
+  Promise.resolve(shown).then(land, land);
+  return shown;
 }
 export function closeLobby(){
   if(!S.open) return;
   S.open = false;
   if($('kickPop').matches(':popover-open')) $('kickPop').hidePopover();
+  mapPicker.close();
   menuPixels(false);
 }
 // leaving the room or a run starting: the garage opened from here goes too
 export function leaveLobby(){ closeLobby(); if(garage.open) garage.close(); }
-addEventListener('resize', () => { if(lobby.open) backdrop(); });
 
 // Keys: Esc leaves the room (after closing the ✕ panel or a rename first), Enter is the
 // main button unless a control has the focus.
@@ -311,13 +341,15 @@ addEventListener('keydown', e => {
   if(!lobby.open || e.repeat || e.defaultPrevented) return;    // (the garage's Esc or Enter that brought us here)
   const t = e.target;
   if(S.editing || (t && (t.tagName === 'INPUT' && t.type === 'text'))) return;
-  if(e.key === 'Escape'){ if(!$('kickPop').matches(':popover-open')){ e.preventDefault(); $('leaveLobby').click(); } return; }
+  const popOpen = document.querySelector('#pLobby .pop:popover-open');
+  if(e.key === 'Escape'){ if(!popOpen){ e.preventDefault(); $('leaveLobby').click(); } return; }   // the browser closes the popover itself
+  if(popOpen) return;
   if(e.key === 'Enter' && (t === document.body || !t.closest || !t.closest('button, a, input, select, summary'))){ e.preventDefault(); mainAction(); }
 });
 
 export const lobby = {
   get open(){ return S.open && !$('pLobby').hidden && !$('menu').hidden; },
-  frame(now){ drawBackdrop(); stand.frame(now); },
+  frame(now){ drawBackdrop(stand.measure()); stand.frame(now); },
   stand,
 };
 if(isTouch) $('pLobby').classList.add('touch');

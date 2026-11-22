@@ -38,8 +38,11 @@ export function startPose(slot) {
 // Runs right after stepCar() in every substep. Same wall response as the drift track
 // (push back, bounce at 1.45, rub off speed by how hard it hit — see wallKeep — and
 // report hits above 2.5 m/s); the rail is a
-// straight line, so its normal is simply the x axis. No off-road here: the shoulder is
-// paved and the rails stop the car before the grass.
+// straight line, so its normal is simply the x axis. Past the edge of the lanes
+// (|x| > HALF, the car's centre on the shoulder) the car is off the road, as off the
+// drift track: car.off makes stepCar pull at 77.5 % with 70 % grip, and the same extra
+// drag as there (exp(-0.45·dt)) holds full throttle to ~83 km/h, so the shoulder is
+// no way round the traffic. The rails stop the car before the grass.
 export function constrainToHighway(car, dt, hooks) {
   const lat = car.x, lim = RAIL - 1.25;
   if (Math.abs(lat) > lim) {
@@ -48,7 +51,8 @@ export function constrainToHighway(car, dt, hooks) {
     wallAlign(car, s, 0, dt);
     if (vn > 0) { const k = wallKeep(vn); car.vx -= s * vn * 1.45; car.vx *= k; car.vz *= k; if (vn > 2.5) hooks.onWall(vn); }
   }
-  car.off = false;
+  car.off = Math.abs(car.x) > HALF;
+  if (car.off) { const k = Math.exp(-.45 * dt); car.vx *= k; car.vz *= k; }
 }
 
 // Another player's predicted car must not be drawn through the rails. The prediction

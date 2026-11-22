@@ -107,51 +107,186 @@ export function qualityTick(realDt, racing){
 }
 
 /* ---------- the menu backdrop ----------
-   Behind the garage and the lobby the track is not drawn every frame: it is drawn once,
-   small, into a texture, and that picture is shown blurred and dimmed behind the stand.
-   captureBackdrop() takes the picture (on opening the screen, and on resize);
-   drawBackdrop() fills the canvas with it, a single cheap pass per frame. */
-let backRT = null;
+   Behind the menus (home, the mode cards, the garage, the lobby) the race is not drawn: a
+   drawn night city stands there instead. Two layers of skyline are painted once into
+   canvases at the screen's resolution (the far one at half of it: it sits in the haze
+   anyway); everything smooth (the sky, the glow on the horizon, the haze, the wet floor,
+   the light pool under the podium) is worked out per pixel in one pass, in floats, and
+   dithered, so no gradient bands. The floor mirrors the near skyline, stretched and
+   smeared like wet asphalt.
+   captureBackdrop() repaints the skyline when the window's size changed (cheap otherwise;
+   drawBackdrop calls it); drawBackdrop(anchor) fills the canvas, one quad per frame. The
+   horizon depends on the window only (where the garage's and the lobby's podiums stand,
+   about the car's waist), so going from one menu screen to the next never moves the city.
+   `anchor` is a stand's podium on screen ({x, y, sway}, css px): a light pool fades in
+   under it, and the two layers drift apart a little as the stand turns (not with reduced
+   motion).
+   WebGL and not CSS: the stand draws into this same canvas over what is behind it, and a
+   transparent canvas would make every race frame pay for blending with the page. */
+const BACK = { key: '', far: null, near: null, ov: 28, sway: 0, pool: 0, t: 0 };
+// a lost and restored GL context: paint the skyline again into fresh textures
+canvas.addEventListener('webglcontextrestored', () => { BACK.key = ''; });
+const NEAR_SHIFT = 16, FAR_SHIFT = 5;             // css px the layers drift at full sway
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const backScene = new THREE.Scene(), backCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const backMat = new THREE.ShaderMaterial({
-  uniforms: { map: { value: null }, texel: { value: new THREE.Vector2() }, dim: { value: 0.62 } },
-  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
-  // a 25-tap blur on an eighth-size picture: soft enough to read as "behind", no detail left
-  fragmentShader: `uniform sampler2D map; uniform vec2 texel; uniform float dim; varying vec2 vUv;
+  uniforms: {
+    farMap: { value: null }, nearMap: { value: null },
+    view: { value: new THREE.Vector2(1, 1) }, scale: { value: 1 }, horizon: { value: 0 },
+    pod: { value: new THREE.Vector3() }, sway: { value: 0 },
+    farBox: { value: new THREE.Vector3() }, nearBox: { value: new THREE.Vector3() },
+  },
+  vertexShader: 'void main(){ gl_Position = vec4(position.xy, 0., 1.); }',
+  // colours are sRGB values written straight out (no tone mapping): they are the tokens'
+  fragmentShader: `uniform sampler2D farMap, nearMap; uniform vec2 view; uniform float scale, horizon, sway;
+    uniform vec3 pod, farBox, nearBox;
+    const vec3 ROSE = vec3(1., .231, .420), CYAN = vec3(.243, .941, 1.), HAZE = vec3(.17, .09, .25);
+    // a layer of skyline: box = (left, width, height above the horizon), css px
+    vec4 layer(sampler2D m, vec3 box, vec2 p){
+      vec2 uv = vec2((p.x - box.x) / box.y, (horizon - p.y) / box.z);
+      if(uv.x < 0. || uv.x > 1. || uv.y < 0. || uv.y > 1.) return vec4(0.);
+      return texture2D(m, uv);
+    }
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main(){
-      vec3 c = texture2D(map, vUv).rgb * .12;
-      for(int i = 0; i < 8; i++){
-        float a = float(i) * .7854 + .39;
-        vec2 o = vec2(cos(a), sin(a)) * texel;
-        c += texture2D(map, vUv + o * 1.3).rgb * .05 + texture2D(map, vUv + o * 2.8).rgb * .036 + texture2D(map, vUv + o * 4.6).rgb * .024;
+      vec2 p = vec2(gl_FragCoord.x * scale, view.y - gl_FragCoord.y * scale);
+      float H = view.y, up = horizon - p.y;
+      vec3 col;
+      if(up >= 0.){
+        // the sky: near black on top, violet lower down, the city's rose glow on the horizon
+        float t = up / max(horizon, 1.);
+        col = mix(vec3(.060, .035, .120), vec3(.030, .032, .090), smoothstep(0., .45, t));
+        col = mix(col, vec3(.010, .013, .035), smoothstep(.4, 1., t));
+        col += ROSE * .26 * exp(-up / (.08 * H)) + vec3(.30, .10, .42) * .12 * exp(-up / (.28 * H));
+        vec4 f = layer(farMap, farBox, vec2(p.x + sway * ${FAR_SHIFT.toFixed(1)}, p.y));
+        col = col * (1. - f.a) + f.rgb;
+        col = mix(col, HAZE, .5 * exp(-up / (.06 * H)));                 // haze between the layers
+        vec4 n = layer(nearMap, nearBox, vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)}, p.y));
+        col = col * (1. - n.a) + n.rgb;
+        col = mix(col, HAZE, .5 * exp(-up / (.025 * H)));                // and low over the street
+      } else {
+        // the floor: wet asphalt, lit by the horizon, mirroring the near skyline
+        float d = -up, fd = d / max(H - horizon, 1.);
+        col = mix(vec3(.045, .040, .095), vec3(.010, .012, .028), smoothstep(0., 1., fd));
+        col += ROSE * .10 * exp(-d / (.05 * H));
+        vec2 q = vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)} + sin(d * .23) * 1.1, horizon - d * .62);
+        vec4 r = layer(nearMap, nearBox, q) * .3
+               + (layer(nearMap, nearBox, q + vec2(-2., 0.)) + layer(nearMap, nearBox, q + vec2(2., 0.))) * .2
+               + (layer(nearMap, nearBox, q + vec2(0., -5.)) + layer(nearMap, nearBox, q + vec2(0., 5.))) * .15;
+        float fade = .6 * exp(-d / (.2 * H));
+        col = col * (1. - r.a * fade * .5) + r.rgb * fade;
+        col = mix(col, HAZE, .45 * exp(-d / (.035 * H)));
+        if(pod.z > 0.){                                                  // the light under the podium (z: how much)
+          vec2 e = (p - pod.xy) / vec2(.36 * H + 60., .09 * H + 20.);
+          float k = dot(e, e);
+          col += (CYAN * .045 * exp(-k * 1.6) + ROSE * .03 * exp(-k * .35)) * smoothstep(0., 12., d) * pod.z;
+        }
+        col += (hash(gl_FragCoord.xy * .37) - .5) * .012;                // the asphalt's grain
       }
-      gl_FragColor = vec4(c * dim, 1.);
-      #include <tonemapping_fragment>
-      #include <encodings_fragment>
+      // dither: a triangular ±1/255, so the smooth parts do not band
+      col += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 19.19) - 1.) / 255.;
+      gl_FragColor = vec4(col, 1.);
     }`,
   depthTest: false, depthWrite: false,
 });
 backScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), backMat));
-export function captureBackdrop(){
-  const w = Math.max(48, Math.round(innerWidth / 8)), h = Math.max(48, Math.round(innerHeight / 8));
-  if(!backRT || backRT.width !== w || backRT.height !== h){
-    if(backRT) backRT.dispose();
-    const half = renderer.capabilities.isWebGL2 || renderer.extensions.has('OES_texture_half_float');
-    backRT = new THREE.WebGLRenderTarget(w, h, half ? { type: THREE.HalfFloatType } : {});   // linear light: tone mapping comes on the way out
+
+// a seeded random: the same city every time it is painted again (a resize, a new screen)
+function seeded(seed){ return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// One layer of skyline in css px (w × h, the base on the bottom edge) at `ratio` device px each.
+function paintSkyline(w, h, ratio, near, tall){
+  const [c, g] = cv(Math.max(2, Math.round(w * ratio)), Math.max(2, Math.round(h * ratio)));
+  g.scale(ratio, ratio);
+  const rnd = seeded(near ? 7331 : 1999), s = Math.min(1, Math.max(.5, w / 1500));
+  const lights = near ? [['255,207,122', .55], ['127,245,255', .22], ['255,107,147', .13], ['201,184,255', .1]]
+                      : [['255,196,140', .5], ['160,200,255', .3], ['255,120,170', .2]];
+  const pick = () => { let r = rnd(); for(const [col, p] of lights){ if((r -= p) < 0) return col; } return lights[0][0]; };
+  if(!near){                                                       // a few stars where the city's glow is thin
+    for(let i = 0; i < 70; i++){ g.fillStyle = `rgba(210,220,255,${(.15 + rnd() * .45).toFixed(2)})`; const r = .5 + rnd() * .8; g.fillRect(rnd() * w, rnd() * h * .45, r, r); }
   }
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setRenderTarget(backRT); renderer.render(scene, camera); renderer.setRenderTarget(null);
-  backMat.uniforms.map.value = backRT.texture;
-  backMat.uniforms.texel.value.set(1 / w, 1 / h);
+  const signs = [];
+  for(let x = -rnd() * 30; x < w;){
+    const bw = (near ? 38 + rnd() * 92 : 26 + rnd() * 70) * s;
+    const bh = near ? h * (.22 + Math.pow(rnd(), 1.8) * .78) : tall * (.3 + Math.pow(rnd(), 1.4) * .7);
+    const top = h - bh;
+    const body = g.createLinearGradient(0, top, 0, h);
+    if(near){ body.addColorStop(0, '#0d0f22'); body.addColorStop(1, '#06070e'); }
+    else { body.addColorStop(0, '#1b1640'); body.addColorStop(1, '#251a48'); }
+    g.fillStyle = body; g.fillRect(x, top, bw, bh);
+    // a setback on top, sometimes a mast with its red light
+    let roof = top;
+    if(rnd() < .35){ const sw = bw * (.4 + rnd() * .35), sh = bh * (.05 + rnd() * .1); g.fillRect(x + (bw - sw) / 2, top - sh, sw, sh); roof = top - sh; }
+    if(rnd() < .25){ const mx = x + bw * (.3 + rnd() * .4), mh = (10 + rnd() * 26) * s; g.fillStyle = near ? '#0d0f22' : '#1b1640'; g.fillRect(mx, roof - mh, 1.2, mh);
+      g.fillStyle = near ? 'rgba(255,59,107,.9)' : 'rgba(255,90,130,.5)'; g.fillRect(mx - .9, roof - mh - 1.5, 3, 3); }
+    // the roof catches a little of the neon
+    if(near && rnd() < .5){ g.fillStyle = rnd() < .6 ? 'rgba(62,240,255,.28)' : 'rgba(255,59,107,.3)'; g.fillRect(x, top, bw, 1); }
+    // windows, floor by floor: some floors are lit through, most here and there
+    const px = (near ? 7 : 5) * Math.max(.8, s), py = (near ? 9 : 6.5) * Math.max(.8, s);
+    const ww = px * .45, wh = py * .5, rate = near ? .04 + rnd() * .24 : .03 + rnd() * .16;
+    const tone = pick(), mixTone = rnd() < .3;
+    for(let y = top + py * .9; y < h - py; y += py){
+      const busy = rnd() < .12 ? 3.5 : rnd() < .3 ? 0 : 1;
+      for(let wx = x + px * .6; wx < x + bw - px * .6; wx += px){
+        if(rnd() >= rate * busy) continue;
+        g.fillStyle = `rgba(${mixTone ? pick() : tone},${((near ? .3 : .12) + rnd() * (near ? .55 : .26)).toFixed(2)})`;
+        g.fillRect(wx, y, ww, wh);
+      }
+    }
+    if(near && bw > 60 * s && rnd() < .3) signs.push([x, top, bw, bh]);
+    x += bw + (rnd() < .3 ? rnd() * 16 * s : 0);
+  }
+  // neon signs: a few vertical tubes, glowing (drawn last, so the glow lies over the walls)
+  for(const [x, top, bw, bh] of signs){
+    const col = rnd() < .55 ? '62,240,255' : '255,59,107', sx = x + bw * (rnd() < .5 ? .12 : .82), sy = top + bh * (.08 + rnd() * .15), sl = bh * (.18 + rnd() * .22);
+    g.shadowColor = `rgba(${col},.9)`; g.shadowBlur = 14 * ratio;
+    g.fillStyle = `rgba(${col},.85)`; g.fillRect(sx, sy, 2.6 * s, sl);
+    g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(sx + .8 * s, sy + 1, 1, sl - 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.premultiplyAlpha = true; t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter;
+  return t;
 }
-export function drawBackdrop(){
-  if(!backRT) captureBackdrop();
+export function captureBackdrop(){
+  const w = innerWidth, h = innerHeight;
+  // the skyline at the menus' pixel ratio (menuPixels: 1.5, 1.25 on a touch screen), not
+  // the canvas's current one, so home ↔ garage does not paint it again; under ~3.5 M pixels
+  const span = w + BACK.ov * 2, nearH = h * .3, farH = h * .8;
+  const ratio = Math.min(devicePixelRatio, isTouch ? 1.25 : 1.5, Math.sqrt(3.5e6 / (span * nearH)));
+  const key = w + 'x' + h + '@' + ratio.toFixed(3);
+  if(key === BACK.key) return;
+  BACK.key = key;
+  if(BACK.far){ BACK.far.dispose(); BACK.near.dispose(); }
+  BACK.far = paintSkyline(span, farH, ratio / 2, false, h * .4);
+  BACK.near = paintSkyline(span, nearH, ratio, true);
+  const u = backMat.uniforms;
+  u.farMap.value = BACK.far; u.nearMap.value = BACK.near;
+  u.farBox.value.set(-BACK.ov, span, farH); u.nearBox.value.set(-BACK.ov, span, nearH);
+}
+// what the backdrop shows now (for tests): the horizon (css px from the top), the pool
+export const backdropState = () => ({ horizon: backMat.uniforms.horizon.value, pool: backMat.uniforms.pod.value.z, key: BACK.key });
+export function drawBackdrop(anchor){
+  captureBackdrop();
+  const u = backMat.uniforms, w = innerWidth, h = innerHeight, now = performance.now();
+  const dt = now - BACK.t > 100 ? 1 / 60 : (now - BACK.t) / 1000; BACK.t = now;   // after a gap: a first frame
+  u.view.value.set(w, h);
+  u.scale.value = 1 / renderer.getPixelRatio();
+  // the horizon: 43% of the height on a tall phone, 49% on a wide screen
+  const a = Math.min(1, Math.max(0, (w / h - .5) / .5));
+  u.horizon.value = h * (.43 + .06 * a * a * (3 - 2 * a));
+  // the light pool follows the podium and fades in with it (~250 ms; at once for reduced motion)
+  if(anchor){ u.pod.value.x = anchor.x; u.pod.value.y = anchor.y; }
+  BACK.pool = !anchor ? 0 : reducedMotion.matches ? 1 : BACK.pool + (1 - BACK.pool) * (1 - Math.exp(-dt / .08));
+  u.pod.value.z = BACK.pool < .002 ? 0 : BACK.pool;
+  // the drift follows the stand's turn slowly: a flick does not shake the city
+  const want = anchor && !reducedMotion.matches ? anchor.sway || 0 : 0;
+  BACK.sway = reducedMotion.matches ? 0 : BACK.sway + (want - BACK.sway) * (1 - Math.exp(-dt / .9));
+  u.sway.value = BACK.sway;
   renderer.setScissorTest(false);
   renderer.render(backScene, backCam);
 }
 
 // While a menu screen with a stand is up, fewer pixels (1.5x, 1.25x on a phone): the
-// stand is small and the backdrop is a blur. Back in the race, the quality level's own.
+// stand is small and the backdrop is soft. Back in the race, the quality level's own.
 export function menuPixels(on){
   const r = on ? Math.min(TOP_RATIO, isTouch ? 1.25 : 1.5) : QUALITY[Q.level].ratio;
   if(renderer.getPixelRatio() !== r){ renderer.setPixelRatio(r); resize(); }

@@ -1,20 +1,44 @@
-// Prepare a car model for the game:
+// Prepare a car model for the game, in two steps.
+//
+// prep (from an original download, the 3D-Cars branch) → models-src/cars/<name>.glb:
 //  - remove the interior (seats, dashboard, engine...): the windows become opaque, so it is never seen
 //  - one window material for every car: "Glass", dark and opaque (like the GT-R's)
 //  - the body paint in its own material, "Paint", with no texture: the game recolours it by
 //    setting one colour. Where the paint was baked into a texture atlas, the triangles whose
 //    texels are the body colour are split off into the Paint material.
-// usage: node tools/prep-car-model.mjs <in.glb> <out.glb> <config name>
-// needs (not part of the game's dependencies; install once in a scratch folder or with -g):
-//   npm i @gltf-transform/core@4 @gltf-transform/extensions@4 @gltf-transform/functions@4 meshoptimizer jpeg-js pngjs
+// pack (models-src/cars/<name>.glb → public/models/cars/<name>.glb, what the game loads):
+//  - wheels modelled into the body mesh (the Lamborghini) are cut out into nodes of their own
+//  - wheels modelled steered (Rally, Ford) are turned straight: each wheel's axle (its
+//    thinnest direction, tools/wheel-axle.mjs) is put along the car's X axis, or the wheel
+//    wobbles in a figure eight as it spins
+//  - textures to WebP (EXT_texture_webp): colour maps at most 1024 px, the others
+//    (normal, roughness, occlusion) at most 512 px
+//  - geometry quantised and meshopt-compressed (EXT_meshopt_compression): the game loads
+//    three's meshopt_decoder.js for it (index.html)
+//
+// usage:
+//   node tools/prep-car-model.mjs <original.glb> <out.glb> <config name>    prep, then pack
+//   node tools/prep-car-model.mjs --pack <in.glb> <out.glb>                 pack only
+//   node tools/prep-car-model.mjs --pack-all                                models-src/cars/* → public/models/cars/
+//   node tools/prep-car-model.mjs --versions                                only rewrite the ?v= hashes
+// Every run ends by rewriting the models' versions (public/js/core/modelVersions.js and
+// the preload map in public/index.html): a hash of each file, in its URL.
+// pack needs the devDependencies (npm install). prep also needs jpeg-js and pngjs:
+//   npm i --no-save jpeg-js pngjs
 // The originals are in the 3D-Cars branch. A new car needs an entry in CFG below: which
 // materials/nodes are the interior, which are window glass, and where the body paint is.
+// Its prepped, uncompressed file goes to models-src/cars/ (kept out of public/), so the
+// pack step can be redone or tuned without the originals.
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { prune, dedup, simplify, weld, convertPrimitiveToTriangles } from '@gltf-transform/functions';
-import { MeshoptSimplifier } from 'meshoptimizer';
-import jpeg from 'jpeg-js';
-import { PNG } from 'pngjs';
+import { prune, dedup, simplify, weld, join, convertPrimitiveToTriangles, textureCompress, meshopt } from '@gltf-transform/functions';
+import { MeshoptSimplifier, MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
+import sharp from 'sharp';
+import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { wheelAxles } from './wheel-axle.mjs';
 
 const CFG = {
   muscle_car: {
@@ -41,10 +65,292 @@ const CFG = {
   lowpoly_stylized_rx_7_free: { split: { mats: ['Material.001', 'Material.002', 'Material.003'], color: [252, 109, 0], thr: 40 } },
 };
 
-const [, , IN, OUT, NAME] = process.argv;
+await Promise.all([MeshoptSimplifier.ready, MeshoptEncoder.ready, MeshoptDecoder.ready]);
+const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
+  .registerDependencies({ 'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder });
+const kb = f => Math.round(statSync(f).size / 1024) + ' KB';
+
+/* ---------- pack ---------- */
+// 4x4 column-major helpers (glTF's layout), affine only
+const mul = (a, b) => { const o = new Array(16).fill(0); for(let c = 0; c < 4; c++) for(let r = 0; r < 4; r++) for(let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; };
+function invert(m){
+  const [a, b, c, d, e, f, g, h, i] = [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];   // rows
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, det = a * A + b * B + c * C;
+  const r = [A, -(b * i - c * h), b * f - c * e, B, a * i - c * g, -(a * f - c * d), C, -(a * h - b * g), a * e - b * d].map(v => v / det);
+  const t = [m[12], m[13], m[14]];
+  return [r[0], r[3], r[6], 0, r[1], r[4], r[7], 0, r[2], r[5], r[8], 0,
+    -(r[0] * t[0] + r[1] * t[1] + r[2] * t[2]), -(r[3] * t[0] + r[4] * t[1] + r[5] * t[2]), -(r[6] * t[0] + r[7] * t[1] + r[8] * t[2]), 1];
+}
+const translate = ([x, y, z]) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
+// the smallest rotation that takes unit vector u onto unit vector v (Rodrigues)
+function rotation(u, v){
+  const k = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const c = u[0] * v[0] + u[1] * v[1] + u[2] * v[2], s = Math.hypot(...k);
+  if(s < 1e-9) return translate([0, 0, 0]);
+  const [x, y, z] = k.map(q => q / s), t = 1 - c;
+  return [t * x * x + c, t * x * y + s * z, t * x * z - s * y, 0,
+    t * x * y - s * z, t * y * y + c, t * y * z + s * x, 0,
+    t * x * z + s * y, t * y * z - s * x, t * z * z + c, 0, 0, 0, 0, 1];
+}
+// Wheels modelled steered or tilted: turned about their own centre so the axle lies on X.
+// Only the node's transform changes (a mesh shared by two wheels stays shared).
+function straightenWheels(doc, log){
+  for(const w of wheelAxles(doc)){
+    if(w.offX < 0.5) continue;
+    const R = mul(translate(w.centre), mul(rotation(w.axle, [1, 0, 0]), translate(w.centre.map(v => -v))));
+    const parent = w.node.getParentNode();
+    const world = mul(R, w.node.getWorldMatrix());
+    w.node.setMatrix(parent ? mul(invert(parent.getWorldMatrix()), world) : world);
+    log(`wheel ${w.name} straightened (axle was ${w.offX.toFixed(1)}° off X)`);
+  }
+}
+// Wheels modelled into the body mesh (the Lamborghini: the whole car is one mesh) are cut
+// out into four nodes of their own, so they can spin. The mesh is split into connected
+// pieces (faces joined by a shared vertex position); a tyre is a piece that is round in
+// the car's side view (as tall as it is long), thin across, touching the ground and at
+// least a tenth of the car long; every piece that lies wholly inside a tyre's box (the
+// rim's spokes, hub, wheel nuts) goes with it. Each wheel becomes a node named for its
+// corner (FLW, FRW, RLW, RRW: core/carModels.js WHEEL; front is +Z, left is +X), with its
+// origin at the hub and its geometry in world units around it. Only geometry moves: at
+// rest the car looks exactly as before.
+function cutWheels(doc, log){
+  const root = doc.getRoot(), scene = root.listScenes()[0], buffer = root.listBuffers()[0];
+  const wheelNodes = new Set(wheelAxles(doc).map(w => w.node));
+  const meshNodes = root.listNodes().filter(n => n.getMesh() && !wheelNodes.has(n));
+  // the car's world box, for "touching the ground" and the size of a wheel
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const pts = new Map();          // primitive -> its vertices in world space
+  for(const n of meshNodes){
+    const W = n.getWorldMatrix();
+    for(const p of n.getMesh().listPrimitives()){
+      const a = p.getAttribute('POSITION'), w = [];
+      for(let i = 0; i < a.getCount(); i++){
+        const q = apply(W, a.getElement(i, [])); w.push(q);
+        for(let k = 0; k < 3; k++){ lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]); }
+      }
+      pts.set(p, w);
+    }
+  }
+  const len = hi[2] - lo[2], mid = [0, 1, 2].map(k => (lo[k] + hi[k]) / 2);
+  const eps = len * 1e-4;
+  let cut = 0;
+  for(const n of meshNodes){
+    const W = n.getWorldMatrix(), N = normalMatrix(W), prims = n.getMesh().listPrimitives();
+    // connected pieces over all the node's primitives, by vertex position
+    const par = [], find = i => { while(par[i] !== i){ par[i] = par[par[i]]; i = par[i]; } return i; };
+    const ids = new Map(), vid = new Map();      // position key -> id; primitive -> [id per vertex]
+    for(const p of prims){
+      const loc = pts.get(p).map(q => {
+        const k = q.map(v => Math.round(v / eps)).join(',');
+        if(!ids.has(k)){ ids.set(k, par.length); par.push(par.length); }
+        return ids.get(k);
+      });
+      vid.set(p, loc);
+      const idx = p.getIndices().getArray();
+      for(let f = 0; f < idx.length; f += 3){
+        const a = find(loc[idx[f]]), b = find(loc[idx[f + 1]]), c = find(loc[idx[f + 2]]);
+        par[a] = c; par[b] = c;
+      }
+    }
+    const pieces = new Map();       // root id -> { lo, hi, faces: Map<primitive, [face]> }
+    for(const p of prims){
+      const loc = vid.get(p), idx = p.getIndices().getArray(), w = pts.get(p);
+      for(let f = 0; f < idx.length / 3; f++){
+        const r = find(loc[idx[f * 3]]);
+        let pc = pieces.get(r);
+        if(!pc){ pc = { lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity], faces: new Map() }; pieces.set(r, pc); }
+        if(!pc.faces.has(p)) pc.faces.set(p, []);
+        pc.faces.get(p).push(f);
+        for(let j = 0; j < 3; j++){ const q = w[idx[f * 3 + j]]; for(let k = 0; k < 3; k++){ pc.lo[k] = Math.min(pc.lo[k], q[k]); pc.hi[k] = Math.max(pc.hi[k], q[k]); } }
+      }
+    }
+    const size = pc => [0, 1, 2].map(k => pc.hi[k] - pc.lo[k]);
+    const tyres = [...pieces.values()].filter(pc => {
+      const [x, y, z] = size(pc);
+      return Math.abs(y - z) < 0.05 * y && x < 0.5 * y && y > 0.1 * len && pc.lo[1] - lo[1] < 0.02 * (hi[1] - lo[1]);
+    });
+    if(!tyres.length) continue;
+    if(tyres.length !== 4) throw new Error(`${n.getName()}: ${tyres.length} tyres found, not 4`);
+    const inside = (pc, t) => [0, 1, 2].every(k => pc.lo[k] >= t.lo[k] - eps && pc.hi[k] <= t.hi[k] + eps);
+    const taken = new Map(prims.map(p => [p, new Set()]));     // primitive -> its faces now in a wheel
+    for(const t of tyres){
+      const hub = [0, 1, 2].map(k => (t.lo[k] + t.hi[k]) / 2);
+      const name = (hub[2] > mid[2] ? 'F' : 'R') + (hub[0] > mid[0] ? 'L' : 'R') + 'W';
+      const parts = [...pieces.values()].filter(pc => pc === t || (!tyres.includes(pc) && inside(pc, t)));
+      const mesh = doc.createMesh(name);
+      for(const p of prims){
+        const faces = parts.flatMap(pc => pc.faces.get(p) || []);
+        if(!faces.length) continue;
+        mesh.addPrimitive(subPrimitive(doc, buffer, p, faces, q => apply(W, q).map((v, k) => v - hub[k]), N));
+        for(const f of faces) taken.get(p).add(f);
+      }
+      scene.addChild(doc.createNode(name).setMesh(mesh).setTranslation(hub));
+      log(`wheel ${name} cut out: ${parts.length} pieces, hub at ${hub.map(v => v.toFixed(2)).join(', ')}`);
+      cut++;
+    }
+    // the body keeps the rest, its vertices compacted
+    for(const p of prims){
+      const keep = [];
+      for(let f = 0; f < p.getIndices().getCount() / 3; f++) if(!taken.get(p).has(f)) keep.push(f);
+      n.getMesh().addPrimitive(subPrimitive(doc, buffer, p, keep, null, null));
+      p.dispose();
+    }
+  }
+  if(cut) log(`${cut} wheels cut from the body mesh`);
+}
+const apply = (m, p) => [0, 1, 2].map(r => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]);
+// the inverse transpose of a matrix's 3x3 part, for normals (column-major like glTF)
+const normalMatrix = m => { const i = invert(m); return [i[0], i[4], i[8], 0, i[1], i[5], i[9], 0, i[2], i[6], i[10], 0, 0, 0, 0, 1]; };
+// A primitive of `faces` of p (face indices), with only the vertices they use. pos maps a
+// position (null: unchanged); N, if given, turns normals and tangents the same way.
+function subPrimitive(doc, buffer, p, faces, pos, N){
+  const idx = p.getIndices().getArray(), map = new Map(), order = [];
+  const out = new Uint32Array(faces.length * 3);
+  faces.forEach((f, j) => { for(let k = 0; k < 3; k++){ const v = idx[f * 3 + k]; if(!map.has(v)){ map.set(v, order.length); order.push(v); } out[j * 3 + k] = map.get(v); } });
+  const np = doc.createPrimitive().setMaterial(p.getMaterial()).setMode(p.getMode())
+    .setIndices(doc.createAccessor().setType('SCALAR').setArray(order.length > 65535 ? out : Uint16Array.from(out)).setBuffer(buffer));
+  for(const sem of p.listSemantics()){
+    const a = p.getAttribute(sem), n = a.getElementSize(), src = a.getArray();
+    const dst = new src.constructor(order.length * n);
+    order.forEach((v, j) => {
+      let e = a.getElement(v, []);
+      if(sem === 'POSITION' && pos) e = pos(e);
+      else if((sem === 'NORMAL' || sem === 'TANGENT') && N){
+        const t = [0, 1, 2].map(r => N[r] * e[0] + N[4 + r] * e[1] + N[8 + r] * e[2]), l = Math.hypot(...t) || 1;
+        e = [...t.map(v => v / l), ...e.slice(3)];
+      }
+      for(let k = 0; k < n; k++) dst[j * n + k] = e[k];
+    });
+    if((sem === 'POSITION' || sem === 'NORMAL' || sem === 'TANGENT') && pos && !(src instanceof Float32Array)) throw new Error(sem + ' is not float: cannot move it');
+    np.setAttribute(sem, doc.createAccessor().setType(a.getType()).setArray(dst).setNormalized(a.getNormalized()).setBuffer(buffer));
+  }
+  return np;
+}
+// Per model. small: materials of small parts (a grille, a tyre, decals, brake discs) whose
+// textures need no more than 512 px (the body's atlas keeps 1024).
+// (No simplification: tried with meshopt's simplifier at under 2 mm of error, the glossy
+// paint showed dents where vertices merged — the normals are not re-solved — so the dense
+// models keep every triangle and the savings come from compression alone.)
+const PACK = {
+  generic_sedan_car: { small: /honeycomb|tire|suspension|car-bottom|Stainless/ },
+  generic_sport_coupe_car: { small: /wheel-brake-disc|mechanics|tire|grille/ },
+  nexus_rx: { small: /Decals|Tires/ },
+  sports_car: { cutWheels: true },
+};
+// Everything but the wheels hangs straight from the scene, at its world place, so join()
+// can merge the body's parts by material (the Ford came as 92 meshes, each in a node of
+// its own: 140 KB of JSON alone). A wheel's subtree stays as it is and is marked, so it
+// is never merged into the body: the game spins those nodes (core/carModels.js WHEEL).
+function flattenBody(doc){
+  const scene = doc.getRoot().listScenes()[0];
+  const wheels = new Set(wheelAxles(doc).map(w => w.node));
+  const inWheel = n => { for(let a = n; a; a = a.getParentNode()) if(wheels.has(a)) return true; return false; };
+  for(const n of doc.getRoot().listNodes()){
+    if(inWheel(n)){ n.setExtras({ ...n.getExtras(), wheel: true }); continue; }
+    if(!n.getMesh() || !n.getParentNode()) continue;
+    const world = n.getWorldMatrix();
+    n.getParentNode().removeChild(n);
+    n.setMatrix(world);
+    scene.addChild(n);
+  }
+}
+// Texture coordinates a primitive's material never reads (the Paint has no texture: the
+// biggest parts of every car carried UVs for nothing). Run after weld(), which gives each
+// primitive accessors of its own, so the other primitives keep theirs.
+function dropUnusedUVs(doc){
+  for(const mesh of doc.getRoot().listMeshes()) for(const p of mesh.listPrimitives()){
+    const m = p.getMaterial(), used = new Set();
+    if(m) for(const slot of ['BaseColor', 'Normal', 'MetallicRoughness', 'Occlusion', 'Emissive']){
+      if(m['get' + slot + 'Texture']()) used.add(m['get' + slot + 'TextureInfo']().getTexCoord());
+    }
+    for(const sem of p.listSemantics()){
+      const k = /^TEXCOORD_(\d+)$/.exec(sem);
+      if(k && !used.has(+k[1])) p.setAttribute(sem, null);
+    }
+  }
+  return doc.transform(prune());
+}
+async function pack(doc, log, name){
+  const opt = PACK[name] || {};
+  if(opt.cutWheels) cutWheels(doc, log);
+  straightenWheels(doc, log);
+  // (each pass takes only what is still JPEG or PNG: nothing is encoded twice)
+  const webp = (more) => textureCompress({ encoder: sharp, targetFormat: 'webp', formats: /^image\/(jpeg|png)$/, ...more });
+  if(opt.small) for(const m of doc.getRoot().listMaterials()) if(opt.small.test(m.getName())){
+    for(const slot of ['BaseColor', 'Normal', 'MetallicRoughness', 'Occlusion', 'Emissive']){
+      const t = m['get' + slot + 'Texture'](); if(t) t.setName('small:' + m.getName());
+    }
+  }
+  // Palettes and flat-colour atlases (the RX-7's 256 px palette, the Rally's 28 colours,
+  // the GT-R's): every texel is a colour a face is painted with, so lossy WebP shifts them
+  // (the RX-7's black went olive). Colour maps of at most 256 px, or with at most 256
+  // colours, go lossless and keep their size (a resize would blend neighbouring cells).
+  // (Runs after the small parts are named, which it leaves to the lossy 512 px pass.)
+  for(const m of doc.getRoot().listMaterials()) for(const slot of ['BaseColor', 'Emissive']){
+    const t = m['get' + slot + 'Texture']();
+    if(!t || /^(flat|small):/.test(t.getName())) continue;     // (a small part's texture: its shift can't be seen)
+    const { data, info } = await sharp(Buffer.from(t.getImage())).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const colours = new Set();
+    for(let i = 0; i < data.length && colours.size <= 256; i += 4) colours.add(data.readUInt32LE(i));
+    if(Math.max(info.width, info.height) <= 256 || colours.size <= 256){ t.setName('flat:' + m.getName()); log(`texture of ${m.getName()}: palette, lossless`); }
+  }
+  await doc.transform(
+    dedup(), prune(), flattenBody, join({ keepNamed: false, filter: n => !n.getExtras().wheel }),
+    // (the mark goes: GLTFLoader would hand it over as userData.wheel, the game's own field)
+    d => { for(const n of d.getRoot().listNodes()){ const { wheel, ...rest } = n.getExtras(); n.setExtras(rest); } },
+    webp({ pattern: /^flat:/, lossless: true }),
+    webp({ pattern: /^small:/, slots: /^(baseColor|emissive)/, resize: [512, 512], quality: 80 }),
+    webp({ pattern: /^small:/, resize: [256, 256], quality: 70 }),
+    webp({ slots: /^(baseColor|emissive)/, resize: [1024, 1024], quality: 80 }),
+    webp({ slots: /^(normal|metallicRoughness|occlusion)/, resize: [512, 512], quality: 70 }),
+    webp({ resize: [1024, 1024], quality: 80 }),   // anything else
+    weld(),
+    dropUnusedUVs,
+    meshopt({ encoder: MeshoptEncoder, level: 'high' }),
+  );
+}
+async function packFile(IN, OUT){
+  const name = path.basename(IN, '.glb'), log = (...a) => console.log(name + ':', ...a);
+  const doc = await io.read(IN);
+  await pack(doc, log, name);
+  await io.write(OUT, doc);
+  log(kb(IN), '→', kb(OUT));
+}
+
+// The models' versions: a hash of each file's content, put in its URL (?v=), so the
+// browser may keep a model for a year (immutable) and still gets a changed one at once.
+// Written to public/js/core/modelVersions.js (core/carModels.js reads it) and into the
+// early preload in public/index.html; tests/models.test.mjs checks both against the files.
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+function writeVersions(){
+  const dir = path.join(REPO, 'public/models/cars');
+  const v = Object.fromEntries(readdirSync(dir).filter(f => f.endsWith('.glb')).sort()
+    .map(f => [f, createHash('sha256').update(readFileSync(path.join(dir, f))).digest('hex').slice(0, 10)]));
+  writeFileSync(path.join(REPO, 'public/js/core/modelVersions.js'),
+    '// Written by tools/prep-car-model.mjs (do not edit): a hash of each car model file, used as\n' +
+    '// its URL\'s ?v= so a changed model is never served from a stale cache.\n' +
+    'export const MODEL_VERSIONS = ' + JSON.stringify(v, null, 2).replace(/"/g, "'") + ';\n');
+  const html = path.join(REPO, 'public/index.html'), page = readFileSync(html, 'utf8');
+  const map = /var M = \{([^}]*)\};/.exec(page);
+  if(!map) throw new Error('index.html: the preload map (var M = {...}) is gone');
+  const body = map[1].replace(/'([\w-]+\.glb)(\?v=\w+)?'/g, (_, f) => { if(!v[f]) throw new Error('index.html: no model ' + f); return `'${f}?v=${v[f]}'`; });
+  writeFileSync(html, page.replace(map[0], 'var M = {' + body + '};'));
+  console.log('versions:', Object.entries(v).map(([f, h]) => f + ' ' + h).join(', '));
+}
+
+const argv = process.argv.slice(2);
+if(argv[0] === '--pack-all'){
+  const src = path.join(REPO, 'models-src/cars'), dst = path.join(REPO, 'public/models/cars');
+  for(const f of readdirSync(src).filter(f => f.endsWith('.glb'))) await packFile(path.join(src, f), path.join(dst, f));
+  writeVersions();
+  process.exit(0);
+}
+if(argv[0] === '--pack'){ await packFile(argv[1], argv[2]); writeVersions(); process.exit(0); }
+if(argv[0] === '--versions'){ writeVersions(); process.exit(0); }
+
+/* ---------- prep ---------- */
+const [IN, OUT, NAME] = argv;
 const cfg = CFG[NAME]; if (!cfg) throw new Error('no config ' + NAME);
-await MeshoptSimplifier.ready;
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const doc = await io.read(IN);
 const root = doc.getRoot();
 const log = (...a) => console.log(NAME + ':', ...a);
@@ -84,12 +390,14 @@ for (const [, p] of prims()) if ((cfg.paintMats || []).includes(matName(p))) {
   p.setMaterial(paint); painted += tri(p);
 }
 
+let jpeg, PNG;
 function decode(tex) {
   const buf = Buffer.from(tex.getImage());
   if (tex.getMimeType() === 'image/png') { const png = PNG.sync.read(buf); return { w: png.width, h: png.height, d: png.data }; }
   const j = jpeg.decode(buf, { useTArray: true }); return { w: j.width, h: j.height, d: j.data };
 }
 if (cfg.split) {
+  jpeg = (await import('jpeg-js')).default; PNG = (await import('pngjs')).PNG;
   const cand = prims().filter(([, p]) => cfg.split.mats.includes(matName(p)) && (!cfg.split.nodes || cfg.split.nodes.test(nodeOf.get(p)?.getName() || '')));
   const imgs = new Map();
   const img = m => { if (!imgs.has(m)) imgs.set(m, decode(m.getBaseColorTexture())); return imgs.get(m); };
@@ -157,5 +465,9 @@ await doc.transform(prune(), dedup());
 if (cfg.simplify) await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: cfg.simplify, error: 0.0005 }));
 await doc.transform(prune());
 const after = prims().reduce((s, [, p]) => s + tri(p), 0);
-await io.write(OUT, doc);
 log('triangles', Math.round(before), '→', Math.round(after));
+// the prepped file, uncompressed, next to OUT's name in models-src/cars/; then the packed one
+const SRC = path.join(REPO, 'models-src/cars', path.basename(OUT));
+await io.write(SRC, doc);
+await packFile(SRC, OUT);
+writeVersions();

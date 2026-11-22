@@ -46,12 +46,14 @@ export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s
 // of the room"). It stays 6 s (longer while the focus is on its close button). What it says
 // is also on the screen below it (a status line there reads it out), so it says nothing
 // itself: a second voice would only repeat it.
+// { short: true }: a passing note (the host picked another map), 3 s, in the calm cyan.
 let noteTimer=0;
-export function note(text){
+export function note(text, { short=false }={}){
   const t=$('noteToast'); if(!t) return;
   $('noteText').textContent=text;
+  t.toggleAttribute('data-info', short);
   if(!t.matches(':popover-open')) t.showPopover();
   clearTimeout(noteTimer);
-  const later=()=>{ noteTimer=setTimeout(()=>{ if(t.contains(document.activeElement)) later(); else if(t.matches(':popover-open')) t.hidePopover(); },6000); };
+  const later=()=>{ noteTimer=setTimeout(()=>{ if(t.contains(document.activeElement)) later(); else if(t.matches(':popover-open')) t.hidePopover(); },short?3000:6000); };
   later();
 }

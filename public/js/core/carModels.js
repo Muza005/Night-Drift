@@ -8,9 +8,12 @@
 // the race: 4.3 m long, wheels on the ground (y = 0), centred on x and z, nose to +Z (the
 // files already face +Z).
 //
-// Needs the global THREE (r128) and THREE.GLTFLoader (three/examples/js/loaders/GLTFLoader.js
-// of the same version), both loaded by index.html.
+// Needs the global THREE (r128), THREE.GLTFLoader (three/examples/js/loaders/GLTFLoader.js
+// of the same version) and MeshoptDecoder (three/examples/js/libs/meshopt_decoder.js: the
+// models' geometry is meshopt-compressed, see tools/prep-car-model.mjs), all loaded by
+// index.html.
 import { CARS, carById, paintHex } from './cars.js';
+import { MODEL_VERSIONS } from './modelVersions.js';
 
 export const CAR_LEN = 4.3;
 
@@ -24,8 +27,13 @@ export function setPaint(mat, hex){
 
 // Model paths in cars.js are relative to public/: resolve them from this file, so any page
 // (the game, the preview in dev/) finds them.
+// Each URL carries the file's content hash (?v=, modelVersions.js, written by the pack
+// step): it may be cached for good, and a changed model is a new URL.
 const PUBLIC = new URL('../../', import.meta.url);
-const modelUrl = path => new URL(path, PUBLIC).href;
+export const modelUrl = path => {
+  const v = MODEL_VERSIONS[path.split('/').pop()];
+  return new URL(path + (v ? '?v=' + v : ''), PUBLIC).href;
+};
 
 const templates = new Map();      // model path -> Promise<template>
 let loader = null;
@@ -33,16 +41,18 @@ let loader = null;
 function gltfLoader(){
   if(!loader){
     if(!THREE.GLTFLoader) throw new Error('THREE.GLTFLoader is missing: load three/examples/js/loaders/GLTFLoader.js');
-    loader = new THREE.GLTFLoader();
+    if(!globalThis.MeshoptDecoder) throw new Error('MeshoptDecoder is missing: load three/examples/js/libs/meshopt_decoder.js');
+    loader = new THREE.GLTFLoader().setMeshoptDecoder(globalThis.MeshoptDecoder);
   }
   return loader;
 }
 
 // The wheels of each model, by node name as GLTFLoader gives it (it drops dots and turns
 // spaces into "_"): where wheels are separate nodes they can spin. Some models have the
-// tyre and the rim as two nodes (Nexus, Dodge): both are listed. Models whose wheels are
-// part of the body mesh (the Lamborghini, the RX-7) have none.
-const WHEEL = /^(DEF-Wheel(Ft|Bk)[LR]_\d+|Tire_(FL|FR|RL|RR)|(FL|FR|RL|RR)W|(Tire|Rim)_(FL|FR|RL|RR)_low|(FL|FR|RL|RR)(tire|rim)_[A-Za-z]+\d*)$/;
+// tyre and the rim as two nodes (Nexus, Dodge, the RX-7's Circle.001 and .004-.010;
+// .002 and .003 are its tail lights): both are listed. The Lamborghini's wheels were part of
+// its one body mesh: the pack step cuts them out into nodes FLW, FRW, RLW, RRW.
+export const WHEEL = /^(DEF-Wheel(Ft|Bk)[LR]_\d+|Tire_(FL|FR|RL|RR)|(FL|FR|RL|RR)W|(Tire|Rim)_(FL|FR|RL|RR)_low|(FL|FR|RL|RR)(tire|rim)_[A-Za-z]+\d*|Circle0(0[14-9]|10))$/;
 
 function normalise(scene){
   scene.updateMatrixWorld(true);
@@ -91,7 +101,8 @@ export function loadModel(carId){
   if(!templates.has(c.model)){
     const fail = err => { templates.delete(c.model); throw err; };   // a failure is not kept: the next ask tries again
     templates.set(c.model, new Promise((resolve, reject) => {
-      gltfLoader().load(modelUrl(c.model), gltf => { try {
+      const url = modelUrl(c.model);
+      gltfLoader().load(url, gltf => { try {
         const t = normalise(gltf.scene);
         t.root.traverse(o => {
           if(!o.isMesh) return;
@@ -106,7 +117,12 @@ export function loadModel(carId){
         pivotWheels(t);
         t.model = c.model;
         resolve(t);
-      } catch(err){ reject(err); } }, undefined, reject);
+      } catch(err){ reject(new Error(url + ': ' + err.message)); } }, undefined, e => {
+        // FileLoader hands over the request's ProgressEvent: say which file and what came back
+        const x = e && e.target;
+        reject(e instanceof Error ? new Error(url + ': ' + e.message)
+          : new Error(url + ': ' + (x && 'status' in x ? (x.status ? 'HTTP ' + x.status + ' ' + (x.statusText || '') : 'network error') : String(e))));
+      });
     }).catch(fail));
   }
   return templates.get(c.model);
@@ -114,11 +130,32 @@ export function loadModel(carId){
 
 // Load models ahead of time, when the browser is idle (the next and previous car in the
 // garage): a car scrolled to is then already there, without a freeze.
-const idle = globalThis.requestIdleCallback || (fn => setTimeout(fn, 200));
+const idle = globalThis.requestIdleCallback ? fn => requestIdleCallback(fn, { timeout: 1500 }) : fn => setTimeout(fn, 200);
 export function preload(carIds){
   for(const id of carIds) idle(() => { loadModel(id).catch(() => {}); });
 }
+// Is it asked for (loading or loaded)?
 export const isLoaded = carId => templates.has(carById(carId).model);
+
+// The whole garage in the background, after the first menu frame: one model at a time
+// (never two downloads fighting over the line), nearest to car `fromId` in the garage's
+// order first, each one only once the browser is idle. paused(): true while loading must
+// wait (a race on: parsing a model mid-race would cost a frame). A car asked for meanwhile
+// (flipped to in the garage, an opponent's pick in a room) loads at once, ahead of this.
+let queued = false;
+export function preloadAll(fromId, paused = () => false){
+  if(queued) return; queued = true;
+  const i0 = Math.max(0, CARS.findIndex(c => c.id === fromId));
+  const order = CARS.map((c, i) => ({ id: c.id, d: Math.abs(i - i0) + (i < i0 ? 0.5 : 0) })).sort((a, b) => a.d - b.d).map(c => c.id);
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  (async () => {
+    for(const id of order){
+      while(paused()) await wait(1000);
+      await new Promise(r => idle(r));
+      await loadModel(id).catch(() => {});          // (a failure is not kept: the garage tries again)
+    }
+  })();
+}
 
 // A car to put on screen: a clone of the template with its own Paint material.
 //   inst.root     the THREE.Group to add to a scene

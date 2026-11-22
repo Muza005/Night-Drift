@@ -16,6 +16,11 @@
 //   turn   how fast the nose turns in
 //   dirt   pull off the asphalt (only the rally car differs: it loses less on the verge)
 //
+// mass: how heavy the car is in a hit with another player's car (net/bump.js), the base
+// car 1: the sedans and the muscle car heavier, the RX-7 lighter, all within 0.9-1.15, so a
+// heavier car is pushed a little less and pushes a little more. Not a physics.js stat: it
+// changes nothing in how a car drives.
+//
 // model: the 3D model file under public/ (models/cars/, see README there). Every model has
 // a material "Paint" (the body: recolour it by its colour, no texture); the four detailed
 // ones also have "Glass" (the windows). core/carModels.js loads and recolours them.
@@ -42,42 +47,43 @@ export const CARS = [
   // GT: the base car. Exactly the physics the game always had.
   { id: 'coupe',  cls: 'gt',     name: 'Aston Martin', model: 'models/cars/generic_sport_coupe_car.glb', factory: 0x881413,
     tag: 'Эталон: ровно во всём, ни одной слабости и ни одного козыря',
-    stats: BASE },
+    stats: BASE, mass: 1 },
 
   // JDM: the drift cars. Both hold a slide easily; one grips, one is pure drift.
   { id: 'gtr',    cls: 'jdm',    name: 'Skyline GT-R R32', model: 'models/cars/nissan_gtr_r32.glb', factory: 0x2f2f2f, tail: [0.57, 0.27, 0.3],
     tag: 'Полный привод: цепкий и резвый с места, легко идёт в занос, но невысокая максималка',
-    stats: S({ vmax: 0.98, acc: 1.03, brake: 1.01, grip: 1.04, slide: 0.95, turn: 1.02 }) },
+    stats: S({ vmax: 0.98, acc: 1.03, brake: 1.01, grip: 1.04, slide: 0.95, turn: 1.02 }), mass: 1.05 },
   { id: 'rx7',    cls: 'jdm',    name: 'Mazda RX-7',   model: 'models/cars/lowpoly_stylized_rx_7_free.glb', factory: 0xfc6d00,
     tag: 'Король дрифта: лёгкий, острый руль, дольше всех держит занос, но слабый мотор',
-    stats: S({ vmax: 0.98, acc: 1.0, brake: 1.03, grip: 1.06, slide: 0.92, turn: 1.07 }) },
+    stats: S({ vmax: 0.98, acc: 1.0, brake: 1.03, grip: 1.06, slide: 0.92, turn: 1.07 }), mass: 0.9 },
 
   // Muscle: power and a tail that steps out; pays in corners and brakes.
   { id: 'muscle', cls: 'muscle', name: 'Dodge',        model: 'models/cars/muscle_car.glb', factory: 0xe70900,
     tag: 'Мощный, второй по скорости, охотно идёт боком, но тяжёлый в повороте и тормоза так себе',
-    stats: S({ vmax: 1.02, acc: 1.03, brake: 0.94, grip: 0.94, slide: 0.94, turn: 0.95 }) },
+    stats: S({ vmax: 1.02, acc: 1.03, brake: 0.94, grip: 0.94, slide: 0.94, turn: 0.95 }), mass: 1.15 },
 
   // Super: the fastest car; planted, so a drift dies quickly.
   { id: 'super',  cls: 'super',  name: 'Lamborghini',  model: 'models/cars/sports_car.glb', factory: 0xe22727, tail: [0.68, 0.33, 0.3],
     tag: 'Самая высокая максималка, но неохотно поворачивает и не любит занос',
-    stats: S({ vmax: 1.05, acc: 1.0, brake: 1.03, grip: 0.92, slide: 1.0, turn: 0.92 }) },
+    stats: S({ vmax: 1.05, acc: 1.0, brake: 1.03, grip: 0.92, slide: 1.0, turn: 0.92 }), mass: 1.0 },
 
   // Sedans: heavy and stable, forgiving.
   { id: 'sedan',  cls: 'sedan',  name: 'Ford',         model: 'models/cars/generic_sedan_car.glb', factory: 0x656770,
     tag: 'Для новичка: устойчивый, отличные тормоза, прощает ошибки, но неторопливый',
-    stats: S({ vmax: 0.98, acc: 0.97, brake: 1.06, grip: 1.05, slide: 1.06, turn: 1.0 }) },
+    stats: S({ vmax: 0.98, acc: 0.97, brake: 1.06, grip: 1.05, slide: 1.06, turn: 1.0 }), mass: 1.12 },
   { id: 'nexus',  cls: 'sedan',  name: 'Nexus RX',     model: 'models/cars/nexus_rx.glb', factory: 0x4f5471, tail: [0.6, 0.36, 0.3],
     tag: 'Электромобиль: лучший разгон с места, но скромная максималка и тяжёлый в повороте',
-    stats: S({ vmax: 0.96, acc: 1.08, brake: 1.02, grip: 1.02, slide: 1.03, turn: 0.93 }) },
+    stats: S({ vmax: 0.96, acc: 1.08, brake: 1.02, grip: 1.02, slide: 1.03, turn: 0.93 }), mass: 1.15 },
 
   // Rally: agile, at home off the asphalt, slow at the top.
   { id: 'rally',  cls: 'rally',  name: 'Rally',        model: 'models/cars/everest.glb', factory: 0x1f5cff, tail: [0.66, 0.4, 0.26],
     tag: 'Вёрткий, уверенно скользит и лучше всех едет по бездорожью, но низкая максималка',
-    stats: S({ vmax: 0.95, acc: 1.02, brake: 1.0, grip: 1.03, slide: 0.97, turn: 1.06, dirt: 1.25 }) },
+    stats: S({ vmax: 0.95, acc: 1.02, brake: 1.0, grip: 1.03, slide: 0.97, turn: 1.06, dirt: 1.25 }), mass: 0.95 },
 ];
 export const CAR_IDS = CARS.map(c => c.id);
 export const DEFAULT_CAR = CARS[0].id;           // the first car of the list: reorder CARS to change it
 export const carById = id => CARS.find(c => c.id === id) || CARS[0];
+export const carMass = id => carById(id).mass || 1;   // in a hit with another player's car
 export const classById = id => CLASSES.find(c => c.id === id) || CLASSES[0];
 
 // The paints. The first is "Заводской": the colour the car's own model came with (each

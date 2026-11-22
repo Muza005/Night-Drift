@@ -4,29 +4,35 @@
 // G.mode.constrain() (the mode's walls and rules). Everything else here is the
 // single-file version's loop, split across modules.
 import { $, G, NET, drift, isTouch, serverNow } from './state.js';
-import { canvas, renderer, scene, camera, moon, qualityTick, captureBackdrop, drawBackdrop } from './core/render.js';
+import { canvas, renderer, scene, camera, moon, qualityTick, drawBackdrop } from './core/render.js';
 import './modes/track/scene.js';            // scenery first, then the cars (same order as before)
 import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
-import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft } from './core/audio.js';
+import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft, audioRumble } from './core/audio.js';
 import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
+import { lift } from './net/bump.js';
 import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
 import { openGarage, garage } from './ui/garageScreen.js';
 import { lobby } from './ui/lobbyScreen.js';
 import { choice, savePick } from './ui/garage.js';
 import { applyLook } from './player.js';
+import { preloadAll } from './core/carModels.js';
 
 if (isTouch) document.body.classList.add('touch');
+import { records, saveScore, migrate } from './records.js';
 const LS = {
   get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
 };
-{ const b=parseFloat(LS.get('nightdrift.best')); if(b>0) G.best=b; }
+// solo drift records per map (records.js): G.best (lap, s) and G.bestScore are the active map's
+migrate();
+function loadRecords(){ const r=records(trackMode.mapId); G.best=r.lap; G.bestScore=r.score; }
+loadRecords();
 
 /* ---------- modes ----------
    The drift track is built at start-up; the highway module loads the first time it is
@@ -56,7 +62,9 @@ G.setMode = setMode;            // net.js switches to the room's mode
 /* ---------- physics step ---------- */
 function physics(dt){
   const I=((NET.online&&NET.finished)||G.state==='crash'||(G.mode.inputBlocked&&G.mode.inputBlocked()))?NOINPUT:input;
-  stepCar(car,I,dt);
+  // in the air after a crest (maps with heights): no grip, steering or throttle; the
+  // track mode flies the car in constrain() instead (modes/track/geometry.js)
+  if(!(car.air && G.mode.id==='track')) stepCar(car,I,dt);
   G.mode.constrain(car,dt,physicsHooks);
   if(G.mode.collide) G.mode.collide(car,physicsHooks);   // traffic mode: hits with bots
 }
@@ -96,7 +104,7 @@ $('bPause').addEventListener('click',()=>{ if(NET.online) leaveOnline(); else if
 function startRace(quick=false){
   audioInit();
   $('menu').hidden=true; canvas.focus();
-  G.mode.enter(car,{slot:0});
+  G.mode.enter(car,{slot:0}); loadRecords();
   G.raceT=0; G.lapT=0; G.lap=1; G.score=0; G.runBest=0; G.runRecord=false; G.runEnd=false; dropDrift(); clearMarks();
   G.state='count';
   if(quick){ G.cd=0.45; G.prevCount=1; $('count').textContent=''; }
@@ -128,7 +136,9 @@ let menuKind = 'solo';                   // which mode screen is open: 'solo' | 
 
 function renderRecords(){
   const tb = parseInt(LS.get('nightdrift.trafficBest'),10) || 0;
-  $('bestTrack').textContent = G.best ? 'Лучший круг ' + fmtT(G.best) : 'Лучшего круга пока нет';
+  loadRecords();                         // (the solo map's: «Дрифт» shows the map it will start on)
+  // (with the map's name: the record is that map's)
+  $('bestTrack').textContent = trackMode.mapName + ' · ' + (G.best ? 'лучший круг ' + fmtT(G.best) : 'лучшего круга пока нет');
   $('bestTraffic').textContent = tb ? 'Рекорд ' + fmtN(tb) : 'Рекорда пока нет';
 }
 // Focus moves with the screens when they are changed, so the keyboard carries on where the
@@ -179,6 +189,8 @@ function openSoloGarage(dir){
   return openGarage({ kind:'solo', mode:G.mode.id, car:choice.car, paint:choice.paint, dir,
     onGo(carId, paint){ savePick(carId, paint); applyLook(carId, paint); startRace(); },
     onBack(){ openModes('solo','back'); },
+    // a map picked in the garage: the track switches to it now, its records come with it
+    onMap(id){ if(G.setSoloMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } loadRecords(); },
   }).then(()=>moveFocus($('garGo')));
 }
 $('mTrack').addEventListener('click',()=>pick('track'));
@@ -204,7 +216,7 @@ function showOver(){
   showPanel('pOver'); $('retry').focus();
 }
 function overTitle(a, b){ const h=$('overTitle'), sp=document.createElement('span'); sp.textContent=b; h.replaceChildren(a+' ', sp); }
-// Solo drift: the run is N laps (the garage's "!"); after the last one, the finish screen:
+// Solo drift: the run is N laps (the garage's gear button); after the last one, the finish screen:
 // the drift points big, the run's time, its best lap, a badge for a lap record.
 function showFinish(){
   G.state='over'; clearInput(); G.runEnd=false;
@@ -212,8 +224,11 @@ function showFinish(){
   overTitle('Финиш', G.soloLaps+' '+(G.soloLaps===1?'круг':G.soloLaps<5?'круга':'кругов'));
   $('overLbl').textContent = 'Очки дрифта';
   $('overScore').textContent = fmtN(G.score);
-  $('overRecord').hidden = !G.runRecord; $('overRecord').textContent = 'Рекорд круга';
-  $('overBest').textContent = G.runRecord ? '' : (G.best ? 'Рекорд круга ' + fmtT(G.best) : '');
+  // the map's records: the lap (finishLap keeps it) and the run's drift score
+  const scoreRec = saveScore(trackMode.mapId, G.score); if(scoreRec) G.bestScore = G.score;
+  $('overRecord').hidden = !G.runRecord && !scoreRec;
+  $('overRecord').textContent = G.runRecord && scoreRec ? 'Рекорд круга и очков' : G.runRecord ? 'Рекорд круга' : 'Рекорд очков';
+  $('overBest').textContent = [!G.runRecord && G.best ? 'Рекорд круга ' + fmtT(G.best) : '', !scoreRec && G.bestScore ? 'рекорд очков ' + fmtN(G.bestScore) : ''].filter(Boolean).join(' · ');
   const box=$('overStats'); box.replaceChildren();
   for(const [k,v] of [['Время', fmtT(G.raceT)], ['Лучший круг', G.runBest ? fmtT(G.runBest) : '—'], ['Круги', String(G.soloLaps)]]){
     const d=document.createElement('div'); const a=document.createElement('span'); a.className='lbl'; a.textContent=k;
@@ -231,21 +246,21 @@ G.mode.idle(car);
 
 /* ---------- loop ---------- */
 let last=performance.now(), menuA=0;
-// The camera behind a menu screen: circling the car. The lobby and the garage take one
-// still picture from here (G.menuView, then core/render.js captureBackdrop).
+// The camera behind a menu screen: circling the car (the menus themselves show the drawn
+// city of core/render.js drawBackdrop, not the race).
 function menuView(){
   rig.pos.set(car.x+Math.sin(menuA)*11,4.2,car.z+Math.cos(menuA)*11);
   camera.position.copy(rig.pos); rig.look.set(car.x,.9,car.z); camera.lookAt(rig.look); rig.init=false;
   camera.fov=58; if(camera.view && camera.view.enabled) camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
-G.menuView=menuView;
 // A menu screen with nothing of the race moving (home, the mode cards, the results, the
 // pause and the finish or crash screen): the scene is drawn once, not every frame, and the
-// canvas keeps that picture. Behind home, the cards and the results it is the blurred
-// still the garage uses; behind pause and the finish screen, the race as it stood.
+// canvas keeps that picture. Behind home, the cards and the results it is the drawn night
+// city the garage uses; behind pause and the finish screen, the race as it stood.
 // Drawn again only when something it shows changes: the mode, my car, the window.
 let stillKey='', audioIdle=false;
+canvas.addEventListener('webglcontextrestored',()=>{ stillKey=''; });   // the still picture is gone with the context: draw it again
 function stillFrame(){
   if($('menu').hidden){ stillKey=''; return false; }
   const s=G.state, frozen=s==='pause'||s==='over';
@@ -254,18 +269,19 @@ function stillFrame(){
   if(key!==stillKey){
     stillKey=key;
     if(frozen) renderer.render(scene,camera);
-    else { menuView(); captureBackdrop(); drawBackdrop(); }
+    else drawBackdrop();
   }
   return true;
 }
 function frame(now){
   requestAnimationFrame(frame);
   const realDt=Math.max(.001,(now-last)/1000), dt=Math.min(.05,realDt); last=now;
-  // The garage is up: only the stand is drawn, on a still, blurred picture of the track.
+  // The garage is up: only the stand is drawn, on the drawn night city.
   // Out of the race (results, the menu, the garage…) the engine and the tyres go back to
-  // idle once: the screens below return early and never reach the audio further down.
+  // idle once, and the shoulder rumble and the slipstream wind stop: the screens below
+  // return early and never reach the audio further down.
   const racing=G.state==='race'||G.state==='count'||G.state==='crash';
-  if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioIdle=true; } else if(racing) audioIdle=false;
+  if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioRumble(0); audioDraft(0); audioIdle=true; } else if(racing) audioIdle=false;
   if(garage.open){ stillKey=''; garage.frame(now); return; }
   if(lobby.open){ stillKey=''; lobby.frame(now); return; }        // the lobby: the same, with my car
   if(stillFrame()) return;
@@ -295,7 +311,7 @@ function frame(now){
   audioDraft(G.state==='race' ? NET.draft.level : 0);
   if(G.state==='race'){
     G.raceT+=dt; G.lapT+=dt;
-    const h=dt/2; physics(h); collideGhosts(); physics(h); collideGhosts();
+    const h=dt/2; physics(h); collideGhosts(h); physics(h); collideGhosts(h);
     // a crash in one of the two steps ends the run right there: no drift or near miss is
     // scored for the frame of the crash (the drift meter used to come back on and stay)
     if(G.state==='race'){
@@ -310,9 +326,17 @@ function frame(now){
 
   /* visuals */
   const fx=Math.sin(car.h), fz=Math.cos(car.h), rx=Math.cos(car.h), rz=-Math.sin(car.h);
-  car.root.position.set(car.x,0,car.z); car.root.rotation.y=car.h;
-  car.roll+=(Math.max(-.11,Math.min(.11,car.vR*.012))-car.roll)*Math.min(1,dt*6);
-  car.body.rotation.z=car.roll;
+  // on a map with heights: the car's height, and pitch and roll from the road under it
+  const pose=G.mode.pose?G.mode.pose(car,dt):null, cy=pose?pose.y:0;
+  // a hard hit by another player's car lifts it a moment (net/bump.js): on maps with heights
+  // that is a real hop (car.air, in pose.y); elsewhere only drawn
+  car.root.position.set(car.x,cy+lift(car,dt),car.z);
+  // a landing squashes the body toward the road (scaled from the ground up, so the wheels
+  // never sink into it)
+  if(pose){ car.root.rotation.set(pose.pitch,car.h,pose.roll,'YXZ'); car.body.scale.y=1-pose.squash*.5; }
+  else { car.root.rotation.set(0,car.h,0); car.body.scale.y=1; }
+  // No body roll in a slide: the 3D models' wheels are part of the body, so leaning it
+  // pushed the tyres on one side into the road.
   car.pitch+=(((input.down&&car.vF>1)?.035:input.up?-.02:0)-car.pitch)*Math.min(1,dt*5);
   car.body.rotation.x=car.pitch;
   if(G.state!=='pause') car.spin+=car.vF*dt/.38;             // paused: the wheels stand still like everything else
@@ -324,7 +348,7 @@ function frame(now){
   const smokeOn=G.state==='race' && info.speed>5 && (Math.abs(car.vR)>4.5 || (input.hb&&info.speed>8));
   for(const [k,lx] of [[0,.95],[1,-.95]]){
     const wx=car.x+rx*lx+fx*-1.35, wz=car.z+rz*lx+fz*-1.35;
-    if(smokeOn){ addMark(car,k,wx,wz); if(Math.random()<.85) emitSmoke(wx,wz,car.vx,car.vz,slide+.3); }
+    if(smokeOn && !car.air){ addMark(car,k,wx,wz,cy); if(Math.random()<.425) emitSmoke(wx,wz,car.vx,car.vz,slide+.3,cy); }
     else car.lastMark[k]=null;
   }
   sendState(dt,slide);
@@ -339,13 +363,14 @@ function frame(now){
     G.mode.camera(car,dt);
   }
   camera.updateProjectionMatrix();
-  moon.position.set(car.x+30,60,car.z+20); moon.target.position.set(car.x,0,car.z);
+  moon.position.set(car.x+30,60+cy,car.z+20); moon.target.position.set(car.x,cy,car.z);
 
   // audio
   const spd=Math.abs(car.vF);
   const bands=[0,12,22,33,45,58,72]; let gear=1; while(gear<6 && spd>bands[gear]) gear++;   // six gears up to 250 km/h
   const lo=bands[gear-1], hi=bands[gear]; const rpm=.25+.75*Math.min(1,(spd-lo)/(hi-lo));
   audioUpdate(G.state==='race'?rpm:.2, G.state==='race'?input.up:0, slide);
+  audioRumble(G.state==='race' && car.off && G.mode.id==='traffic' ? Math.hypot(car.vx,car.vz) : 0);   // on the highway shoulder
 
   // HUD
   const kmh=Math.round(Math.hypot(car.vx,car.vz)*3.6);
@@ -365,4 +390,8 @@ function frame(now){
 }
 if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,scene,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
 requestAnimationFrame(frame);
+// The other cars' models load in the background once the first menu frame is up, one by
+// one, nearest to the picked car first (that one started at once: player.js asks for it,
+// and index.html already preloads its file). Held while a race runs (crash included).
+requestAnimationFrame(()=>setTimeout(()=>preloadAll(choice.car,()=>G.state==='race'||G.state==='count'||G.state==='crash'),0));
 document.addEventListener('visibilitychange',()=>{ if(document.hidden && !NET.online && (G.state==='race'||G.state==='count')) pause(); });
