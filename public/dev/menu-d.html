@@ -3,238 +3,335 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Night Drift — макет D «Стойка»</title>
+<title>Night Drift — макет D «Стойка», вторая итерация</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500..800&family=Manrope:wght@400..800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="../css/tokens.css">
 <style>
-/* U1 mock D, «Стойка». Your car stands on its lit podium in the middle of the night city and
-   never leaves it: every menu level is a deck of slanted cards that rolls past under it.
-   ← → slides the deck so the chosen card sits under the car, opens wide and lights its frame
-   from the game; the readout above the deck says what it is. Enter rolls the deck on to the
-   next level (it leaves to the left, the next comes in from the right, the car leans into the
-   move); Esc rolls it back. «С друзьями» is a card of the first deck, next to the two modes:
-   one press for the common case (drive alone), one card away for a room, and the friend with
-   a code finds «Войти по коду» right behind it. */
+/* U1 mock D, «Стойка», iteration 2. One picture: your car stands on a wet street at night,
+   the city on the horizon and its lights smeared in the asphalt, and the deck of slanted
+   cards lies along the kerb in front of it. The card in focus lights the street: its colour
+   pools under the car, catches the car's flanks and runs along the lane lines, and the
+   layers of the street shift a little as you move along the deck (← →), near ones more than
+   far ones. Enter rolls the deck on to the next level and the street rolls with it; Esc
+   rolls it back. Words are only names and the one or two numbers a choice needs.
+   Map cards are not frames from the game: each is a diagram of the real track, built from
+   the map's centre line (u1/blueprints.json, taken from geometry.js blueprint()): lifted by
+   its real height over its own shadow, coloured from cyan at the start to rose at the end
+   of the lap, bridges drawn over what they cross, shortcuts dashed amber, a light running
+   the lap on the card in focus. */
+@property --glow { syntax: '<color>'; inherits: true; initial-value: #3ef0ff; }
 :root {
   --slant: 26px;
-  --card: 150px;                       /* a card at rest */
-  --card-open: 380px;                  /* the card under the car */
-  --card-h: clamp(150px, 26vh, 250px);
+  --card: 150px;
+  --card-open: 380px;
+  --card-h: clamp(150px, 27vh, 250px);
   --deck-gap: 10px;
   --dur-focus: 220ms;
   --dur-level: 320ms;
+  --dur-light: 420ms;                  /* the street taking the colour of the card in focus */
+  --hz: 47vh;                          /* the horizon */
+  --car-w: min(40vw, 600px);
+  --car-y: calc(var(--hz) - 15vh);     /* the car's roof line: its wheels stand just below the horizon */
   --gutter: clamp(16px, 3vw, 40px);
+  --glow: var(--c-cyan);
+  transition: --glow var(--dur-light) var(--ease-out);
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+html, body { margin: 0; height: 100%; background: var(--c-night-0); color: var(--text); overflow: hidden; }
 body { font: 400 var(--fs-md)/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
 ::selection { background: var(--c-rose); color: var(--c-night-1); }
 
-/* ---------- the scene: the painted city and the car on its stand ---------- */
-.scene { position: fixed; inset: 0; z-index: 0; background: url(u1/city-wide.webp) center 60% / cover no-repeat, var(--c-night-1); }
-.scene::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 6, 16, 0.7) 0%, rgba(5, 6, 16, 0.2) 30%, rgba(5, 6, 16, 0.35) 55%, rgba(5, 6, 16, 0.95) 80%); }
-.car { position: fixed; z-index: 0; left: 50%; top: calc(var(--top) + 36px); width: min(66vw, 780px); aspect-ratio: 940 / 520; translate: -50% 0;
-  -webkit-mask-image: radial-gradient(ellipse 50% 48% at 50% 50%, #000 58%, transparent 100%); mask-image: radial-gradient(ellipse 50% 48% at 50% 50%, #000 58%, transparent 100%); }
-.car img { width: 100%; height: 100%; display: block; }
+/* ---------- the street ---------- */
+.street { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: linear-gradient(180deg, var(--c-night-0) 0%, var(--c-night-2) calc(var(--hz) - 2vh), #0a0b17 var(--hz), var(--c-night-0) 100%); }
+.layer { position: absolute; transition: translate 480ms var(--ease-out); }
+/* the city on the horizon: the painted backdrop of the game */
+.city { --cw: 112vw; left: -6vw; width: var(--cw); height: calc(var(--cw) * 0.5625); top: calc(var(--hz) - var(--cw) * 0.5625 * 0.489); background: url(u1/city-wide.webp) center / cover no-repeat; filter: brightness(1.3) saturate(1.2); }
+/* its lights smeared further down the wet asphalt */
+.wet { --cw: 112vw; left: -6vw; width: var(--cw); top: var(--hz); height: 30vh; background: url(u1/city-wide.webp) center 40% / var(--cw) auto no-repeat; transform: scaleY(-1); filter: url(#smear) brightness(1.4) saturate(1.4); opacity: 0.5; mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(0deg, #000 0%, transparent 90%); mask-image: linear-gradient(0deg, #000 0%, transparent 90%); }
+/* far lamps out of focus, at the sides, at three depths */
+.bokeh i { position: absolute; width: var(--s); height: var(--s); border-radius: 50%; left: var(--x); top: var(--y); background: radial-gradient(circle, var(--c) 0%, transparent 70%); opacity: var(--o, 0.5); filter: blur(var(--b, 2px)); }
+/* the colour of the card in focus pooled on the street under the car */
+.pool { left: 50%; top: calc(var(--car-y) + var(--car-w) * 0.2); width: calc(var(--car-w) * 1.9); height: calc(var(--car-w) * 0.5); translate: -50% 0; background: radial-gradient(ellipse at 50% 45%, color-mix(in oklab, var(--glow) 42%, transparent) 0%, color-mix(in oklab, var(--glow) 12%, transparent) 45%, transparent 70%); mix-blend-mode: screen; }
+.veil { inset: 0; background: radial-gradient(ellipse 80% 70% at 50% 45%, transparent 45%, rgba(3, 4, 10, 0.55) 100%), linear-gradient(180deg, rgba(5, 6, 16, 0.6), transparent 14%); }
 
-.app { position: relative; z-index: 1; height: 100dvh; display: grid; grid-template-rows: auto 1fr auto auto auto; }
+/* ---------- the car on it ---------- */
+.car { position: fixed; z-index: 0; left: 50%; top: var(--car-y); width: var(--car-w); aspect-ratio: 1151 / 413; translate: -50% 0; }
+.car img, .car .rim { position: absolute; inset: 0; width: 100%; height: 100%; }
+.car .shadow { position: absolute; left: 6%; right: 2%; bottom: -5%; height: 22%; background: radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0.85), transparent 70%); }
+/* light from the street catching the body: the rim pass of the same render, in the card's colour */
+.car .rim { background: var(--glow); -webkit-mask: url(u1/car-rim.webp) center / 100% 100% no-repeat; mask: url(u1/car-rim.webp) luminance center / 100% 100% no-repeat; mix-blend-mode: screen; opacity: 0.32; }
+.car .mirror { position: absolute; left: 0; top: 100%; width: 100%; height: 100%; transform: scaleY(-1) translateY(6%); opacity: 0.26; filter: blur(1.5px);
+  -webkit-mask-image: linear-gradient(0deg, transparent 45%, #000 100%); mask-image: linear-gradient(0deg, transparent 45%, #000 100%); }
+.car .mirror img { width: 100%; height: 100%; }
 
-.top { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--top) var(--gutter) 0; }
+.app { position: relative; z-index: 1; height: 100dvh; display: grid; grid-template-rows: auto 1fr auto auto; }
+
+.top { display: flex; align-items: center; gap: var(--sp-3); padding: var(--top) var(--gutter) 0; min-height: calc(var(--top) + var(--btn-h)); }
 .logo { margin: 0; font: 800 var(--fs-lg)/1 var(--f-display); white-space: nowrap; }
 .logo span { color: var(--brand); }
-.path { display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; font: 600 var(--fs-sm)/1 var(--f-body); color: var(--text-quiet); }
-.path li + li::before { content: "/"; margin-inline-end: var(--sp-2); color: var(--text-off); }
-.path li:last-child { color: var(--text); }
-
-/* ---------- the readout: what the card under the car is ---------- */
-.readout { display: grid; gap: var(--sp-2); justify-items: center; text-align: center; padding: 0 var(--gutter) var(--sp-4); width: min(100%, 640px); margin-inline: auto; min-height: 5.5rem; align-content: end; }
-.readout .meta { justify-content: center; }
-.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
-.readout p { margin: 0; font-size: var(--fs-md); color: var(--c-ink-0); max-width: 52ch; text-wrap: balance; }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); color: var(--c-ink-1); }
-.meta .num { font: 700 var(--fs-sm)/1 var(--f-num); color: var(--text); }
-.meta .none { color: var(--text-quiet); font-weight: 600; }
-.dots { display: inline-flex; gap: 3px; vertical-align: middle; }
-.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ink-3); }
-.dots i.on { background: var(--brand); }
-.tag { padding: 2px var(--sp-2); border-radius: var(--r-pill); border: 1px solid var(--line-strong); font: 600 var(--fs-xs)/1.4 var(--f-body); }
-.readout .swap { transition: opacity 140ms var(--ease-out), translate 200ms var(--ease-out); }
-.readout .swap.out { opacity: 0; translate: 0 6px; transition-duration: 1ms; }
+.back { display: grid; place-items: center; width: var(--btn-h); height: var(--btn-h); border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; transition: transform var(--dur-press) var(--ease-out); }
+.back:active { transform: scale(0.94); }
+.back:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.back[hidden] { display: none; }
+.where { font: 700 var(--fs-md)/1 var(--f-display); color: var(--text); }
+.where:empty { display: none; }
 
 /* ---------- the deck ---------- */
 .deck { position: relative; height: calc(var(--card-h) + var(--sp-2)); overflow: hidden; }
 .track { position: absolute; top: 0; left: 0; display: flex; gap: var(--deck-gap); height: var(--card-h); transition: transform var(--dur-focus) var(--ease-out); will-change: transform; }
 .track[inert] { pointer-events: none; }
 .card {
-  position: relative; flex: 0 0 var(--card); height: 100%; border: 0; padding: 0; cursor: pointer; background: var(--c-night-2);
+  position: relative; flex: 0 0 var(--card); height: 100%; cursor: pointer; background: var(--c-night-2);
   margin-inline-end: calc(var(--slant) * -1);
   clip-path: polygon(var(--slant) 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%);
   transition: flex-basis var(--dur-focus) var(--ease-out);
   outline: none;
 }
 .card[aria-selected="true"] { flex-basis: var(--card-open); }
-.card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--fx, 50%) 50%; opacity: 0.45; transition: opacity var(--dur-focus) var(--ease-out); }
-.card[aria-selected="true"] img { opacity: 1; }
-.card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 6, 16, 0) 40%, rgba(5, 6, 16, 0.85)); }
-.card .name { position: absolute; z-index: 1; left: calc(var(--slant) * 0.2 + var(--sp-3)); right: calc(var(--slant) + var(--sp-2)); bottom: var(--sp-3); font: 700 var(--fs-sm)/1.15 var(--f-display); color: var(--c-ink-1); }
+.card > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--fx, 50%) 50%; opacity: 0.4; transition: opacity var(--dur-focus) var(--ease-out); }
+.card[aria-selected="true"] > img { opacity: 1; }
+.card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 6, 16, 0) 45%, rgba(5, 6, 16, 0.85)); pointer-events: none; }
+.card .name { position: absolute; z-index: 1; left: calc(var(--slant) * 0.2 + var(--sp-3)); right: calc(var(--slant) + var(--sp-2)); bottom: var(--sp-3); font: 700 var(--fs-sm)/1.15 var(--f-display); color: var(--c-ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card[aria-selected="true"] .name { color: var(--text); font-size: var(--fs-md); }
-.card .bar { position: absolute; z-index: 1; left: 0; right: var(--slant); bottom: 0; height: 3px; background: var(--accent, var(--action)); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); }
+.card .bar { position: absolute; z-index: 2; left: 0; right: var(--slant); bottom: 0; height: 3px; background: var(--accent, var(--action)); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); }
 .card[aria-selected="true"] .bar { opacity: 1; }
-.card:focus-visible .bar { opacity: 1; height: 5px; }
-.card[aria-disabled="true"] img { filter: grayscale(1); }
+.card:focus-visible .bar { height: 5px; }
+.card[aria-disabled="true"] > img { filter: grayscale(1); }
 .card .soon { position: absolute; z-index: 1; top: var(--sp-3); right: calc(var(--slant) + var(--sp-2)); font: 700 var(--fs-xs)/1 var(--f-body); color: var(--text-quiet); }
-.card .room { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1; color: var(--brand); }
+/* the card in focus is the button: a chevron says so */
+.card .goes { position: absolute; z-index: 2; right: calc(var(--slant) + var(--sp-3)); bottom: var(--sp-3); width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--r-pill); background: var(--accent, var(--action)); color: var(--c-night-1); opacity: 0; transition: opacity 160ms var(--ease-out); }
+.card[aria-selected="true"] .goes { opacity: 1; transition-delay: 80ms; }
 
-/* ---------- the action under the deck ---------- */
-.act { display: flex; align-items: center; justify-content: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-4) var(--gutter) 0; }
-.keys { justify-content: center; }
-.go { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: var(--btn-h); padding: 0 var(--sp-5); border: 0; border-radius: var(--r-pill); background: linear-gradient(180deg, var(--action-hi), var(--action)); color: var(--on-action); font: 800 var(--fs-md)/1 var(--f-display); box-shadow: var(--glow-action); cursor: pointer; white-space: nowrap; transition: transform var(--dur-press) var(--ease-out); }
-.go:active { transform: scale(0.97); }
-.go:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
-.go[aria-disabled="true"] { opacity: 0.42; box-shadow: none; cursor: not-allowed; }
-.go kbd, .keys kbd { font: 700 var(--fs-xs)/1 var(--f-num); }
-.go kbd { padding: 3px 6px; border-radius: var(--r-xs); background: rgba(7, 8, 15, 0.18); }
+/* map cards: the track from above, not a frame */
+.card.map { background: radial-gradient(ellipse 90% 80% at 50% 55%, var(--c-night-3), var(--c-night-1) 75%); }
+.card.map::after { background: linear-gradient(180deg, transparent 62%, rgba(5, 6, 16, 0.8)); }
+.card.map > svg { position: absolute; left: 50%; top: 44%; width: var(--card-open); height: calc(var(--card-h) * 0.86); translate: -50% -50%; opacity: 0.38; transition: opacity var(--dur-focus) var(--ease-out); }
+.card.map[aria-selected="true"] > svg { opacity: 1; }
+.card .figs { position: absolute; z-index: 1; right: calc(var(--slant) + var(--sp-3) + 36px); bottom: calc(var(--sp-3) + 2px); display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-sm)/1 var(--f-num); color: var(--c-ink-1); opacity: 0; transition: opacity 160ms var(--ease-out); }
+.card[aria-selected="true"] .figs { opacity: 1; }
+.diff { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.diff i { width: 3px; background: var(--c-ink-3); }
+.diff i:nth-child(1) { height: 5px; } .diff i:nth-child(2) { height: 8px; } .diff i:nth-child(3) { height: 12px; }
+.diff i.on { background: var(--brand); }
+.runner { offset-rotate: 0deg; }
+
+/* ---------- under the deck: the code field when it is needed, the keys once you use them ---------- */
+.foot { display: grid; justify-items: center; gap: var(--sp-2); min-height: calc(var(--btn-h) + var(--sp-4)); padding: var(--sp-3) var(--gutter) var(--bot); }
 .code { display: none; gap: var(--sp-2); }
 .code.on { display: flex; }
 .code input { width: 8.5em; min-height: var(--btn-h); padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface-sunk); color: var(--text); font: 700 var(--fs-lg)/1 var(--f-num); letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
 .code input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-color: var(--action); }
-.keys { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); align-items: center; padding: var(--sp-3) var(--gutter) var(--bot); font: 600 var(--fs-sm)/1 var(--f-body); color: var(--text-quiet); }
-.keys kbd { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; margin-inline-end: 6px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); box-shadow: inset 0 -2px 0 var(--line); color: var(--c-ink-1); }
-.keys button { display: inline-flex; align-items: center; min-height: var(--btn-h); border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
-.keys button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-radius: var(--r-xs); }
-.keys button[hidden] { display: none; }
+.code button { min-height: var(--btn-h); padding: 0 var(--sp-5); border: 0; border-radius: var(--r-pill); background: linear-gradient(180deg, var(--action-hi), var(--action)); color: var(--on-action); font: 800 var(--fs-md)/1 var(--f-display); cursor: pointer; }
+.code button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.keys { display: flex; gap: var(--sp-4); font: 600 var(--fs-xs)/1 var(--f-body); color: var(--text-quiet); opacity: 0; transition: opacity 200ms var(--ease-out); }
+.kb .keys { opacity: 1; }
+.keys kbd { font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); margin-inline-end: 4px; }
 
 @media (max-width: 760px) {
-  :root { --card: 84px; --card-open: 62vw; --slant: 18px; --card-h: clamp(140px, 24vh, 200px); --deck-gap: 6px; }
-  .car { width: 118vw; top: calc(var(--top) + 30px); }
-  .readout { min-height: 6rem; }
-  .keys .hint { display: none; }
-  .act .go { flex: 1 1 auto; justify-content: center; }
+  :root { --card: 84px; --card-open: 62vw; --slant: 18px; --card-h: clamp(160px, 28vh, 240px); --deck-gap: 6px; --hz: 44vh; --car-w: 92vw; }
+  .card .figs { top: var(--sp-3); bottom: auto; right: calc(var(--slant) + var(--sp-2)); font-size: var(--fs-xs); }
+  .city, .wet { --cw: 240vw; left: -70vw; }
+  .card .name { font-size: var(--fs-xs); }
+  .card[aria-selected="true"] .name { font-size: var(--fs-sm); }
+  .card.map > svg { width: 62vw; }
+  .keys { display: none; }
 }
 @media (max-height: 500px) {
-  :root { --card-h: 120px; }
-  .car { width: 46vw; left: auto; right: var(--gutter); translate: 0 0; top: var(--top); }
-  .readout { min-height: 0; width: 50vw; margin: 0; justify-items: start; text-align: start; }
-  .readout .meta, .act { justify-content: flex-start; }
-  .readout p { display: none; }
+  :root { --card-h: 132px; --hz: 52vh; --car-w: 40vw; --car-y: 18vh; --card-open: 300px; }
+  .card .figs { top: var(--sp-3); bottom: auto; right: calc(var(--slant) + var(--sp-2)); font-size: var(--fs-xs); }
   .keys { display: none; }
-  .act { padding-bottom: var(--bot); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .track, .card, .card img, .card .bar, .readout .swap { transition-duration: 1ms; }
+  :root { transition-duration: 1ms; }
+  .layer, .track, .card, .card > img, .card .bar, .card > svg { transition-duration: 1ms; }
 }
 </style>
 </head>
 <body>
-<div class="scene" aria-hidden="true"></div>
-<div class="car" id="car" aria-hidden="true"><img src="u1/car-stand.webp" alt=""></div>
-<div class="app">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- wet asphalt: the lights stretch down, hardly sideways -->
+  <filter id="smear" x="-5%" y="-20%" width="110%" height="140%"><feGaussianBlur stdDeviation="1.5 16"/></filter>
+  <filter id="glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
+</svg>
+<div class="street" aria-hidden="true">
+  <div class="layer city" data-depth="10"></div>
+  <div class="layer wet" data-depth="10"></div>
+  <div class="layer bokeh" data-depth="26" style="inset:0">
+    <i style="--x:4%;--y:calc(var(--hz) - 9vh);--s:38px;--c:var(--c-amber);--o:.45"></i>
+    <i style="--x:11%;--y:calc(var(--hz) - 4vh);--s:22px;--c:var(--c-cyan);--o:.5"></i>
+    <i style="--x:19%;--y:calc(var(--hz) - 12vh);--s:16px;--c:var(--c-rose);--o:.55"></i>
+    <i style="--x:83%;--y:calc(var(--hz) - 10vh);--s:30px;--c:var(--c-amber);--o:.4"></i>
+    <i style="--x:91%;--y:calc(var(--hz) - 3vh);--s:20px;--c:var(--c-rose);--o:.5"></i>
+    <i style="--x:76%;--y:calc(var(--hz) - 6vh);--s:14px;--c:var(--c-cyan);--o:.55"></i>
+  </div>
+  <div class="layer bokeh" data-depth="60" style="inset:0">
+    <i style="--x:-2%;--y:calc(var(--hz) + 3vh);--s:120px;--c:var(--glow);--o:.22;--b:10px"></i>
+    <i style="--x:93%;--y:calc(var(--hz) + 6vh);--s:150px;--c:var(--glow);--o:.18;--b:12px"></i>
+  </div>
+  <div class="layer pool"></div>
+  <div class="layer veil"></div>
+</div>
+<div class="car" aria-hidden="true">
+  <div class="shadow"></div>
+  <div class="mirror"><img src="u1/car.webp" alt=""></div>
+  <img src="u1/car.webp" alt="">
+  <div class="rim"></div>
+</div>
+<div class="app" id="app">
   <header class="top">
-    <p class="logo">Night <span>Drift</span></p>
-    <ol class="path" id="path" aria-label="Где вы"></ol>
+    <button type="button" class="back" id="back" aria-label="Назад" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <p class="logo" id="logo">Night <span>Drift</span></p>
+    <p class="where" id="where"></p>
   </header>
   <div></div>
-  <section class="readout" aria-live="polite" id="readout"></section>
   <main class="deck" id="deck"></main>
-  <div class="act">
-    <button type="button" class="go" id="go"></button>
-    <form class="code" id="code" onsubmit="return false"><input aria-label="Код комнаты" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false"></form>
+  <div class="foot">
+    <form class="code" id="code" onsubmit="return false"><input aria-label="Код комнаты" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false"><button type="submit">Войти</button></form>
+    <p class="keys" aria-hidden="true"><span><kbd>← →</kbd>выбор</span><span><kbd>Enter</kbd>дальше</span><span><kbd>Esc</kbd>назад</span></p>
   </div>
-  <footer class="keys">
-    <span class="hint"><kbd>←</kbd><kbd>→</kbd>выбор</span>
-    <span class="hint"><kbd>Enter</kbd>дальше</span>
-    <button type="button" id="back" hidden><kbd>Esc</kbd>назад</button>
-  </footer>
 </div>
 <script type="module">
-const DIFF = ['', 'лёгкая', 'средняя', 'сложная'];
-const dots = n => `<span class="dots" aria-label="Сложность ${n} из 3">${[1, 2, 3].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>`;
+const BP = await fetch('u1/blueprints.json').then(r => r.json());
+const DIFF = { neon: 1, estakada: 2, serpantin: 3, parking: 3, pereval: 2, razvyazka: 2 };
+const DIFF_NAME = ['', 'лёгкая', 'средняя', 'сложная'];
 const km = m => (m / 1000).toFixed(2).replace('.', ',') + ' км';
-const none = '<span class="none">Рекорда пока нет</span>';
-const MAPS = [
-  ['neon', 'Ночной город', 1433.4, 1, [], 43, 'Неоновый круг между небоскрёбами: длинные дуги и две тугие шпильки.'],
-  ['estakada', 'Эстакада', 1972.2, 2, ['мост'], 42, 'Цветок из петель вокруг развязки: мост над двумя тоннелями, насыпи и вираж.'],
-  ['serpantin', 'Серпантин', 2473.6, 3, ['срезка'], 41, 'Извилистая змейка, тугая гармошка, длинная прямая и три срезки.'],
-  ['parking', 'Паркинг', 1646.2, 3, ['этажи'], 58, 'Многоэтажная парковка: спираль вверх, три этажа между колоннами, крыша над городом.'],
-  ['pereval', 'Перевал', 2514.8, 2, ['мост', 'уклоны'], 43, 'Горный перевал в лесу: холмы, виражи, два трамплина и спираль под собственным мостом.'],
-  ['razvyazka', 'Развязка', 2803.3, 2, ['мост', 'срезка'], 43, 'Портовая развязка: две петли под своими мостами, шпильки гармошкой и четыре срезки.'],
-].map(([id, name, len, diff, tags, x, desc]) => ({ id, name, len, diff, tags, x, desc }));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const CHEV = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+
+/* ---------- the track diagram, from the map's real centre line ----------
+   The plan is turned to the angle that fills the card best, tilted back (depth squashed to
+   0.5), and every point lifted by its height (×3, so a 7 m bridge reads). Under the route,
+   its shadow on the ground and thin posts where it is up in the air; the route itself in
+   short segments drawn low to high, each over a dark casing, so a bridge cuts across what
+   it passes over; colour from cyan at the start line to rose at the end of the lap. */
+function diagram(id, W = 380, H = 215) {
+  const m = BP[id], P = m.path, n = P.length, TILT = 0.5, LIFT = 3, PAD = 18;
+  let best = null;
+  for (let a = 0; a < 180; a += 7.5) {
+    const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const [x, z, h] of P) { const u = x * c - z * s, v = (x * s + z * c) * TILT; x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v - h * LIFT); y1 = Math.max(y1, v); }
+    const k = Math.min((W - 2 * PAD) / (x1 - x0), (H - 2 * PAD) / (y1 - y0));
+    if (!best || k > best.k) best = { c, s, k, x0, x1, y0, y1 };
+  }
+  const { c, s, k } = best, ox = (W - (best.x1 - best.x0) * k) / 2 - best.x0 * k, oy = (H - (best.y1 - best.y0) * k) / 2 - best.y0 * k;
+  const pr = (x, z, h = 0) => [(x * c - z * s) * k + ox, ((x * s + z * c) * TILT - h * LIFT) * k + oy];
+  const f = v => v.toFixed(1);
+  const cy = [62, 240, 255], ro = [255, 59, 107];
+  const col = t => `rgb(${cy.map((v, i) => Math.round(v + (ro[i] - v) * t)).join(',')})`;
+  const st = m.start, order = i => ((i - st + n) % n) / n;
+  const pts = P.map(p => pr(p[0], p[1], p[2])), gnd = P.map(p => pr(p[0], p[1], 0));
+  const line = a => 'M' + a.map(p => f(p[0]) + ' ' + f(p[1])).join('L') + 'Z';
+  let posts = '';
+  for (let i = 0; i < n; i += 3) if (P[i][2] > 1.2) posts += `M${f(gnd[i][0])} ${f(gnd[i][1])}V${f(pts[i][1])}`;
+  const segs = [];
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; segs.push({ i, j, h: (P[i][2] + P[j][2]) / 2, d: (pts[i][1] + pts[j][1]) / 2 }); }
+  segs.sort((a, b) => a.h - b.h || a.d - b.d);
+  const w = Math.max(2.6, Math.min(4.2, W / 95));
+  // in bands of height: a band's dark casings first, then its colour, so a road crossing over
+  // another cuts a gap in it while one road's own segments never cut each other
+  let route = '';
+  const band = h => Math.round(h / 2.5);
+  for (let lo = 0; lo < segs.length;) {
+    let hi = lo; while (hi < segs.length && band(segs[hi].h) === band(segs[lo].h)) hi++;
+    const grp = segs.slice(lo, hi), seg = sg => { const a = pts[sg.i], b = pts[sg.j]; return `M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}`; };
+    if (band(grp[0].h) > 0) route += `<path d="${grp.map(seg).join('')}" stroke="${css('--c-night-1')}" stroke-width="${f(w + 4)}"/>`;
+    for (const sg of grp) route += `<path d="${seg(sg)}" stroke="${col(order(sg.i))}" stroke-width="${f(w)}"/>`;
+    lo = hi;
+  }
+  const cuts = m.shortcuts.map(sc => `<path d="M${sc.map(p => pr(p[0], p[1], 0)).map(p => f(p[0]) + ' ' + f(p[1])).join('L')}"/>`).join('');
+  // the start: a white bar across the road and the direction it runs
+  const a = pts[st], b = pts[(st + 2) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L * 9, ny = dx / L * 9;
+  return `<svg viewBox="0 0 ${W} ${H}" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="${line(gnd)}" stroke="rgba(0,0,0,0.55)" stroke-width="${f(w + 5)}" transform="translate(0 4)"/>
+    <path d="${line(gnd)}" stroke="${css('--c-night-4')}" stroke-width="1.2" opacity=".9"/>
+    <path d="${posts}" stroke="${css('--c-ink-3')}" stroke-width="1" opacity=".8"/>
+    <g stroke="${css('--c-amber')}" stroke-width="1.6" stroke-dasharray="3 5" opacity=".9">${cuts}</g>
+    <g filter="url(#glow)" opacity=".7">${route}</g>
+    <g>${route}</g>
+    <path d="M${f(a[0] - nx)} ${f(a[1] - ny)}L${f(a[0] + nx)} ${f(a[1] + ny)}" stroke="${css('--c-ink-0')}" stroke-width="3"/>
+    <path id="lap-${id}" d="${line(pts.slice(st).concat(pts.slice(0, st)))}" stroke="none"/>
+    <circle class="runner" r="3.6" fill="${css('--c-ink-0')}" style="offset-path: path('${line(pts.slice(st).concat(pts.slice(0, st)))}')"/>
+  </svg>`;
+}
+
 const room = { on: false };
 const modeCards = () => [
-  { id: 'track', name: 'Дрифт', img: 'u1/map-neon.webp', x: 43, accent: 'var(--brand)', text: 'Круг по одной из шести карт. Очки за занос, время круга.', meta: `<span>6 карт</span><span>1–10 кругов</span>${none}`, go: 'Выбрать карту' },
-  { id: 'traffic', name: 'Трасса', img: 'u1/traffic-pass.webp', x: 50, accent: 'var(--action)', text: room.on ? 'Шоссе в потоке на время: 1–10 минут, плотность на выбор хозяина.' : 'Бесконечное шоссе в потоке. Очки за обгон впритирку, множитель до ×5.', meta: room.on ? '<span>до 6 машин</span>' : `<span>4 полосы</span>${none}`, go: room.on ? 'Создать комнату' : 'Поехали' },
+  { id: 'track', name: 'Дрифт', img: 'u1/map-neon.webp', x: 43, accent: '--c-rose' },
+  { id: 'traffic', name: 'Трасса', img: 'u1/traffic-pass.webp', x: 50, accent: '--c-cyan' },
 ];
 const LEVELS = {
-  home: { path: [], items: () => [
-    ...modeCards(),
-    { id: 'friends', name: 'С друзьями', img: 'u1/city-tall.webp', x: 50, accent: 'var(--brand)', text: 'Своя комната до шести машин или вход по коду друга. Те же режимы и машины, общий старт.', meta: '<span>до 6 игроков</span><span>код и ссылка</span>', go: 'Дальше' },
-    { id: 'career', name: 'Карьера', img: 'u1/city-wide.webp', x: 50, soon: true, text: 'Скоро: сезон заездов и свой гараж.', meta: '' },
-  ] },
-  friends: { path: ['С друзьями'], items: () => [
-    { id: 'host', name: 'Создать комнату', img: 'u1/city-tall.webp', x: 50, accent: 'var(--brand)', text: 'Вы хозяин: выбираете режим и карту, друзья входят по ссылке или коду.', meta: '<span>до 6 игроков</span>', go: 'Выбрать режим' },
-    { id: 'join', name: 'Войти по коду', img: 'u1/city-wide.webp', x: 30, accent: 'var(--record)', text: 'Друг уже создал комнату? Четыре буквы из его ссылки.', meta: '', go: 'Войти', code: true },
-  ] },
-  mode: { path: ['С друзьями', 'Комната'], items: modeCards },
-  map: { path: () => room.on ? ['С друзьями', 'Комната', 'Дрифт'] : ['Дрифт'], items: () => MAPS.map(m => ({ id: m.id, name: m.name, img: `u1/map-${m.id}.webp`, x: m.x, accent: 'var(--brand)', small: km(m.len),
-    text: m.desc, meta: `<span class="num">${km(m.len)}</span><span>${dots(m.diff)} ${DIFF[m.diff]}</span>${m.tags.map(t => `<span class="tag">${t}</span>`).join('')}${room.on ? '' : none}`, go: room.on ? 'Создать комнату' : 'Поехали' })) },
+  home: { where: '', items: () => [...modeCards(),
+    { id: 'friends', name: 'С друзьями', img: 'u1/city-tall.webp', x: 50, accent: '--c-amber' },
+    { id: 'career', name: 'Карьера', img: 'u1/city-wide.webp', x: 50, soon: true, accent: '--c-ink-3' }] },
+  friends: { where: 'С друзьями', items: () => [
+    { id: 'host', name: 'Создать комнату', img: 'u1/city-tall.webp', x: 50, accent: '--c-rose' },
+    { id: 'join', name: 'Войти по коду', img: 'u1/city-wide.webp', x: 30, accent: '--c-amber', code: true }] },
+  mode: { where: 'Комната', items: modeCards },
+  map: { where: 'Дрифт', items: () => Object.keys(BP).map(id => ({ id, name: BP[id].name, map: true, accent: '--c-rose', len: BP[id].len, diff: DIFF[id] })) },
 };
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
 const $ = id => document.getElementById(id);
-const deck = $('deck'), readout = $('readout'), go = $('go'), back = $('back'), code = $('code'), car = $('car');
-const history = []; let cur = null;
-const px = v => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(v));
+const deck = $('deck'), back = $('back'), code = $('code');
+const layers = [...document.querySelectorAll('.street .layer[data-depth]')];
+const history = []; let cur = null, lane = 0;
 
-function renderPath(id) {
-  const p = LEVELS[id].path; const list = typeof p === 'function' ? p() : p;
-  $('path').innerHTML = ['Главная', ...list].map(s => `<li>${s}</li>`).join('');
-}
 function build(id) {
   const t = document.createElement('div');
-  t.className = 'track'; t.setAttribute('role', 'listbox'); t.setAttribute('aria-orientation', 'horizontal'); t.setAttribute('aria-label', id === 'map' ? 'Карта' : id === 'friends' ? 'С друзьями' : 'Режим');
+  t.className = 'track'; t.setAttribute('role', 'listbox'); t.setAttribute('aria-orientation', 'horizontal');
+  t.setAttribute('aria-label', id === 'map' ? 'Карта' : id === 'friends' ? 'С друзьями' : 'Режим');
   const items = LEVELS[id].items(); t._items = items;
   items.forEach((it, i) => {
     const c = document.createElement('div');
-    c.className = 'card'; c.id = `${id}-${it.id}`; c.setAttribute('role', 'option'); c.tabIndex = -1; c.dataset.id = it.id;
-    c.setAttribute('aria-label', it.name);
+    c.className = 'card' + (it.map ? ' map' : ''); c.id = `${id}-${it.id}`; c.setAttribute('role', 'option'); c.tabIndex = -1;
+    c.setAttribute('aria-label', it.map ? `${it.name}, ${km(it.len)}, ${DIFF_NAME[it.diff]}` : it.name + (it.soon ? ', скоро' : ''));
     if (it.soon) c.setAttribute('aria-disabled', 'true');
-    c.style.setProperty('--fx', it.x + '%'); if (it.accent) c.style.setProperty('--accent', it.accent);
-    c.innerHTML = `<img src="${it.img}" alt="" ${i > 3 ? 'loading="lazy"' : ''}><span class="name">${it.name}</span><span class="bar"></span>${it.soon ? '<span class="soon">Скоро</span>' : ''}`;
+    c.style.setProperty('--fx', (it.x || 50) + '%'); c.style.setProperty('--accent', `var(${it.accent})`);
+    c.innerHTML = (it.map ? diagram(it.id) + `<span class="figs"><span>${km(it.len)}</span><span class="diff" title="${DIFF_NAME[it.diff]}">${[1, 2, 3].map(k => `<i${k <= it.diff ? ' class="on"' : ''}></i>`).join('')}</span></span>`
+        : `<img src="${it.img}" alt="">`) +
+      `<span class="name">${it.name}</span><span class="bar"></span>${it.soon ? '<span class="soon">Скоро</span>' : `<span class="goes">${CHEV}</span>`}`;
     c.addEventListener('click', () => { if (c.getAttribute('aria-selected') === 'true') enter(); else focusAt(i); });
     t.appendChild(c);
   });
   return t;
 }
-// The card in focus sits under the car: the deck slides so its centre is the screen's centre.
+const num = v => parseFloat(css(v));
 function place(t, i) {
-  const w = px('--card'), wo = deck.clientWidth < 700 ? innerWidth * 0.62 : px('--card-open'), gap = px('--deck-gap') - px('--slant');
-  const left = i * (w + gap);
-  t.style.transform = `translateX(${Math.round(deck.clientWidth / 2 - left - wo / 2)}px)`;
+  const w = num('--card'), wo = deck.clientWidth < 700 ? innerWidth * 0.62 : num('--card-open'), gap = num('--deck-gap') - num('--slant');
+  t.style.transform = `translateX(${Math.round(deck.clientWidth / 2 - i * (w + gap) - wo / 2)}px)`;
 }
-function fillReadout(it) {
-  readout.innerHTML = `<h1 class="vh">${it.name}</h1><div class="swap out"><p>${it.text}</p></div>${it.meta ? `<div class="swap out meta">${it.meta}</div>` : ''}`;
-  requestAnimationFrame(() => readout.querySelectorAll('.swap').forEach((s, k) => { s.style.transitionDelay = k * 40 + 'ms'; s.classList.remove('out'); }));
-  go.innerHTML = it.soon ? 'Скоро' : `${it.go} <kbd>Enter</kbd>`;
-  go.setAttribute('aria-disabled', it.soon ? 'true' : 'false');
-  code.classList.toggle('on', !!it.code);
+// the street follows the deck: each layer shifts by its depth, the light takes the card's colour
+function street(i, n) {
+  const off = i - (n - 1) / 2 + lane;
+  for (const l of layers) l.style.translate = `${(-off * Number(l.dataset.depth)).toFixed(1)}px 0`;
 }
+let runner = null;
 function focusAt(i, moveFocus = true) {
   const cs = [...cur.el.children]; i = Math.max(0, Math.min(cs.length - 1, i)); cur.i = i;
   cs.forEach((c, k) => { c.setAttribute('aria-selected', k === i ? 'true' : 'false'); c.tabIndex = k === i ? 0 : -1; });
-  place(cur.el, i); fillReadout(cur.el._items[i]);
+  place(cur.el, i); street(i, cs.length);
+  const it = cur.el._items[i];
+  document.documentElement.style.setProperty('--glow', css(it.accent));
+  code.classList.toggle('on', !!it.code);
+  // a light runs the lap on the map in focus
+  if (runner) { runner.cancel(); runner = null; }
+  const dot = cs[i].querySelector('.runner');
+  if (dot && !reduce.matches) runner = dot.animate([{ offsetDistance: '0%' }, { offsetDistance: '100%' }], { duration: Math.round(BP[it.id].len * 3.2), iterations: Infinity });
   if (moveFocus) cs[i].focus({ preventScroll: true });
 }
-// One level to the next: the deck under the car rolls away to one side and the next rolls in
-// from the other; the car leans a little into the move and settles back.
 function show(id, dir, at = 0) {
   const old = cur && cur.el, t = build(id);
-  t.style.transition = 'none'; deck.appendChild(t); cur = { id, el: t, i: 0 }; focusAt(at);
-  t.getBoundingClientRect(); t.style.transition = '';
-  renderPath(id); back.hidden = history.length === 0;
+  t.style.transition = 'none'; deck.appendChild(t); cur = { id, el: t, i: 0 };
+  lane += old ? dir * 3 : 0;                         // the street rolls on with the deck
+  focusAt(at); t.getBoundingClientRect(); t.style.transition = '';
+  $('where').textContent = room.on && id === 'map' ? 'Комната · Дрифт' : LEVELS[id].where;
+  $('logo').hidden = history.length > 0; back.hidden = history.length === 0;
   if (!old) return;
   old.inert = true;
-  const d = px('--dur-level') || 320, ease = 'cubic-bezier(0.22, 1, 0.36, 1)';
+  const d = num('--dur-level') || 320;
   if (reduce.matches) {
     old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished.then(() => old.remove());
     t.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160 });
@@ -242,8 +339,7 @@ function show(id, dir, at = 0) {
   }
   const from = old.style.transform;
   old.animate([{ transform: from, opacity: 1 }, { opacity: 0, offset: 0.75 }, { transform: `${from} translateX(${-dir * 60}vw)`, opacity: 0 }], { duration: d * 0.8, easing: 'cubic-bezier(0.55, 0, 0.75, 0.4)', fill: 'forwards' }).finished.then(() => old.remove());
-  t.animate([{ transform: `${t.style.transform} translateX(${dir * 70}vw)`, opacity: 0 }, { transform: t.style.transform, opacity: 1 }], { duration: d, delay: 40, easing: ease, fill: 'backwards' });
-  car.animate([{ translate: '-50% 0' }, { translate: `calc(-50% + ${-dir * 1.6}vw) 0`, offset: 0.4 }, { translate: '-50% 0' }], { duration: d + 160, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', composite: 'replace' });
+  t.animate([{ transform: `${t.style.transform} translateX(${dir * 70}vw)`, opacity: 0 }, { transform: t.style.transform, opacity: 1 }], { duration: d, delay: 40, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' });
 }
 function enter() {
   const it = cur.el._items[cur.i]; if (!it || it.soon) return;
@@ -257,13 +353,15 @@ function enter() {
 }
 function goBack() {
   const prev = history.pop(); if (!prev) return;
-  if (prev.id === 'friends' || prev.id === 'home') room.on = prev.id !== 'home' ? false : room.on;
-  if (prev.id === 'home') room.on = false;
+  if (prev.id === 'home' || prev.id === 'friends') room.on = false;
   show(prev.id, -1, prev.i);
 }
-go.addEventListener('click', enter);
 back.addEventListener('click', goBack);
+// the key row appears only once the keyboard is used, and goes with the first touch or click
+const app = $('app');
+document.addEventListener('pointerdown', () => app.classList.remove('kb'));
 document.addEventListener('keydown', e => {
+  app.classList.add('kb');
   const typing = e.target.matches('input');
   if (e.key === 'Escape') { e.preventDefault(); if (typing) cur.el.children[cur.i].focus(); else goBack(); return; }
   if (typing) return;
