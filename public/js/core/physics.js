@@ -29,23 +29,8 @@
 export const VMAX=72.3, ACC=24, BRAKE=34, VREV=11, DRAFT_ACC=6;
 const KEEP=.75, SCRUB=.1;
 
-// Hitting a wall or rail: how much speed the car keeps, by how hard it hit (vn, m/s
-// into the wall). Version 1 always kept 90 %, every physics substep in contact, so a
-// car sliding along a rail lost most of its speed within a second. Now a glancing
-// touch keeps 99 %+ and only a hard hit (5 m/s and up) costs the full 10 %.
-export const wallKeep = vn => 1 - Math.min(.1, vn * .02);
-
-// Scraping along a wall turns the car parallel to it (nx, nz: the wall's normal, pointing
-// into the wall). Without this a car pressed against a rail kept its nose angled in while
-// the rail forced it to move along: all that motion was sideways for the tyres, grip
-// killed it, and the car stopped dead within a second.
-export function wallAlign(car, nx, nz, dt){
-  const fx=Math.sin(car.h), fz=Math.cos(car.h), into=fx*nx+fz*nz;
-  if(into<=0 || car.vx*fx+car.vz*fz<=0) return;           // nose already away, or reversing
-  const tx=fx-into*nx, tz=fz-into*nz;                      // along the wall, the way the nose points
-  let d=Math.atan2(tx,tz)-car.h; d=Math.atan2(Math.sin(d),Math.cos(d));
-  car.h+=d*Math.min(1,30*dt);
-}
+// Walls and rails (wallKeep, wallAlign, the bounce) moved to core/contact.js in plan 3,
+// stage 3; the golden recording was re-recorded for it then (tests/physics.test.mjs).
 
 // I = {up, down, left, right, hb}, each 0 or 1; optional I.draft 0..1.
 const NOSPEC={vmax:1,acc:1,brake:1,grip:1,slide:1,turn:1,dirt:1};

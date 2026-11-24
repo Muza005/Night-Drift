@@ -6,13 +6,19 @@
 // noses into it at 5 km/h. Both walls: the drift track (a straight bit of «Ночной город»,
 // modes/track/geometry.js) and the highway's rail (modes/traffic/geometry.js). From the
 // first contact (core/hitlog.js records it), over 0.5 s:
-//   in       speed into the wall at the contact (km/h)
+//   in       speed into the wall at the contact (km/h; stage 3: of the contact point)
 //   v 0.1 s / v 0.5 s   speed after (km/h)
-//   bounce   how far the car's centre gets from where the wall stops it (m)
+//   bounce   how far the car's body gets from the wall after the hit (m; stage 0 measured
+//            the centre against where the one-point check held it)
 //   along    how far it moves along the wall (m, from just before the contact; at 90° and
 //            5 km/h: the sideways shift)
 //   turn     heading change (°, from just before the contact)
 //   contact  substeps in contact with the wall
+//   pen      the deepest the body is inside the drawn wall after a substep (cm; what is seen)
+//   gap      the body's distance from the wall at the end (cm)
+// Plus «side»: the car parallel to the wall, sliding sideways into it at 5 and 20 km/h.
+// The car is the coupe; the wall: the drawn line (track: the right-hand wall polyline,
+// WALL from the centre line on this straight; highway: the rail's inner face at RAIL).
 // Cars (net/bump.js, both cars on one computer, the faster one decides the hit as in the
 // game, the other gets its share at once): a coupe at 180 km/h into the back of a stopped
 // coupe, one at 60 km/h into the side of a stopped one (at right angles), one pushing a
@@ -36,7 +42,9 @@ const H = await import(R + 'public/js/modes/traffic/geometry.js');
 const B = await import(R + 'public/js/net/bump.js');
 const { HITLOG } = await import(R + 'public/js/core/hitlog.js');
 const { carById } = await import(R + 'public/js/core/cars.js');
-const { WALL_ALLOW } = await import(R + 'public/js/core/contact.js');
+const { worldPoly } = await import(R + 'public/js/core/hitboxes.js');
+const { bodyOf } = await import(R + 'public/js/core/contact.js');
+const { wallsNear } = await import(R + 'public/js/modes/track/walls.js');
 const { MAPS, MAP_IDS } = await import(R + 'public/js/modes/track/maps/index.js');
 
 const DT = 1 / 120, NONE = { up: 0, down: 0, left: 0, right: 0, hb: 0 }, GAS = { ...NONE, up: 1 };
@@ -66,39 +74,61 @@ function aim(c, x, z, dx, dz, v) {
 // wall, lim: how far from o (along n) the car's centre is stopped, constrain(car, dt)
 const TRACK = (() => {
   const p = T.P[I0], t = T.TG[I0], n = { x: -T.NM[I0].x, z: -T.NM[I0].z };       // the right-hand wall
-  return { name: 'track', o: p, t, n, lim: T.WALL - WALL_ALLOW, constrain: (c, dt) => T.constrainToTrack(c, dt, hooks) };
+  return { name: 'track', o: p, t, n, wall: T.WALL, constrain: (c, dt) => T.constrainToTrack(c, dt, hooks) };
 })();
-const HIGHWAY = { name: 'highway', o: { x: 0, z: 0 }, t: { x: 0, z: 1 }, n: { x: 1, z: 0 }, lim: H.RAIL - WALL_ALLOW, constrain: (c, dt) => H.constrainToHighway(c, dt, hooks) };
+const HIGHWAY = { name: 'highway', o: { x: 0, z: 0 }, t: { x: 0, z: 1 }, n: { x: 1, z: 0 }, wall: H.RAIL, constrain: (c, dt) => H.constrainToHighway(c, dt, hooks) };
 
-function wallRun(F, angle, speedKmh) {
+// the body's distance from the wall (m; < 0: inside it). Track: the drawn polyline (the
+// nearest point of it to each vertex, on which side); highway: the rail's line.
+const PB = new Float64Array(64), NB = [];
+function bodyGap(F, c) {
+  worldPoly(c.carId, c.x, c.z, c.h, PB); const nv = 2 * bodyOf(c.carId).nv;
+  let m = Infinity;
+  if (F === HIGHWAY) { for (let i = 0; i < nv; i += 2) m = Math.min(m, F.wall - ((PB[i] - F.o.x) * F.n.x + (PB[i + 1] - F.o.z) * F.n.z)); return m; }
+  const cnt = wallsNear(T.WALLS, c.x, c.z, NaN, 12, NB), S = T.WALLS.SEG;
+  for (let i = 0; i < nv; i += 2) { let best = Infinity, side = 0;
+    for (let e = 0; e < cnt; e++) { const o = NB[e].seg * 9, ax = S[o], az = S[o + 1], ex = S[o + 2] - ax, ez = S[o + 3] - az, L2 = ex * ex + ez * ez;
+      const f = Math.max(0, Math.min(1, ((PB[i] - ax) * ex + (PB[i + 1] - az) * ez) / L2)), qx = ax + ex * f, qz = az + ez * f, d = Math.hypot(PB[i] - qx, PB[i + 1] - qz);
+      if (d < best) { best = d; side = (PB[i] - qx) * S[o + 6] + (PB[i + 1] - qz) * S[o + 7] >= 0 ? 1 : -1; } }
+    m = Math.min(m, best * side); }
+  return m;
+}
+// angle: of the motion to the wall; yaw: of the car to its motion (side-on: 90)
+function wallRun(F, angle, speedKmh, yaw = 0) {
   const c = mkCar(), v = speedKmh / 3.6, a = angle * Math.PI / 180;
   const dx = F.t.x * Math.cos(a) + F.n.x * Math.sin(a), dz = F.t.z * Math.cos(a) + F.n.z * Math.sin(a);
-  const vn = v * Math.sin(a), gap = speedKmh < 10 ? .03 : Math.min(1, vn * .15), back = vn > 0 ? gap / vn * v * Math.cos(a) : 0;
-  aim(c, F.o.x + F.n.x * (F.lim - gap) - F.t.x * back, F.o.z + F.n.z * (F.lim - gap) - F.t.z * back, dx, dz, v);
+  const vn = v * Math.sin(a), gap = speedKmh < 10 || yaw ? .03 : Math.min(1, vn * .15), back = vn > 0 ? gap / vn * v * Math.cos(a) : 0;
+  aim(c, F.o.x + F.n.x * (F.wall - 3) - F.t.x * back, F.o.z + F.n.z * (F.wall - 3) - F.t.z * back, dx, dz, v);
+  if (yaw) { c.h += yaw * Math.PI / 180; c.hPrev = c.h; const f = Math.sin(c.h) * c.vx + Math.cos(c.h) * c.vz; c.vF = f; c.vR = Math.cos(c.h) * c.vx - Math.sin(c.h) * c.vz; }
+  const g0 = bodyGap(F, c) - gap; c.x += F.n.x * g0; c.z += F.n.z * g0;          // the body `gap` m from the wall
   if (F === TRACK) c.idx = T.nearest(c, true);
-  const lat = () => (c.x - F.o.x) * F.n.x + (c.z - F.o.z) * F.n.z, along = () => (c.x - F.o.x) * F.t.x + (c.z - F.o.z) * F.t.z;
-  let t0 = -1, vIn = 0, s0 = null, bounce = 0, contacts = 0, v01 = 0, end = null;
+  const along = () => (c.x - F.o.x) * F.t.x + (c.z - F.o.z) * F.t.z;
+  let t0 = -1, vIn = 0, s0 = null, bounce = 0, contacts = 0, v01 = 0, end = null, pen = 0;
   for (let k = 0; k < 240; k++) {
     const seq = HITLOG.seq, h0 = c.h, a0 = along();
     stepCar(c, NONE, DT); F.constrain(c, DT);
     const hit = HITLOG.seq !== seq && HITLOG.last.kind === 'wall';
     if (hit && t0 < 0) { t0 = k; vIn = HITLOG.last.vn; s0 = { along: a0, h: h0 }; }
     if (t0 < 0) continue;
-    const dtk = k - t0;
-    if (dtk <= 60) { if (hit) contacts++; bounce = Math.max(bounce, F.lim - lat()); }
+    const dtk = k - t0, gp = bodyGap(F, c);
+    if (dtk <= 60) { if (hit) contacts++; bounce = Math.max(bounce, gp); pen = Math.max(pen, -gp); }
     if (dtk === 12) v01 = Math.hypot(c.vx, c.vz);
-    if (dtk === 60) { end = { v: Math.hypot(c.vx, c.vz), along: along() - s0.along, turn: deg(angDiff(s0.h, c.h)) }; break; }
+    if (dtk === 60) { end = { v: Math.hypot(c.vx, c.vz), along: along() - s0.along, turn: deg(angDiff(s0.h, c.h)), gap: gp }; break; }
   }
   if (!end) return { wall: F.name, '°': angle, 'km/h': speedKmh, in: 'no contact' };
   return { wall: F.name, '°': angle, 'km/h': speedKmh, in: kmh(vIn).toFixed(1), 'v 0.1 s': kmh(v01).toFixed(0), 'v 0.5 s': kmh(end.v).toFixed(0),
-    'bounce m': bounce.toFixed(2), 'along m': end.along.toFixed(2), 'turn °': end.turn.toFixed(1), contact: contacts };
+    'bounce m': bounce.toFixed(2), 'along m': end.along.toFixed(2), 'turn °': end.turn.toFixed(1), contact: contacts, 'pen cm': (pen * 100).toFixed(1), 'gap cm': (end.gap * 100).toFixed(1) };
 }
+// the same start without a wall: the speed after 0.1 s coasting
+function coast(speedKmh) { const c = mkCar(); aim(c, 0, 0, 0, 1, speedKmh / 3.6); for (let k = 0; k < 12; k++) stepCar(c, NONE, DT); return kmh(Math.hypot(c.vx, c.vz)); }
 
 const wallRows = [];
 for (const F of [TRACK, HIGHWAY]) {
   for (const angle of [15, 45, 90]) for (const s of [30, 90, 180]) wallRows.push(wallRun(F, angle, s));
   wallRows.push({ ...wallRun(F, 90, 5), '°': '90 nose' });
+  for (const s of [5, 20]) wallRows.push({ ...wallRun(F, 90, s, 90), '°': '90 side' });
 }
+console.log(`(no wall, coasting: 0.1 s after 30 / 90 / 180 km/h: ${[30, 90, 180].map(s => coast(s).toFixed(0)).join(' / ')} km/h)`);
 console.log(`Walls (coasting; track: «Ночной город» point ${I0}, right-hand wall; highway: the left rail)`);
 console.table(wallRows);
 

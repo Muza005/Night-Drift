@@ -102,15 +102,20 @@ const ang = (a, b) => { const t = Math.PI * 2; return (((b - a + Math.PI) % t) +
 
 // Two laps after a flying start. f: how fast it dares to take corners, look: how far ahead
 // (track points) it aims. Returns the average of laps 2 and 3, and the wall touches.
+// It aims at the middle between the drawn walls (plan 3 stage 3: the car's body hits the
+// walls as drawn, and on the inside of «Ночной город»'s hairpins they stand as close as 8.2 m
+// to the centre line; aiming at the centre line it cut through them).
+let MIDS = null;
 function laps(stats, f, look) {
+  if (!MIDS) { const l = T.safeOffsets(T.WALL), r = T.safeOffsets(-T.WALL); MIDS = Float64Array.from(l, (v, i) => (v + r[i]) / 2); }
   const car = {x:0,z:0,h:0,vx:0,vz:0,vF:0,vR:0,steer:0,idx:0,prog:0,off:false,pitch:0,spinV:0,lastMark:[null,null],spec:stats};
   T.placeGrid(car, 0);
   const times = []; let t = 0, walls = 0; const dt = 1 / 120;
   const hooks = { onWall: () => walls++, onLap: () => times.push(t) };
   const I = { up: 0, down: 0, left: 0, right: 0, hb: 0 };
   while (times.length < 3 && t < 200) {
-    const a = (car.idx + look) % T.N, far = (car.idx + look * 3) % T.N;
-    const toA = Math.atan2(T.P[a].x - car.x, T.P[a].z - car.z), err = ang(car.h, toA);
+    const a = (car.idx + look) % T.N, far = (car.idx + look * 3) % T.N, ax = T.P[a].x + T.NM[a].x * MIDS[a], az = T.P[a].z + T.NM[a].z * MIDS[a];
+    const toA = Math.atan2(ax - car.x, az - car.z), err = ang(car.h, toA);
     const bend = Math.abs(ang(toA, Math.atan2(T.P[far].x - T.P[a].x, T.P[far].z - T.P[a].z)));
     const sp = Math.hypot(car.vx, car.vz), tooFast = sp > f * (20 + 45 * (1 - Math.min(1, bend / 1.2)));
     I.left = err > 0.03 ? 1 : 0; I.right = err < -0.03 ? 1 : 0;

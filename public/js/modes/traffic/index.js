@@ -203,7 +203,7 @@ export const trafficMode = {
   inputBlocked(){ return wrecked(); },
   isGhost(){ return ghosted(); },
   // Online: a hard hit does not end the run. Stop, blink 3 s, come back.
-  ghostBounds(s){ keepOnRoad(s); },                     // another player's predicted car stays inside the rails
+  ghostBounds(s, g){ keepOnRoad(s, g && g.car); },                     // another player's predicted car stays inside the rails
   onHit(car, hit){ lastHit = hit; hitPopup(car, hit); if(!hit.hard) horn(Math.max(-1, Math.min(1, (hit.bot.x - car.x) / 4)), .9); },
   wreck(car){
     const t = serverNow();

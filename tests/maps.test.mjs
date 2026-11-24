@@ -21,6 +21,20 @@ const { MAPS, MAP_IDS, DEFAULT_MAP } = await import('../public/js/modes/track/ma
 const IDS = Object.keys(MAPS);
 
 const ang = (a, b) => { const t = Math.PI * 2; return (((b - a + Math.PI) % t) + t) % t - Math.PI; };
+// The bots' way out when stopped facing a wall (plan 3 stage 3: a wall no longer turns a car
+// pressed into it parallel to itself; a car stopped nose-first against it stays so, as a real
+// one would): reverse, steering the other way, as a driver would.
+// For a second, then it tries again. (Slow facing away from where it aims, or pressing on
+// the throttle and getting nowhere for half a second.)
+let backUntil = -1, stuckSince = -1;
+function unstick(I, sp, err, t) {
+  if (t < 3) { backUntil = stuckSince = -1; return; }
+  if (sp >= 1) stuckSince = -1; else if (stuckSince < 0) stuckSince = t;
+  const pinned = stuckSince >= 0 && t - stuckSince > .5;
+  if (t >= backUntil && !pinned && (sp >= 4 || Math.abs(err) < .6)) return;
+  if (t >= backUntil) { backUntil = t + 1; stuckSince = -1; }
+  I.up = 0; I.down = 1; const l = I.left; I.left = I.right; I.right = l;
+}
 const around = (i, metres, fn) => {           // fn(j) for the track points within ±metres of i
   for (const dir of [1, -1]) { let j = i, d = 0; while (d <= metres) { fn(j); const k = (j + dir + T.N) % T.N; d += T.HL[dir > 0 ? j : k]; j = k; } }
 };
@@ -114,6 +128,7 @@ for (const id of IDS) {
       const sp = Math.hypot(car.vx, car.vz), tooFast = sp > f * (20 + 45 * (1 - Math.min(1, bend / 1.2)));
       I.left = err > 0.03 ? 1 : 0; I.right = err < -0.03 ? 1 : 0;
       I.up = !tooFast && Math.abs(err) < 0.6 ? 1 : 0; I.down = tooFast && sp > 18 ? 1 : 0;
+      unstick(I, sp, err, t);
       if (!car.air) stepCar(car, I, dt);
       T.constrainToTrack(car, dt, hooks); t += dt;
       slow = sp < 2 && t > 3 ? slow + dt : 0; worst = Math.max(worst, slow);
@@ -216,18 +231,23 @@ for (const id of IDS.filter(id => (MAPS[id].shortcuts || []).length)) test(`map 
   console.log(`${id}: route bot lap ${lm.toFixed(1)} s on the main road (${main.walls} wall hits), ${lc.toFixed(1)} s through ${T.SHORTCUTS.length} shortcuts (${cut.walls} wall hits); each saves ${each.map(e => e.saves.toFixed(1) + ' s (over the grass ' + e.grass.toFixed(1) + ' s)').join(', ')}; shortest legal lap ${T.LAP_MIN.toFixed(0)} m of ${T.TRACK_LEN.toFixed(0)}`);
 });
 
-test('another player\'s car predicted just past a shortcut\'s wall is put back against that wall', () => {
+test('another player\'s car predicted just past a shortcut\'s wall is put back against that wall', async () => {
+  const C = await import('../public/js/core/contact.js'), { worldPoly } = await import('../public/js/core/hitboxes.js'), NB = [], CON = {};
   T.setMap('serpantin');
   for (const sc of T.SHORTCUTS) {
     // the middle of the shortcut, outside the main road's walls
     let k = sc.n >> 1;
     const j = T.nearest({ x: sc.x[k], z: sc.z[k], idx: 0 }, true);
     assert.ok(Math.hypot(sc.x[k] - T.P[j].x, sc.z[k] - T.P[j].z) > T.WALL, 'the middle is off the main road');
+    // (plan 3 stage 3: its hitbox, heading along the shortcut, ends up against the drawn wall, not
+    // in it; beside the main road the drawn wall can stand further out than the shortcut's own)
+    const h = Math.atan2(sc.tx[k], sc.tz[k]);
     for (const extra of [.05, .5, 1.5]) for (const side of [1, -1]) {
-      const lat = side * (sc.lim + extra), p = { x: sc.x[k] + sc.nx[k] * lat, z: sc.z[k] + sc.nz[k] * lat, idx: j };
+      const lat = side * (sc.lim + extra), p = { x: sc.x[k] + sc.nx[k] * lat, z: sc.z[k] + sc.nz[k] * lat, h, idx: j };
       T.keepInWalls(p, {});
       const back = (p.x - sc.x[k]) * sc.nx[k] + (p.z - sc.z[k]) * sc.nz[k], moved = Math.hypot(p.x - (sc.x[k] + sc.nx[k] * lat), p.z - (sc.z[k] + sc.nz[k] * lat));
-      assert.ok(Math.abs(back) <= sc.lim + 1e-6 && moved <= extra + .01, `shortcut ${sc.k}: ${extra} m past its wall the car moved ${moved.toFixed(2)} m (now ${back.toFixed(2)} m off its centre)`);
+      const B = C.bodyOf(undefined), P = worldPoly(B.id, p.x, p.z, h), nn = T.wallsNear(p.x, p.z, NaN, B.r + 2, NB), d = C.wallContact(T.WALLS, NB, nn, P, B.nv, p.x, p.z, B.r, 3, CON) ? CON.depth : 0;
+      assert.ok(d < 1e-6 && moved <= extra + .01, `shortcut ${sc.k}: ${extra} m past its wall the car moved ${moved.toFixed(2)} m (now ${back.toFixed(2)} m off its centre, ${(d * 100).toFixed(1)} cm in the wall)`);
     }
   }
   T.setMap('neon');
@@ -544,7 +564,9 @@ for (const id of IDS.filter(id => MAPS[id].levels)) {
         // (the deck of the piece of road whose cross-section, out to the deck's edge, passes over (x, z))
         const along = rx * T.TG[j].x + rz * T.TG[j].z; if (along < -T.HL[(j - 1 + T.N) % T.N] / 2 - .01 || along > T.HL[j] / 2 + .01) continue;
         const lat = rx * T.NM[j].x + rz * T.NM[j].z; if (Math.abs(lat) > T.WALL + .3) continue;
-        const yj = T.Y[j] + lat * T.TB[j] + along * T.GR[j]; if (yj > y + 1.5) c = Math.min(c, yj - slab); }
+        // (a deck over the car stands 3.2 m + the slab above its road; the road just behind a
+        // car coming down the helix is up to ~2 m above it, under the camera, and is no ceiling)
+        const yj = T.Y[j] + lat * T.TB[j] + along * T.GR[j]; if (yj > y + 3) c = Math.min(c, yj - slab); }
       return c;
     };
     // the validator's bot drives a lap; the camera follows it at 60 Hz
@@ -559,7 +581,8 @@ for (const id of IDS.filter(id => MAPS[id].levels)) {
       while (n < 26) { const j = (car.idx + n) % T.N, k = (j + 1) % T.N; turn += Math.abs(ang(Math.atan2(T.TG[j].x, T.TG[j].z), Math.atan2(T.TG[k].x, T.TG[k].z))); if (turn > 2) break; n++; }
       const a = (car.idx + Math.max(6, n)) % T.N, err = ang(car.h, Math.atan2(T.P[a].x - car.x, T.P[a].z - car.z));
       const sp = Math.hypot(car.vx, car.vz);
-      I.left = err > .03 ? 1 : 0; I.right = err < -.03 ? 1 : 0; I.up = Math.abs(err) < .6 && sp < 24 ? 1 : 0;
+      I.left = err > .03 ? 1 : 0; I.right = err < -.03 ? 1 : 0; I.up = Math.abs(err) < .6 && sp < 24 ? 1 : 0; I.down = 0;
+      unstick(I, sp, err, t);
       stepCar(car, I, dt); T.constrainToTrack(car, dt, hooks); t += dt;
       if (Math.round(t * 120) % 2) continue;
       chase(car, 1 / 60, rig); frames++;

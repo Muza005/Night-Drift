@@ -6,9 +6,8 @@
 // at any distance, every online player shares the same coordinates, and the renderer
 // keeps each road chunk in its own local coordinates (see scene.js), so the picture
 // does not shake far from the start either.
-import { wallKeep, wallAlign } from '../../core/physics.js';
-import { HITLOG } from '../../core/hitlog.js';
-import { WALL_ALLOW } from '../../core/contact.js';
+import { bodyOf, railContact, resolveWalls } from '../../core/contact.js';
+import { worldPoly } from '../../core/hitboxes.js';
 
 export const LANES = 4, LANE_W = 4;
 export const HALF = LANES * LANE_W / 2;        // 8 m: edge of the asphalt
@@ -37,35 +36,36 @@ export function startPose(slot) {
   return { x: laneCenter(lane), z: -row * 8 };
 }
 
-// Runs right after stepCar() in every substep. Same wall response as the drift track
-// (push back, bounce at 1.45, rub off speed by how hard it hit — see wallKeep — and
-// report hits above 2.5 m/s); the rail is a
-// straight line, so its normal is simply the x axis. Past the edge of the lanes
-// (|x| > HALF, the car's centre on the shoulder) the car is off the road, as off the
-// drift track: car.off makes stepCar pull at 77.5 % with 70 % grip, and the same extra
-// drag as there (exp(-0.45·dt)) holds full throttle to ~83 km/h, so the shoulder is
+// Runs right after stepCar() in every substep. The rails are walls like the drift track's
+// (core/contact.js): the car's hitbox against their inner faces (x = ±RAIL), pushed out
+// along the normal by the depth, an impulse with the car's mass and yaw inertia at the
+// contact point (no bounce below 10 km/h into the rail, at most 0.15), friction along the
+// rail, the off-centre hit turning the car; hits above 2.5 m/s go to hooks.onWall. Past the
+// edge of the lanes (|x| > HALF, the car's centre on the shoulder) the car is off the road,
+// as off the drift track: car.off makes stepCar pull at 77.5 % with 70 % grip, and the same
+// extra drag as there (exp(-0.45·dt)) holds full throttle to ~83 km/h, so the shoulder is
 // no way round the traffic. The rails stop the car before the grass.
+const detectRails = (P, nv, c, B, out) => railContact(P, nv, RAIL, out);
 export function constrainToHighway(car, dt, hooks) {
-  const lat = car.x, lim = RAIL - WALL_ALLOW;
-  if (Math.abs(lat) > lim) {
-    const s = Math.sign(lat), push = Math.abs(lat) - lim; car.x -= s * push;
-    const vn = car.vx * s;
-    if (HITLOG.on) HITLOG.push('wall', car.x + s * WALL_ALLOW, car.z, s, 0, vn, push);   // (?debug=hit)
-    wallAlign(car, s, 0, dt);
-    if (vn > 0) { const k = wallKeep(vn); car.vx -= s * vn * 1.45; car.vx *= k; car.vz *= k; if (vn > 2.5) hooks.onWall(vn); }
-  }
+  const B = bodyOf(car.carId);
+  if (Math.abs(car.x) + B.r > RAIL) resolveWalls(car, B, detectRails, hooks, dt);
   car.off = Math.abs(car.x) > HALF;
   if (car.off) { const k = Math.exp(-.45 * dt); car.vx *= k; car.vz *= k; }
 }
 
 // Another player's predicted car must not be drawn through the rails. The prediction
 // carries the car on at its last known speed for up to a few tenths of a second; when the
-// car hits a rail in that time, the real one bounces off while the prediction would sail
-// through it (up to 8 m beyond, measured at 200 km/h). So a prediction past the rail is
-// bounced back the way the rail bounces the car (keeping 45 % of the overshoot).
-export function keepOnRoad(p) {
-  const lim = RAIL - WALL_ALLOW, over = Math.abs(p.x) - lim;
-  if (over > 0) p.x = Math.sign(p.x) * (lim - Math.min(1.5, 0.45 * over));
+// car hits a rail in that time, the real one stops against it while the prediction would
+// sail through (up to 8 m beyond, measured at 200 km/h). So a prediction past a rail is
+// moved back across until its hitbox (car id `id`, heading p.h) just touches the rail.
+const PK = new Float64Array(64);
+export function keepOnRoad(p, id) {
+  const B = bodyOf(id);
+  if (Math.abs(p.x) + B.r <= RAIL) return p;
+  worldPoly(B.id, p.x, p.z, p.h || 0, PK);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < 2 * B.nv; i += 2) { const x = PK[i]; if (x < lo) lo = x; if (x > hi) hi = x; }
+  if (hi > RAIL) p.x -= hi - RAIL; else if (lo < -RAIL) p.x += -RAIL - lo;
   return p;
 }
 

@@ -7,13 +7,14 @@
 // (and N, START, ... are live bindings), so scene.js, index.js and net.js always read the
 // active map. Listeners from onMapChange() run after a switch (the scenery, the minimap).
 //
-// On a flat map («Ночной город») everything new here is skipped: constrainToTrack does
-// exactly what version 2 did, so the physics golden test matches bit for bit.
-import { wallKeep, wallAlign } from '../../core/physics.js';
+// On a flat map («Ночной город») the heights, jumps and bridges are skipped. The walls are
+// the car's hitbox against the drawn wall polylines on every map (plan 3 stage 3,
+// core/contact.js); the physics golden test was re-recorded once for that.
 import { closedCurve } from './curve.js';
 import { MAPS, DEFAULT_MAP } from './maps/index.js';
 import { HITLOG } from '../../core/hitlog.js';
-import { WALL_ALLOW } from '../../core/contact.js';
+import { WALL_ALLOW, WALL as WALLK, bodyOf, wallContact, resolveWalls, pushOut } from '../../core/contact.js';
+import { worldPoly } from '../../core/hitboxes.js';
 import { buildWalls, safeOffsetsOf, wallsNear as wallsNearIn } from './walls.js';
 
 export const CURB = 1.4, GRAV = 9.81;
@@ -183,7 +184,7 @@ export function setMap(id){
 }
 const ARRAYS = { P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP, SHORTCUTS, GATES, CEIL };
 // The active map's walls as polylines (walls.js buildWalls): what scene.js draws, and (plan 3
-// stage 3) what the car collides with. Not used by constrainToTrack yet.
+// stage 3) what the car's hitbox collides with (trackWalls).
 export let WALLS = null;
 // the wall segments within r m of (x, z) at about height y (NaN: any): see walls.js wallsNear
 export function wallsNear(x, z, y, r, out){ return wallsNearIn(WALLS, x, z, y, r, out); }
@@ -300,12 +301,18 @@ export function keepInWalls(p, memo){
     if(dx*dx+dz*dz>w*w || Math.abs(Y[i]-q0.y)>SAME_LEVEL){ q0.idx=i; i=nearest(q0, true); } }
   memo.idx=i;
   const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-WALL_ALLOW, over=Math.abs(lat)-lim;
-  // on a shortcut: kept inside the shortcut's walls instead
-  // (a prediction a little past a shortcut's wall is found too, and put back against it,
-  // not thrown across onto the main road)
+  // which road it is on: a shortcut's (a prediction a little past a shortcut's wall is found
+  // too, and put back against it, not thrown across onto the main road) or the main road
   const cut=over>0 && SHORTCUTS.length ? cutAt(p, 3) : null;
-  if(cut){ const L=cut.loc; if(Math.abs(L.lat)>cut.s.lim){ const sg=Math.sign(L.lat), k=L.k, back=Math.abs(L.lat)-cut.s.lim; p.x-=cut.s.nx[k]*sg*back; p.z-=cut.s.nz[k]*sg*back; } }
-  else if(over>0){ const s=Math.sign(lat), back=over+Math.min(1.5,.45*over); p.x-=n.x*s*back; p.z-=n.z*s*back; }
+  // A prediction far through a wall (it does not know the walls: up to several metres at
+  // speed) is first brought back along its road's normal until its body (as it is turned) is
+  // at most GHOST_DEPTH / 2 behind the road's wall line; then its hitbox is pushed out of the
+  // drawn walls (contact.js, looking up to GHOST_DEPTH deep), as the car itself would be
+  // stopped, with no bounce.
+  const B=bodyOf(memo.car), lid=(cut?cut.s.lim:lim)+WALL_ALLOW, sx=cut?cut.s.nx[cut.loc.k]:n.x, sz=cut?cut.s.nz[cut.loc.k]:n.z, sl=cut?cut.loc.lat:lat;
+  if(Math.abs(sl)+B.r>lid){ const sg=Math.sign(sl), back=Math.abs(sl)+reach(p, B, sx*sg, sz*sg)-lid-GHOST_DEPTH/2;
+    if(back>0){ p.x-=sx*sg*back; p.z-=sz*sg*back; } }
+  if(WALLS && nearWalls(p.x, p.z, B, !FLAT, i, cut?cut.s.k:-1, GHOST_DEPTH)) pushOut(p, B, detectGhost);
   if(!FLAT){
     // drawn height: their reported flight (ballistic), never below the road
     const ys=surface({x:p.x,z:p.z,idx:i,cut:cut?cut.s.k:-1}).y;
@@ -369,21 +376,51 @@ export function constrainToTrack(car,dt,hooks){
   const ni=nearest(car,false);
   moveIdx(car, ni);
   const p=P[ni], n=NM[ni];
-  const lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-WALL_ALLOW;
-  if(Math.abs(lat)>lim) wallHit(car, n.x, n.z, Math.sign(lat), Math.abs(lat)-lim, dt, hooks);
+  const lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z;
+  trackWalls(car, dt, hooks);
   car.off=Math.abs(lat)>HALF+CURB;
   if(car.off && !car.air){ const k=Math.exp(-VDRAG*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: the map's verge drag (VDRAG, default .45/s)
   if(!FLAT) vertical(car,dt,hooks);
   laps(car,hooks);
 }
-// a wall at normal (nx, nz) × side s, the car `push` m through it
-function wallHit(car, nx, nz, s, push, dt, hooks){
-  car.x-=nx*s*push; car.z-=nz*s*push;
-  const vn=(car.vx*nx+car.vz*nz)*s;
-  // (?debug=hit: the contact is where the car's allowance meets the wall)
-  if(HITLOG.on) HITLOG.push('wall', car.x+nx*s*WALL_ALLOW, car.z+nz*s*WALL_ALLOW, nx*s, nz*s, vn, push);
-  wallAlign(car, nx*s, nz*s, dt);
-  if(vn>0){ const k=wallKeep(vn); car.vx-=nx*s*vn*1.45; car.vz-=nz*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
+// The walls (plan 3 stage 3): the car's hitbox against the wall polylines near it, at its own
+// level (contact.js). The lap logic (car.idx, the gates, which road) stays on the centre.
+const NEAR=[]; let nNear=0;
+// The wall segments within reach of a car's hitbox at (x, z), into NEAR (nNear); on a map
+// with heights (level) only the walls of its own level: the road's height under the car
+// (its track point i, or shortcut cut), carried out to each wall along the road's slope and
+// bank (on «Перевал»'s banks the edge is 2.2 m below the centre), within SAME_LEVEL.
+const SQ={ x:0, z:0, idx:0, cut:-1 };
+function nearWalls(x, z, B, level, i, cut, depth=WALLK.DEPTH){
+  nNear=wallsNearIn(WALLS, x, z, NaN, B.r+depth, NEAR);
+  if(!nNear || !level) return nNear;
+  SQ.x=x; SQ.z=z; SQ.idx=i; SQ.cut=cut;
+  const S=surface(SQ), lev=WALLS.sameLevel, y0=S.y;
+  let m=0;
+  for(let k=0;k<nNear;k++){ const e=NEAR[k], yw=y0+S.gx*(e.px-x)+S.gz*(e.pz-z);
+    if(Math.abs(e.y-yw)<=lev){ if(m!==k){ const t=NEAR[m]; NEAR[m]=e; NEAR[k]=t; } m++; } }
+  return nNear=m;
+}
+// how deep a vertex is looked for: WALLK.DEPTH, or the car's travel in this substep plus a margin
+// when that is more (a stalled frame: main.js clamps dt to .05, a substep of 25 ms at 72 m/s is 1.8 m)
+let depthNow=WALLK.DEPTH;
+const detectTrack=(P, nv, c, B, out)=>wallContact(WALLS, NEAR, nNear, P, nv, c.x, c.z, B.r, depthNow, out);
+// another player's prediction: it may be deeper in a wall than our own car ever gets in a substep
+const GHOST_DEPTH=4;
+const detectGhost=(P, nv, c, B, out)=>wallContact(WALLS, NEAR, nNear, P, nv, c.x, c.z, B.r, GHOST_DEPTH, out);
+// how far the body at p (heading p.h) reaches from its centre along (ux, uz)
+const PR=new Float64Array(64);
+function reach(p, B, ux, uz){
+  worldPoly(B.id, p.x, p.z, p.h||0, PR); let m=0;
+  for(let v=0;v<B.nv;v++){ const d=(PR[2*v]-p.x)*ux+(PR[2*v+1]-p.z)*uz; if(d>m) m=d; }
+  return m;
+}
+function trackWalls(car, dt, hooks){
+  if(!WALLS) return;
+  const B=bodyOf(car.carId);
+  depthNow=Math.max(WALLK.DEPTH, Math.hypot(car.vx, car.vz)*dt+.3);
+  if(!nearWalls(car.x, car.z, B, !FLAT, car.idx, car.cut, depthNow)) return;
+  resolveWalls(car, B, detectTrack, hooks, dt);
 }
 // The car's track point moves to ni: the lap progress (car.prog, in track points) and the
 // checkpoints follow.
@@ -462,20 +499,17 @@ function constrainWithCuts(car,dt,hooks){
     const p=P[ni], n=NM[ni], lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-WALL_ALLOW;
     const c=Math.abs(lat)>HALF ? cutAt(car) : null;
     if(c && Math.abs(lat)>lim){ s=c.s; car.cut=s.k; }                    // through the gap in the wall: onto the shortcut
-    else {
-      if(!c && Math.abs(lat)>lim) wallHit(car, n.x, n.z, Math.sign(lat), Math.abs(lat)-lim, dt, hooks);
-      onRoad=Math.abs(lat)<=HALF+CURB || (c && c.loc.road);
-    }
+    else onRoad=Math.abs(lat)<=HALF+CURB || (c && c.loc.road);
   }
   if(s){
     const L=cutLocate(s, car), m=mainNear(s, car);
     if(m.in && !L.in){ car.cut=-1; moveIdx(car, m.j); onRoad=Math.abs(m.lat)<=HALF+CURB; }   // back on the main road
     else {
       moveIdx(car, cutIdx(s, L.k));
-      if(!L.in && !m.in) wallHit(car, s.nx[L.k], s.nz[L.k], Math.sign(L.lat), Math.abs(L.lat)-s.lim, dt, hooks);
       onRoad=L.road || (m.in && Math.abs(m.lat)<=HALF+CURB);
     }
   }
+  trackWalls(car, dt, hooks);
   car.off=!onRoad;
   if(car.off && !car.air){ const k=Math.exp(-VDRAG*dt); car.vx*=k; car.vz*=k; }
   if(!FLAT) vertical(car,dt,hooks);
