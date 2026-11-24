@@ -15,7 +15,7 @@ export function info(text){ const d=el('div','info',text); document.querySelecto
 // move, the scene behind stays still), a CSS class otherwise. A second change while the
 // first is still running takes over from it (the browser skips the first). Returns a
 // promise kept once the new screen is in the page (to move focus there).
-const PANELS=['pHome','pModes','pGarage','pPause','pLobby','pResults','pOver'];
+const PANELS=['pHome','pGarage','pPause','pLobby','pResults','pOver'];
 let panelGen=0;
 // A run starting hides the menu: a screen change still on its way must not show it again.
 export function cancelPanels(){ panelGen++; }

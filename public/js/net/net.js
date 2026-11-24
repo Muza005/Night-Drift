@@ -82,7 +82,7 @@ export async function connectRoom(kind){
   if(kind==='join' && code.length!==4){ netStatus('netStatus','Введите код из 4 символов.',true); return; }
   audioInit();
   connecting=true;
-  $('pModes').setAttribute('aria-busy','true'); $('joinRoom').disabled=true;
+  $('pHome').setAttribute('aria-busy','true'); $('joinRoom').disabled=true;
   netStatus('netStatus', kind==='create' ? 'Создаю комнату…' : 'Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
@@ -91,7 +91,7 @@ export async function connectRoom(kind){
     try{ bindRoom(room); }
     catch(e){ console.error('joining the room failed', e); try{ room.leave(true); }catch(_){} leaveOnline('Не получилось войти в комнату. Обновите страницу.'); }
   }catch(e){ console.warn('connectRoom', kind, e); netStatus('netStatus',errText(e),true); }
-  finally{ connecting=false; $('pModes').removeAttribute('aria-busy'); $('joinRoom').disabled=false; }
+  finally{ connecting=false; $('pHome').removeAttribute('aria-busy'); $('joinRoom').disabled=false; }
 }
 
 // Clock samples from a worker thread that drawing never blocks (see clock-worker.js).
@@ -219,7 +219,8 @@ export async function leaveOnline(msg){
   $('count').textContent=''; $('ping').hidden=true; NET.rtt=0; dropDrift(); clearMarks();
   if(G.setMap) G.setMap(null);           // back to the solo map
   G.state='menu'; G.mode.idle(car); car.vF=car.vR=0;
-  if(G.openModes) G.openModes('online','back'); else showPanel('pModes');
+  $('codeIn').value='';                    // the old room's code is no use any more
+  if(G.openModes) G.openModes('online','back'); else showPanel('pHome');
   netStatus('netStatus',msg||'',!!msg);
   if(msg) note(msg);                       // and a note at the top, in case the eye is elsewhere
   try{ if(r) await r.leave(true); }catch(e){}

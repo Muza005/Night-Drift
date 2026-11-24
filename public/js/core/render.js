@@ -134,20 +134,76 @@ const backMat = new THREE.ShaderMaterial({
     farMap: { value: null }, nearMap: { value: null },
     view: { value: new THREE.Vector2(1, 1) }, scale: { value: 1 }, horizon: { value: 0 },
     pod: { value: new THREE.Vector3() }, sway: { value: 0 },
+    glow: { value: new THREE.Color(0x3ef0ff) }, shift: { value: 0 }, lamps: { value: 0 },
     farBox: { value: new THREE.Vector3() }, nearBox: { value: new THREE.Vector3() },
   },
   vertexShader: 'void main(){ gl_Position = vec4(position.xy, 0., 1.); }',
   // colours are sRGB values written straight out (no tone mapping): they are the tokens'
   fragmentShader: `uniform sampler2D farMap, nearMap; uniform vec2 view; uniform float scale, horizon, sway;
-    uniform vec3 pod, farBox, nearBox;
+    uniform vec3 pod, farBox, nearBox, glow; uniform float shift, lamps;
     const vec3 ROSE = vec3(1., .231, .420), CYAN = vec3(.243, .941, 1.), HAZE = vec3(.17, .09, .25);
     // a layer of skyline: box = (left, width, height above the horizon), css px
     vec4 layer(sampler2D m, vec3 box, vec2 p){
-      vec2 uv = vec2((p.x - box.x) / box.y, (horizon - p.y) / box.z);
-      if(uv.x < 0. || uv.x > 1. || uv.y < 0. || uv.y > 1.) return vec4(0.);
+      vec2 uv = vec2(fract((p.x - box.x) / box.y), (horizon - p.y) / box.z);   // (wraps: the home screen's parallax)
+      if(uv.y < 0. || uv.y > 1.) return vec4(0.);
       return texture2D(m, uv);
     }
     float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    // The home screen's street, lit for real: a pinhole camera CAM m over flat wet asphalt,
+    // focal length F px. Each pixel of the floor is a point on the ground; the lights are
+    // points in the street, and each adds what a point light gives a flat floor (I·h/r³) and,
+    // the asphalt being wet, its mirror image: a streak under it on the floor.
+    //   the card light: the focused card's colour, low in front of the car (where pod is)
+    //   the street lamps: sodium amber on posts along both kerbs, shifting with the deck
+    const float CAM = 1.3;
+    const vec3 SODIUM = vec3(1., .58, .22);
+    float focal(){ return min(view.y * 1.1, view.x * .95); }
+    vec3 lampAt(int i){                                    // (x, height, depth) m
+      float fi = float(i), side = mod(fi, 2.) < .5 ? -1. : 1., row = floor(fi * .5);
+      return vec3(side * 5.6 + shift * 11. / focal(), 4.4, 15. + row * row * 4. + row * 9.);
+    }
+    vec2 onScreen(vec3 w){ float f = focal(); return vec2(view.x * .5 + w.x * f / w.z, horizon - (w.y - CAM) * f / w.z); }
+    vec3 street(vec2 p, float d){
+      float f = focal(), z = CAM * f / max(d, .5);
+      vec3 g = vec3((p.x - view.x * .5) * z / f, 0., z), sum = vec3(0.);
+      // the card light: half a metre up, a metre in front of the car's contact point
+      float zc = CAM * f / max(pod.y - horizon, 4.);
+      vec3 c = vec3((pod.x - view.x * .5) * zc / f, .55, zc - 1.1), v = c - g;
+      float r2 = dot(v, v) + .04;
+      sum += glow * .22 * c.y / (r2 * sqrt(r2)) * pod.z;
+      vec2 s = onScreen(c), m = vec2(s.x, horizon + (c.y + CAM) * f / c.z);
+      float w = .9 * f / c.z;
+      sum += glow * .05 * exp(-pow((p.x - m.x) / w, 2.)) * exp(-abs(p.y - m.y) / (w * 1.6)) * pod.z;
+      for(int i = 0; i < 8; i++){
+        vec3 l = lampAt(i); v = l - g; r2 = dot(v, v);
+        sum += SODIUM * 5. * l.y / (r2 * sqrt(r2));
+        s = onScreen(l); m = vec2(s.x, horizon + (l.y + CAM) * f / l.z);
+        w = .32 * f / l.z;
+        float run = p.y < m.y ? (m.y - p.y) / (w * 9.) : (p.y - m.y) / (w * 4.);   // a streak, longer toward the horizon
+        sum += SODIUM * .22 * exp(-pow((p.x - m.x) / w, 2.)) * exp(-run) * min(1., 9. / l.z);
+      }
+      return sum;
+    }
+    // the posts: a slim dark pole on the kerb, a short arm out over the road and the lamp, a
+    // small bright head (a light, so a short bloom, not a halo). Further posts are thinner and
+    // sink into the haze; the arm is a third of the lane, so the row never reads as a gantry.
+    vec3 posts(vec2 p, vec3 col, float on){
+      float f = focal();
+      for(int i = 0; i < 8; i++){
+        vec3 l = lampAt(i);
+        float k = f / l.z, side = sign(l.x - shift * 11. / f), x0 = view.x * .5 + l.x * k;
+        float yb = horizon + CAM * k, yt = horizon - (l.y - CAM) * k, pw = max(.8, .07 * k);
+        float far = 1. - exp(-(l.z - 15.) / 28.);                          // 0 near, toward 1 far
+        float pole = (1. - smoothstep(pw * .5 - .5, pw * .5 + .5, abs(p.x - x0))) * step(yt, p.y) * step(p.y, yb);
+        vec2 h = vec2(x0 - side * .7 * k, yt + .06 * k);                    // the head, on its arm
+        float aw = max(.6, .045 * k);
+        float arm = (1. - smoothstep(aw * .5 - .5, aw * .5 + .5, abs(p.y - yt))) * step(min(h.x, x0), p.x) * step(p.x, max(h.x, x0));
+        col = mix(col, mix(vec3(.012, .012, .026), HAZE * .7, far), max(pole, arm) * on * (1. - .55 * far));
+        vec2 e = (p - h) / vec2(.26 * k, .08 * k);
+        col += SODIUM * (1.5 * exp(-dot(e, e) * 3.) + .1 * exp(-dot(e, e) * .08)) * on * (1. - .4 * far);
+      }
+      return col;
+    }
     void main(){
       vec2 p = vec2(gl_FragCoord.x * scale, view.y - gl_FragCoord.y * scale);
       float H = view.y, up = horizon - p.y;
@@ -158,10 +214,10 @@ const backMat = new THREE.ShaderMaterial({
         col = mix(vec3(.060, .035, .120), vec3(.030, .032, .090), smoothstep(0., .45, t));
         col = mix(col, vec3(.010, .013, .035), smoothstep(.4, 1., t));
         col += ROSE * .26 * exp(-up / (.08 * H)) + vec3(.30, .10, .42) * .12 * exp(-up / (.28 * H));
-        vec4 f = layer(farMap, farBox, vec2(p.x + sway * ${FAR_SHIFT.toFixed(1)}, p.y));
+        vec4 f = layer(farMap, farBox, vec2(p.x + sway * ${FAR_SHIFT.toFixed(1)} + shift * .3, p.y));
         col = col * (1. - f.a) + f.rgb;
         col = mix(col, HAZE, .5 * exp(-up / (.06 * H)));                 // haze between the layers
-        vec4 n = layer(nearMap, nearBox, vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)}, p.y));
+        vec4 n = layer(nearMap, nearBox, vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)} + shift, p.y));
         col = col * (1. - n.a) + n.rgb;
         col = mix(col, HAZE, .5 * exp(-up / (.025 * H)));                // and low over the street
       } else {
@@ -169,20 +225,22 @@ const backMat = new THREE.ShaderMaterial({
         float d = -up, fd = d / max(H - horizon, 1.);
         col = mix(vec3(.045, .040, .095), vec3(.010, .012, .028), smoothstep(0., 1., fd));
         col += ROSE * .10 * exp(-d / (.05 * H));
-        vec2 q = vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)} + sin(d * .23) * 1.1, horizon - d * .62);
+        vec2 q = vec2(p.x + sway * ${NEAR_SHIFT.toFixed(1)} + shift + sin(d * .23) * 1.1, horizon - d * .62);
         vec4 r = layer(nearMap, nearBox, q) * .3
                + (layer(nearMap, nearBox, q + vec2(-2., 0.)) + layer(nearMap, nearBox, q + vec2(2., 0.))) * .2
                + (layer(nearMap, nearBox, q + vec2(0., -5.)) + layer(nearMap, nearBox, q + vec2(0., 5.))) * .15;
         float fade = .6 * exp(-d / (.2 * H));
         col = col * (1. - r.a * fade * .5) + r.rgb * fade;
         col = mix(col, HAZE, .45 * exp(-d / (.035 * H)));
-        if(pod.z > 0.){                                                  // the light under the podium (z: how much)
+        if(pod.z > 0. && lamps < .5){                                    // the light under the podium (z: how much)
           vec2 e = (p - pod.xy) / vec2(.36 * H + 60., .09 * H + 20.);
           float k = dot(e, e);
           col += (CYAN * .045 * exp(-k * 1.6) + ROSE * .03 * exp(-k * .35)) * smoothstep(0., 12., d) * pod.z;
         }
+        if(lamps > 0.) col += street(p, d) * lamps;
         col += (hash(gl_FragCoord.xy * .37) - .5) * .012;                // the asphalt's grain
       }
+      if(lamps > 0.) col = posts(p, col, lamps);
       // dither: a triangular ±1/255, so the smooth parts do not band
       col += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 19.19) - 1.) / 255.;
       gl_FragColor = vec4(col, 1.);
@@ -275,6 +333,9 @@ export function drawBackdrop(anchor){
   u.horizon.value = h * (.43 + .06 * a * a * (3 - 2 * a));
   // the light pool follows the podium and fades in with it (~250 ms; at once for reduced motion)
   if(anchor){ u.pod.value.x = anchor.x; u.pod.value.y = anchor.y; }
+  // the home screen: the light's colour, the parallax shift (css px), the kerb lamps
+  if(anchor && anchor.glow) u.glow.value.copy(anchor.glow); else u.glow.value.setHex(0x3ef0ff);
+  u.shift.value = anchor && anchor.shift || 0; u.lamps.value = anchor && anchor.lamps || 0;
   BACK.pool = !anchor ? 0 : reducedMotion.matches ? 1 : BACK.pool + (1 - BACK.pool) * (1 - Math.exp(-dt / .08));
   u.pod.value.z = BACK.pool < .002 ? 0 : BACK.pool;
   // the drift follows the stand's turn slowly: a flick does not shake the city

@@ -21,7 +21,9 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2598;
+const PORT = +process.env.ND_PORT || 2598;     // ND_PORT: another port when this one is taken
+// a home card: the first click brings it to the middle, a click on the card in the middle goes in
+const enterCard = async (p, sel) => { await p.click(sel); await sleep(400); if (await p.$eval(sel, e => !e.closest('[hidden], [inert]') && e.getAttribute('aria-selected') === 'true').catch(() => false)) await p.click(sel); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {
@@ -64,11 +66,11 @@ try {
   const CARS = await A.evaluate(async () => (await import('/js/core/cars.js')).CARS.map(c => [c.id, c.name]));
 
   // A makes a room from the Дрифт card; B and C come in by its code
-  await A.click('#goOnline'); await sleep(400); await A.click('#mTrack');
+  await enterCard(A, '#goOnline'); await sleep(400); await enterCard(A, '#fHost'); await sleep(400); await enterCard(A, '#rTrack');
   await A.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('roomCode').textContent !== '----');
   const code = (await A.innerText('#roomCode')).trim();
   for (const p of [B, C]) {
-    await p.click('#goOnline'); await sleep(400); await p.fill('#codeIn', code); await p.click('#joinRoom');
+    await enterCard(p, '#goOnline'); await sleep(400); await enterCard(p, '#fJoin'); await p.fill('#codeIn', code); await p.click('#joinRoom');
     await p.waitForFunction(() => !document.getElementById('pLobby').hidden);
     await sleep(300);                               // B is in before C: the order is by who came in
   }
@@ -192,18 +194,18 @@ try {
   check('Esc cancels: nobody leaves, the host stays in the lobby', !(await A.evaluate(() => document.getElementById('kickPop').matches(':popover-open'))) && await A.evaluate(() => __nd.NET.room.state.players.size) === 3 && !(await A.$eval('#pLobby', e => e.hidden)));
   await A.click('#plist .pl:nth-child(3) .pl-kick');
   await A.click('#kickYes');
-  await C.waitForFunction(() => !document.getElementById('pModes').hidden && document.getElementById('noteToast').matches(':popover-open'), null, { timeout: 10000 });
+  await C.waitForFunction(() => !document.getElementById('pHome').hidden && document.getElementById('noteToast').matches(':popover-open'), null, { timeout: 10000 });
   check('the kicked player is back on the online cards, with the note', /исключили/.test(await C.innerText('#noteText')));
   await A.waitForFunction(() => __nd.NET.room.state.players.size === 2);
   check('the host and Bob now see two players', (await listOf(B)).length === 2);
-  await C.fill('#codeIn', code); await C.click('#joinRoom');
-  await C.waitForFunction(() => document.getElementById('netStatus').textContent.length > 0 && document.getElementById('pModes').getAttribute('aria-busy') !== 'true', null, { timeout: 10000 });
+  await enterCard(C, '#fJoin'); await C.fill('#codeIn', code); await C.click('#joinRoom');
+  await C.waitForFunction(() => document.getElementById('netStatus').textContent.length > 0 && document.getElementById('pHome').getAttribute('aria-busy') !== 'true', null, { timeout: 10000 });
   await sleep(500);
   check('…and cannot come back, and is told why', !(await C.evaluate(() => __nd.NET.online)) && await A.evaluate(() => __nd.NET.room.state.players.size) === 2 && /исключил/.test(await C.innerText('#netStatus')), await C.innerText('#netStatus'));
 
   // Dan comes in later: he sees the room's map
   const D = await player('Dan');
-  await D.click('#goOnline'); await sleep(400); await D.fill('#codeIn', code); await D.click('#joinRoom');
+  await enterCard(D, '#goOnline'); await sleep(400); await enterCard(D, '#fJoin'); await D.fill('#codeIn', code); await D.click('#joinRoom');
   await D.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('lobMapName').textContent === 'Серпантин');
   check('a player who comes in later sees the room\'s map on the plate, and no note', (await plate(D)).bp && !(await toast(D)).open && await scene(D) === 'serpantin');
   await D.click('#startRace');

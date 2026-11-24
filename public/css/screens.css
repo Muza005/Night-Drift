@@ -28,17 +28,139 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
   font-size: var(--fs-sm);
 }
 
-/* the brand on the home screen */
-#pHome .brand { display: grid; gap: var(--sp-2); justify-items: start; }
-#pHome .brand h1 {
-  margin: 0;
-  font: 800 var(--fs-3xl)/0.95 var(--f-display);
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 34px rgba(255, 59, 107, 0.35);
+/* ---------- home: the car on the street, the deck of cards under it (ui/homeScreen.js) ----------
+   No veil and no box: the canvas behind is the street itself. The screen is the whole
+   viewport: a bar on top, the street in the middle (the stand's box, behind everything),
+   the deck along the bottom. */
+#menu:has(> #pHome:not([hidden])) { background: none; padding: 0; overflow: hidden; }
+#pHome {
+  width: 100%; height: 100dvh; margin: 0; gap: 0;
+  grid-template-rows: auto 1fr auto auto;
 }
-#pHome .brand h1 span { color: var(--brand); }
-#pHome .tagline { margin: 0; color: var(--c-ink-1); font-size: var(--fs-lg); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
-#pHome .howto { justify-self: start; }
+#pHome > * { grid-column: 1; }   /* one column: the dock may share the top bar's row (short screens) */
+#pHome .home-stand { position: absolute; inset: 0; z-index: 0; touch-action: pan-y; }   /* (over .stand, which createStand adds) */
+.home-bar {
+  position: relative; z-index: 1; grid-row: 1;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--top) var(--rgt) 0 var(--lft); min-block-size: calc(var(--top) + var(--btn-h));
+}
+.home-bar .icon-btn[hidden] { display: none; }
+.home-title { margin: 0; font: 800 var(--fs-lg)/1 var(--f-display); letter-spacing: -0.01em; white-space: nowrap; text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7); }
+.home-title span { color: var(--brand); }
+.home-title.sub { font-size: var(--fs-md); font-weight: 700; }
+
+.deck { position: relative; z-index: 1; grid-row: 3; block-size: calc(var(--deck-h) + var(--sp-2)); overflow: hidden; }
+.deck-track { position: absolute; inset-block-start: 0; inset-inline-start: 0; display: flex; gap: var(--deck-gap); block-size: var(--deck-h); transition: transform var(--dur-focus) var(--ease-out); }
+.deck-track[inert] { pointer-events: none; }
+.dcard {
+  position: relative; flex: 0 0 var(--deck-card); block-size: 100%; cursor: pointer; overflow: hidden;
+  margin-inline-end: calc(var(--deck-slant) * -1);
+  background: var(--c-night-2);
+  clip-path: polygon(var(--deck-slant) 0, 100% 0, calc(100% - var(--deck-slant)) 100%, 0 100%);
+  transition: flex-basis var(--dur-focus) var(--ease-out);
+  outline: none; -webkit-tap-highlight-color: transparent;
+}
+.dcard[aria-selected="true"] { flex-basis: min(var(--deck-open), 62vw); cursor: pointer; }
+.dcard > img, .dcard > video { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; object-fit: cover; opacity: 0.4; transition: opacity var(--dur-focus) var(--ease-out); }
+.dcard[aria-selected="true"] > img, .dcard[aria-selected="true"] > video { opacity: 1; }
+.dcard::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, transparent 45%, rgba(5, 6, 16, 0.85)); }
+.dcard-name {
+  position: absolute; z-index: 1; inset-inline: calc(var(--deck-slant) * 0.2 + var(--sp-3)) calc(var(--deck-slant) + var(--sp-2)); inset-block-end: var(--sp-3);
+  font: 700 var(--fs-sm)/1.15 var(--f-display); color: var(--c-ink-1);
+  overflow-wrap: normal;
+}
+.dcard[aria-selected="true"] .dcard-name { color: var(--text); font-size: var(--fs-md); inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
+.dcard-bar { position: absolute; z-index: 2; inset-inline: 0 var(--deck-slant); inset-block-end: 0; block-size: 3px; background: var(--accent); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); }
+.dcard[aria-selected="true"] .dcard-bar { opacity: 1; }
+.dcard:focus-visible .dcard-bar { block-size: 5px; }
+.dcard-go {
+  position: absolute; z-index: 2; inset-inline-end: calc(var(--deck-slant) + var(--sp-3)); inset-block-end: var(--sp-3);
+  inline-size: 28px; block-size: 28px; display: grid; place-items: center; border-radius: var(--r-pill);
+  background: var(--accent); color: var(--c-night-1); opacity: 0; transition: opacity 160ms var(--ease-out);
+}
+.dcard-go svg { inline-size: 16px; block-size: 16px; }
+.dcard[aria-selected="true"] .dcard-go { opacity: 1; transition-delay: 80ms; }
+.dcard:active .dcard-go { scale: 0.94; }
+.dcard[aria-disabled="true"] { cursor: default; }
+.dcard[aria-disabled="true"] > img { filter: grayscale(1); }
+.dcard-soon { position: absolute; z-index: 1; inset-block-start: var(--sp-3); inset-inline-end: calc(var(--deck-slant) + var(--sp-2)); font: 700 var(--fs-xs)/1 var(--f-body); color: var(--text-quiet); }
+
+/* a map card: the track drawn from its centre line, not a frame from the game */
+.dcard-map { background: var(--c-night-1); }
+.dcard-map::after { background: linear-gradient(180deg, transparent 62%, rgba(5, 6, 16, 0.8)); }
+.dcard .dg { position: absolute; inset-inline-start: 50%; inset-block-start: 44%; inline-size: var(--deck-open); block-size: calc(var(--deck-h) * 0.86); translate: -50% -50%; opacity: 0.38; transition: opacity var(--dur-focus) var(--ease-out); }
+.dcard[aria-selected="true"] .dg { opacity: 1; }
+.dg-shadow { stroke: rgba(0, 0, 0, 0.55); }
+.dg-ground { stroke: var(--c-night-4); stroke-width: 1.2; }
+.dg-post { stroke: var(--c-ink-3); stroke-width: 1; }
+.dg-cut { stroke: var(--record); stroke-width: 1.6; stroke-dasharray: 3 5; }
+.dg-case { stroke: var(--c-night-1); }
+.dg-glow { opacity: 0.22; }   /* a wide faint copy of the route: its glow (a blur filter here costs the GPU too much) */
+.dg-glow path { stroke-width: 10px; }
+.dg-glow .dg-case { display: none; }
+.dg-start { stroke: var(--c-ink-0); stroke-width: 3; }
+.dg-run { fill: var(--c-ink-0); }
+.dcard-figs {
+  position: absolute; z-index: 1; inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); inset-block-end: calc(var(--sp-3) + 2px);
+  display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-sm)/1 var(--f-num); color: var(--c-ink-1);
+  opacity: 0; transition: opacity 160ms var(--ease-out);
+}
+.dcard[aria-selected="true"] .dcard-figs { opacity: 1; }
+.dcard[aria-selected="true"].dcard-map .dcard-name { inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 150px); }
+/* difficulty: three bars, the lit ones in the level's colour */
+.diff { display: inline-flex; align-items: flex-end; gap: 2px; block-size: 12px; }
+.diff i { inline-size: 3px; background: var(--c-ink-3); opacity: 0.6; }
+.diff i:nth-child(1) { block-size: 5px; } .diff i:nth-child(2) { block-size: 8px; } .diff i:nth-child(3) { block-size: 12px; }
+.diff.d1 i:nth-child(-n+1) { background: var(--diff-1); opacity: 1; }
+.diff.d2 i:nth-child(-n+2) { background: var(--diff-2); opacity: 1; }
+.diff.d3 i:nth-child(-n+3) { background: var(--diff-3); opacity: 1; }
+
+/* the dock: over the deck, the code field while «Войти по коду» is in focus, and what the
+   connection says (creating a room, an error) */
+.home-dock { position: relative; z-index: 1; grid-row: 2; align-self: end; justify-self: center; display: grid; justify-items: center; gap: var(--sp-2); padding: 0 var(--rgt) var(--sp-3) var(--lft); }
+.home-dock .join { justify-self: center; opacity: 0; translate: 0 6px; visibility: hidden; transition: opacity var(--dur-hover) var(--ease-out), translate var(--dur-hover) var(--ease-out), visibility 0s linear var(--dur-hover); }
+.home-dock.open .join { opacity: 1; translate: 0 0; visibility: visible; transition-delay: 0s; }
+.home-dock .status { margin: 0; color: var(--c-ink-1); text-align: center; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+.home-dock .status:empty { display: none; }
+
+/* little height (a phone sideways, a short laptop window): the street has no room under the
+   car, so the code field and the status move up into the top bar, on its right */
+@media (max-height: 700px) and (min-width: 561px) {
+  .home-dock { grid-row: 1; align-self: center; justify-self: end; grid-auto-flow: column; align-items: center; padding: var(--top) var(--rgt) 0 var(--lft); }
+  .home-dock .status { order: -1; max-inline-size: 32ch; text-align: end; font-size: var(--fs-sm); }
+  .home-dock .join { padding: var(--sp-1) var(--sp-2); translate: 0 -6px; }
+  .home-dock .join input { font-size: var(--fs-md); }   /* (the targets stay 44 px) */
+}
+
+/* the record on a card in focus: the player's own, in the record colour */
+.dcard-rec { display: inline-flex; align-items: center; gap: 4px; color: var(--record); }
+.dcard-rec svg { inline-size: 14px; block-size: 14px; }
+.dcard:not(.dcard-map) .dcard-figs { inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
+
+/* the keys: one small row, only once the keyboard is used */
+.deck-keys { position: relative; z-index: 1; grid-row: 4; display: flex; justify-content: center; gap: var(--sp-4); margin: 0; padding: var(--sp-3) var(--rgt) var(--bot) var(--lft); min-block-size: calc(var(--sp-5) + var(--bot)); font: 600 var(--fs-xs)/1 var(--f-body); color: var(--text-quiet); opacity: 0; transition: opacity var(--dur-hover) var(--ease-out); }
+#pHome.kb .deck-keys { opacity: 1; }
+.deck-keys kbd { font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); margin-inline-end: var(--sp-1); }
+
+@media (max-width: 760px) {
+  #pHome { --deck-card: 84px; --deck-slant: 18px; --deck-h: clamp(160px, 28vh, 240px); --deck-gap: 6px; }
+  .dcard-name { font-size: var(--fs-xs); }
+  .dcard:not([aria-selected="true"]) .dcard-name { display: none; }   /* a narrow card: its picture only */
+  .dcard[aria-selected="true"] .dcard-name { font-size: var(--fs-sm); }
+  .dcard .dg { inline-size: 62vw; }
+  .dcard-figs, .dcard[aria-selected="true"].dcard-map .dcard-name { inset-block: var(--sp-3) auto; inset-inline-end: calc(var(--deck-slant) + var(--sp-2)); font-size: var(--fs-xs); }
+  .dcard[aria-selected="true"].dcard-map .dcard-name { inset-block: auto var(--sp-3); inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
+  .deck-keys { display: none; }
+}
+@media (max-height: 500px) {
+  #pHome { --deck-h: 132px; --deck-open: 300px; }
+  .dcard-figs { inset-block: var(--sp-3) auto; inset-inline-end: calc(var(--deck-slant) + var(--sp-2)); font-size: var(--fs-xs); }
+  .dcard[aria-selected="true"].dcard-map .dcard-name { inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
+  .deck-keys { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck-track, .dcard, .dcard > img, .dcard > video, .dcard-bar, .dcard .dg { transition-duration: 1ms; }
+}
 
 /* a round icon button (back, garage, colour...) */
 .icon-btn {
@@ -60,110 +182,6 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
 .icon-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
 @media (hover: hover) and (pointer: fine) {
   .icon-btn:hover { border-color: var(--action); background: rgba(62, 240, 255, 0.08); }
-}
-
-/* ---------- tiles: a picture on top, the name under it ---------- */
-.tiles { display: grid; gap: var(--sp-4); }
-.tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.tiles-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-.tile {
-  --tile-accent: var(--c-cyan);
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  align-content: start;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-2) var(--sp-4);
-  text-align: start;
-  font: inherit;
-  color: var(--text);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lift);
-  cursor: pointer;
-  transition: translate var(--dur-hover) var(--ease-out), scale var(--dur-press) var(--ease-out), border-color var(--dur-hover) ease;
-}
-/* the glow is a ready-made shadow on a layer of its own: only its opacity changes */
-.tile::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: 0 0 0 1px var(--tile-accent), 0 18px 54px -12px var(--tile-accent);
-  opacity: 0;
-  transition: opacity var(--dur-hover) ease;
-}
-.tile-art {
-  position: relative;
-  display: block;
-  aspect-ratio: 16 / 10;
-  overflow: hidden;
-  border-radius: calc(var(--r-lg) - var(--sp-2));
-  background: var(--c-night-2);
-}
-.tile-art svg {
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  transition: scale var(--dur-screen) var(--ease-out);
-}
-.mode-tile .tile-art { aspect-ratio: 21 / 9; }        /* the mode pictures are wide road scenes */
-.tile-name {
-  padding-inline: var(--sp-2);
-  margin-block-start: var(--sp-2);
-  font: 800 var(--fs-xl)/1.05 var(--f-display);
-}
-.tile-desc {
-  padding-inline: var(--sp-2);
-  color: var(--text-quiet);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  max-inline-size: 46ch;
-}
-.tile-rec {
-  padding-inline: var(--sp-2);
-  margin-block-start: var(--sp-1);
-  color: var(--record);
-  font: 700 var(--fs-sm) var(--f-num);
-  font-variant-numeric: tabular-nums;
-}
-.tile:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
-.tile:focus-visible::after { opacity: 1; }
-.tile:not([aria-disabled="true"]):active { scale: 0.98; }
-
-@media (hover: hover) and (pointer: fine) {
-  .tile:not([aria-disabled="true"]):hover { translate: 0 var(--card-lift); border-color: transparent; }
-  .tile:not([aria-disabled="true"]):hover::after { opacity: 1; }
-  .tile:not([aria-disabled="true"]):hover .tile-art svg { scale: var(--card-zoom); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tile:not([aria-disabled="true"]):hover { translate: none; }
-  .tile:not([aria-disabled="true"]):hover .tile-art svg { scale: none; }
-}
-
-/* a tile that isn't ready yet: grey, still, no pointer; the words stay readable */
-.tile[aria-disabled="true"] {
-  cursor: default;
-  background: var(--surface-sunk);
-  box-shadow: none;
-}
-.tile[aria-disabled="true"] .tile-art svg { filter: grayscale(1); }
-.tile[aria-disabled="true"]:focus-visible::after { opacity: 0; }
-.tile[aria-disabled="true"] .tile-name { color: var(--text-quiet); }
-.soon {
-  position: absolute;
-  inset-block-start: 22px;
-  inset-inline-end: -46px;
-  rotate: 35deg;
-  padding: 6px 56px;
-  background: var(--c-ink-1);
-  color: var(--bg);
-  font: 800 var(--fs-sm)/1 var(--f-display);
-  letter-spacing: 0.24em;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 /* ---------- joining a room by its code ---------- */
@@ -197,20 +215,10 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
 .join input::placeholder { color: var(--text-quiet); }
 .join input:focus-visible { outline: var(--focus-ring); outline-offset: 2px; border-color: var(--action); }
 .join .ghost-btn { min-block-size: var(--btn-h); padding-block: 0; }
-#pModes[aria-busy="true"] .tile { cursor: progress; }
+#pHome[aria-busy="true"] .dcard { cursor: progress; }
 
 /* ---------- phones and narrow windows ---------- */
-@media (max-width: 760px) {
-  .tiles-3 { grid-template-columns: 1fr; }
-  .tiles-3 .tile { grid-template-columns: 42% 1fr; grid-template-rows: auto 1fr; column-gap: var(--sp-3); padding: var(--sp-2); }
-  .tiles-3 .tile-art { grid-row: 1 / span 2; aspect-ratio: 4 / 3; }
-  .tiles-3 .tile-name { margin-block-start: var(--sp-1); padding-inline: 0; font-size: var(--fs-lg); }
-  .tiles-3 .tile-desc { padding-inline: 0; }
-  .soon { inset-block-start: 12px; inset-inline-end: -52px; padding: 4px 56px; font-size: var(--fs-xs); }
-}
 @media (max-width: 560px) {
-  .tiles-2 { grid-template-columns: 1fr; }
-  .tiles-2 .tile-art { aspect-ratio: 5 / 2; }
   .join { display: grid; grid-template-columns: 1fr auto; justify-self: stretch; border-radius: var(--r-lg); }
   .join label { grid-column: 1 / -1; }
   .join input { inline-size: 100%; }
@@ -822,11 +830,6 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   .screen-bar h1 { font-size: var(--fs-xl); }
   .icon-btn { inline-size: 40px; block-size: 40px; }
   .pill-btn { min-block-size: 40px; }
-  #pHome .brand h1 { font-size: var(--fs-2xl); }
-  #pHome .tagline { font-size: var(--fs-md); }
-  .tiles-3 .tile-art { aspect-ratio: 21 / 9; }
-  .mode-tile .tile-art { aspect-ratio: 3 / 1; }
-  .tile-name { font-size: var(--fs-lg); margin-block-start: var(--sp-1); }
 
   .garage { grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: var(--sp-2); }
   .gar-head h2 { font-size: var(--fs-lg); }

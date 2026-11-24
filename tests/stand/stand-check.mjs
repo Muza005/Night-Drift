@@ -18,7 +18,7 @@ import { launchOptions, onGpu } from '../browser.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2596;
+const PORT = +process.env.ND_PORT || 2596;     // ND_PORT: another port when this one is taken
 const CHROME = process.env.CHROME_PATH;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const TAU = Math.PI * 2, AUTO = TAU / 28;

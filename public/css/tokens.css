@@ -101,6 +101,11 @@
   --better: var(--c-green);
   --worse: var(--c-red);
   --focus: var(--c-cyan);
+  /* a map's difficulty (three bars on its card): easy green, middle amber, hard red; each
+     at least 3:1 against the card (night-1/night-3), as a graphic must be */
+  --diff-1: var(--c-green);
+  --diff-2: var(--c-amber);
+  --diff-3: var(--c-red);
 
   --surface: rgba(10, 12, 24, 0.66);                 /* a panel over the scene */
   --surface-raised: linear-gradient(160deg, rgba(28, 30, 62, 0.86), rgba(11, 12, 26, 0.9));
@@ -124,6 +129,14 @@
   --card-lift: -5px;             /* how far a card rises on hover */
   --card-zoom: 1.04;             /* how far its picture comes closer */
   --stand-ring: var(--c-cyan);   /* the neon edge of the car stand */
+  /* the home deck: slanted cards under the car (ui/homeScreen.js) */
+  --deck-slant: 26px;            /* how far a card leans */
+  --deck-card: clamp(150px, 13vw, 240px);   /* a card at rest (bolder on a wide screen) */
+  --deck-open: clamp(340px, 34vw, 600px);   /* the card in focus */
+  --deck-h: clamp(150px, 30vh, 330px);
+  --deck-gap: 10px;
+  --dur-focus: 220ms;            /* a card opening as focus reaches it */
+  --dur-level: 320ms;            /* one deck rolling out, the next one in */
 
   /* safe areas: phones with notches and home bars */
   --top: calc(14px + env(safe-area-inset-top, 0px));

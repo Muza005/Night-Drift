@@ -19,7 +19,9 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2597;
+const PORT = +process.env.ND_PORT || 2597;     // ND_PORT: another port when this one is taken
+// a home card: the first click brings it to the middle, a click on the card in the middle goes in
+const enterCard = async (p, sel) => { await p.click(sel); await sleep(400); if (await p.$eval(sel, e => !e.closest('[hidden], [inert]') && e.getAttribute('aria-selected') === 'true').catch(() => false)) await p.click(sel); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {
@@ -52,8 +54,11 @@ try {
   const soft = await page.evaluate(() => { const g = __nd.renderer.getContext(), e = g.getExtension('WEBGL_debug_renderer_info'); return /swiftshader|llvmpipe/i.test(e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : ''); });
   const $ = (sel, fn) => page.$eval(sel, fn);
 
-  // to the garage: Одиночная → Дрифт
-  await page.click('#goSolo'); await sleep(450); await page.click('#mTrack');
+  // to the garage: home «Дрифт» → the map deck (on the solo map) → in
+  await enterCard(page, '#dTrack');
+  await page.waitForFunction(() => document.querySelector('#homeDeck [role=listbox]:not([inert])')?.getAttribute('aria-label') === 'Карта');
+  check('the map deck opens on the solo map, «Ночной город»', await page.$eval('#homeDeck [role=listbox]:not([inert]) [aria-selected=true]', e => e.id) === 'map-neon');
+  await enterCard(page, '#map-neon');
   await page.waitForFunction(() => !document.getElementById('pGarage').hidden);
   await page.waitForFunction(() => __nd && /, цвет /.test(document.getElementById('garStand').getAttribute('aria-label')), null, { timeout: 30000 });
   check('the garage opens with the first car, factory paint', await $('#garName', e => e.textContent) === 'Aston Martin' && await $('#paintName', e => e.textContent) === 'Заводской');
@@ -133,18 +138,20 @@ try {
 
   // Esc again: back to the modes, nothing saved
   await page.keyboard.press('Escape'); await sleep(500);
-  check('Esc: back to the mode cards, the pick dropped', !(await $('#pModes', e => e.hidden)) && await page.evaluate(() => localStorage.getItem('nightdrift.car')) === null);
-  check('the «Дрифт» card shows the picked map\'s record line', /^Паркинг · /.test(await $('#bestTrack', e => e.textContent)), await $('#bestTrack', e => e.textContent));
+  check('Esc: back to the map deck, the pick dropped', !(await $('#pHome', e => e.hidden)) && await page.evaluate(() => localStorage.getItem('nightdrift.car')) === null);
+  check('the map deck has the picked map, «Паркинг», in the middle', await page.$eval('#homeDeck [role=listbox]:not([inert]) [aria-selected=true]', e => e.id) === 'map-parking');
   // «Трасса» has no map
-  await page.click('#mTraffic'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
+  await page.keyboard.press('Escape'); await sleep(500);
+  await enterCard(page, '#dTraffic'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
   check('«Трасса»: no «Карта» in its garage', await $('#garMap', e => e.hidden));
   await page.keyboard.press('Escape'); await sleep(500);
   // a reload keeps the map
   await page.reload(); await page.waitForFunction(() => window.__nd);
-  await page.click('#goSolo'); await sleep(450);
+  await sleep(600);
 
-  // again, pick the Dodge in red and go
-  await page.click('#mTrack'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
+  // again, pick the Dodge in red and go (the deck opens on the remembered map)
+  await enterCard(page, '#dTrack'); await sleep(400);
+  await enterCard(page, '#map-parking'); await page.waitForFunction(() => !document.getElementById('pGarage').hidden); await sleep(300);
   for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowRight'); await sleep(120); }
   await page.click('#garPaint'); await page.click('#garSwatches button[aria-label="Красный"]'); await page.keyboard.press('Escape');
   // (closing a popover gives focus back to its button, where Enter is that button's own)

@@ -20,6 +20,14 @@
 //   stand.frame(now)                 draws one frame (now: rAF time, ms); false if not drawn
 //   stand.measure()                  the podium on screen now, for the backdrop (or null)
 //   stand.dispose()
+//
+// createStand({ renderer, el, street: true }) is the home screen's version: no podium. The
+// car stands on the wet street of the backdrop: a tight dark spot under each tyre, a wider
+// soft shadow under the body, and its reflection, the same car mirrored in the ground at a
+// third of its strength, starting at the tyres' contact line. The camera is low (~4°), the
+// car is framed to a share of the box's width and its contact line is put on the backdrop's
+// street just under the horizon; it does not turn by itself.
+//   stand.setGlow(color)             the colour of the light from the street (the focused card's)
 import { CARS, carById, paintByCode, paintHex } from '../core/cars.js';
 import { makeModel, preload, setPaint, PAINT_FINISH } from '../core/carModels.js';
 import { coupeShape, wheelShape } from '../core/carShapes.js';
@@ -42,6 +50,27 @@ function spotTexture(inner){
   const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
   gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(inner, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+// The street's shadows (home): `box` a soft rounded rectangle, the ambient occlusion under the
+// body (its core 0.62 of the half-size, falling off to the edge); otherwise a tight spot for a
+// tyre's contact, dark almost to its edge.
+function contactTexture(box){
+  const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d'), img = g.createImageData(N, N);
+  for(let j = 0; j < N; j++) for(let i = 0; i < N; i++){
+    const x = Math.abs((i + 0.5) / N * 2 - 1), y = Math.abs((j + 0.5) / N * 2 - 1);
+    let a;
+    if(box){
+      const r = 0.3, qx = Math.max(x - 0.62 + r, 0), qy = Math.max(y - 0.62 + r, 0);
+      const d = Math.hypot(qx, qy) + Math.min(Math.max(x - 0.62 + r, y - 0.62 + r), 0) - r;
+      const t = Math.min(1, Math.max(0, (d + 0.04) / 0.42)); a = Math.pow(1 - t * t * (3 - 2 * t), 1.6);
+    } else {
+      const d = Math.hypot(x, y), t = Math.min(1, Math.max(0, (d - 0.35) / 0.65)); a = Math.pow(1 - t, 2.2);
+    }
+    const k = (j * N + i) * 4; img.data[k] = img.data[k + 1] = img.data[k + 2] = 255; img.data[k + 3] = Math.round(a * 255);
+  }
+  g.putImageData(img, 0, 0);
   return new THREE.CanvasTexture(c);
 }
 // The neon halo around the rim: a ring that is bright at the rim and fades outward.
@@ -102,7 +131,7 @@ function coupeParts(){
   return COUPE;
 }
 
-export function createStand({ renderer, el }){
+export function createStand({ renderer, el, street = false }){
   const scene = new THREE.Scene();
   const env = studioEnv(renderer);
   const own = [];                                   // what dispose() frees
@@ -113,6 +142,10 @@ export function createStand({ renderer, el }){
   const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(4, 8, 6);
   const rim = new THREE.DirectionalLight(0x7fe9ff, 0.7); rim.position.set(-5, 3, -6);
   scene.add(key, rim);
+  // street: the light coming up from the lit asphalt in front of the car, in the colour of
+  // the card in focus (setGlow); it also tints the rim light
+  const bounce = new THREE.DirectionalLight(0x3ef0ff, street ? 0.55 : 0); bounce.position.set(1.5, -1.2, 5);
+  if(street){ scene.add(bounce); key.intensity = 1.25; }
 
   // The podium: a low dark disc, a thin cyan rim on its top edge, a halo outside it, a dark
   // spot under it, and the car's own soft shadow (a blurred spot, no shadow map). Its parts
@@ -131,7 +164,8 @@ export function createStand({ renderer, el }){
   const haloMat = keep(new THREE.MeshBasicMaterial({ map: keep(haloTexture()), color: 0x3ef0ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
   const flatGeo = keep(new THREE.PlaneGeometry(1, 1));
   const underMat = keep(new THREE.MeshBasicMaterial({ map: keep(spotTexture(0.5)), color: 0x000000, transparent: true, opacity: 0.7, depthWrite: false }));
-  const blobMat = keep(new THREE.MeshBasicMaterial({ map: keep(spotTexture(0.6)), color: 0x000000, transparent: true, opacity: 0.85, depthWrite: false }));
+  const blobMat = keep(new THREE.MeshBasicMaterial({ map: keep(street ? contactTexture(true) : spotTexture(0.6)), color: 0x000000, transparent: true, opacity: street ? 0.92 : 0.85, depthWrite: false }));
+  const aoMat = keep(new THREE.MeshBasicMaterial({ map: keep(contactTexture(false)), color: 0x000000, transparent: true, opacity: 1, depthWrite: false }));
   // the stand-in coupe's parts other than its paint
   const coupeMats = {
     glass: keep(new THREE.MeshStandardMaterial({ color: 0x101c30, metalness: 0.9, roughness: 0.08, envMap: env, envMapIntensity: 1.5 })),
@@ -178,8 +212,9 @@ export function createStand({ renderer, el }){
     const outline = new THREE.Group(); outline.visible = false;
     for(const g of outlineGeometry()) outline.add(new THREE.LineSegments(g, outlineMat));
     turn.add(blob, outline); group.add(disc, edge, halo, under, turn); scene.add(group);
+    if(street){ disc.visible = edge.visible = halo.visible = under.visible = false; }
     // x, v, target: where it is across the stand, its speed, where it is going
-    return { group, turn, blob, outline, inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0 };
+    return { group, turn, blob, outline, ao: [], inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0 };
   }
 
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
@@ -206,6 +241,7 @@ export function createStand({ renderer, el }){
       slot.turn.add(inst.root);
       slot.blob.scale.set(inst.size.x * 1.55, inst.size.z * 1.22, 1);
       slot.blob.visible = true;
+      if(street) contact(slot, inst);
       if(slot === cur) describe();
       return inst;
     }).catch(e => {
@@ -218,9 +254,27 @@ export function createStand({ renderer, el }){
       slot.turn.add(inst.root);
       slot.blob.scale.set(inst.size.x * 1.55, inst.size.z * 1.22, 1);
       slot.blob.visible = true;
+      if(street) contact(slot, inst);
       if(slot === cur) describe();
       return inst;
     });
+  }
+  // On the street: the ambient occlusion under the body, a soft rounded rectangle the size of
+  // the footprint (dark in its middle, fading out a hand past the sills), and under each tyre
+  // its contact: a small, tight, near-black spot the width of the tread, found from the wheel
+  // pivots. Both lie over the reflection, so the mirrored car meets the real one at the tyres.
+  function contact(slot, inst){
+    for(const m of slot.ao) slot.turn.remove(m);
+    slot.ao.length = 0;
+    slot.blob.scale.set(inst.size.x * 1.32, inst.size.z * 1.22, 1);
+    slot.turn.updateMatrixWorld(true);
+    const v = new THREE.Vector3(), tw = Math.max(0.2, inst.size.x * 0.12), tl = 0.36;
+    let wheels = inst.wheels.map(w => slot.turn.worldToLocal(w.getWorldPosition(v.clone())));
+    if(!wheels.length){ const hx = inst.size.x * 0.4, hz = inst.size.z * 0.32; wheels = [[hx, hz], [-hx, hz], [hx, -hz], [-hx, -hz]].map(([x, z]) => new THREE.Vector3(x, 0, z)); }
+    for(const w of wheels){
+      const m = new THREE.Mesh(flatGeo, aoMat); m.rotation.x = -Math.PI / 2; m.position.set(w.x, 0.006, w.z); m.scale.set(tw * 1.7, tl * 1.9, 1);
+      slot.turn.add(m); slot.ao.push(m);
+    }
   }
   function drop(slot){
     slot.alive = false; slot.token++;
@@ -284,7 +338,7 @@ export function createStand({ renderer, el }){
   /* ---------- turning: by itself, by hand, coasting after a flick ---------- */
   // angle: where it is; vel: rad/s now; idle: s since the last touch.
   const spin = { angle: 0.6, vel: 0, idle: IDLE, grab: null };
-  const autoSpeed = () => reduced.matches ? 0 : AUTO;
+  const autoSpeed = () => reduced.matches || street ? 0 : AUTO;
   spin.vel = autoSpeed();
   const hist = [];                                   // the last moves: [t ms, x px]
   function down(e){
@@ -341,7 +395,10 @@ export function createStand({ renderer, el }){
 
   /* ---------- drawing ---------- */
   let last = 0, disposed = false;
-  const box = { w: 0, h: 0 }, P = new THREE.Vector3(), anchor = { x: 0, y: 0, sway: 0 };
+  const box = { w: 0, h: 0, hz: 0 }, P = new THREE.Vector3(), anchor = { x: 0, y: 0, sway: 0 };
+  // street: where the backdrop's horizon is (css px from the top), and how far under it the
+  // tyres stand (a share of the box's height); the host sets it (setStreet)
+  const streetAt = { horizon: 0, below: 0.06 };
   // The box on screen, the camera framed to it, and where the podium stands in it (for the
   // backdrop behind: its light pool). Null while the box is hidden or off screen.
   function place(){
@@ -350,7 +407,24 @@ export function createStand({ renderer, el }){
     const vw = renderer.domElement.clientWidth || innerWidth, vh = renderer.domElement.clientHeight || innerHeight;
     if(r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
     if(el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return null;   // in a hidden screen
-    if(r.width !== box.w || r.height !== box.h){
+    if(street && (r.width !== box.w || r.height !== box.h || box.hz !== streetAt.horizon)){
+      box.w = r.width; box.h = r.height; box.hz = streetAt.horizon;
+      // the car takes a share of the width (more on a narrow screen), seen from ~4° up, and
+      // its contact line is put a little under the horizon of the backdrop's street
+      const aspect = r.width / r.height, vFov = camera.fov * Math.PI / 180;
+      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+      const share = aspect < 0.8 ? 0.9 : aspect < 1.3 ? 0.62 : 0.42;
+      const dist = 2.45 / (share * Math.tan(hFov / 2));
+      span = dist * Math.tan(hFov / 2) + 3.5;
+      const elev = 0.07;
+      camera.aspect = aspect; camera.clearViewOffset();
+      camera.position.set(0, LOOK.y + Math.sin(elev) * dist, Math.cos(elev) * dist);
+      camera.lookAt(LOOK); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+      P.set(0, 0, 0).project(camera);
+      const at = (1 - P.y) / 2 * r.height, want = (streetAt.horizon - r.top) + r.height * streetAt.below;
+      camera.setViewOffset(r.width, r.height, 0, at - want, r.width, r.height);
+      camera.updateProjectionMatrix();
+    } else if(!street && (r.width !== box.w || r.height !== box.h)){
       box.w = r.width; box.h = r.height;
       // frame the whole podium in any box: wide boxes fit its height, narrow ones its width
       const aspect = r.width / r.height, vFov = camera.fov * Math.PI / 180;
@@ -365,7 +439,7 @@ export function createStand({ renderer, el }){
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld();                           // (render() would, but the anchor below is now)
     }
-    P.set(0, -DISC_H / 2, 0).project(camera);
+    P.set(0, street ? 0 : -DISC_H / 2, 0).project(camera);
     anchor.x = r.left + (P.x + 1) / 2 * r.width; anchor.y = r.top + (1 - P.y) / 2 * r.height;
     anchor.sway = Math.sin(spin.angle);
     return r;
@@ -389,11 +463,58 @@ export function createStand({ renderer, el }){
     renderer.setViewport(x, y, r.width, r.height);
     renderer.setScissor(x, y, r.width, r.height);
     renderer.setScissorTest(true);
+    if(street) mirror();
     renderer.render(scene, camera);
     renderer.setScissorTest(scissor);
     renderer.setViewport(0, 0, vw, vh);
     renderer.toneMappingExposure = exposure; renderer.autoClearColor = clearColor;
     return true;
+  }
+
+  // The reflection on the wet street: the cars flipped under the ground and drawn first,
+  // with nothing else of the stand (shadows, outlines) in that pass, marking the stencil where
+  // they are. Then thin dark sheets of "water" at the ground and every 12 cm under it, drawn
+  // only over the reflection: a point of the mirrored car h metres down is seen through about
+  // h / 12 cm of them, so the reflection is clear at the tyres and fades out with height, as on
+  // asphalt; nothing around the car is darkened.
+  const SHEETS = 9, sheetScene = new THREE.Scene();
+  const sheetMat = (op) => keep(new THREE.MeshBasicMaterial({ color: 0x05060d, transparent: true, opacity: op, depthWrite: false, toneMapped: false,
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp }));
+  if(street){
+    const sheetGeo = keep(new THREE.PlaneGeometry(60, 60)), top = sheetMat(0.55), under = sheetMat(0.3);
+    for(let i = 0; i < SHEETS; i++){ const m = new THREE.Mesh(sheetGeo, i ? under : top); m.rotation.x = -Math.PI / 2; m.position.y = -0.002 - i * 0.12; m.renderOrder = i; sheetScene.add(m); }
+  }
+  const saved = [], seen = new Set();
+  function mirror(){
+    const shown = [cur, gone].filter(s => s && s.inst);
+    if(!shown.length) return;
+    for(const s of [cur, gone]) if(s){ s.blob.visible = false; for(const m of s.ao) m.visible = false; s.outline.visible = false; }
+    for(const s of shown){
+      s.turn.scale.y = -1;
+      // (a material shared by several meshes, the four tyres, is changed and put back once)
+      s.inst.root.traverse(o => { if(!o.isMesh) return; for(const m of [].concat(o.material)){ if(seen.has(m)) continue; seen.add(m);
+        saved.push([m, m.stencilWrite, m.stencilRef, m.stencilFunc, m.stencilZPass]);
+        m.stencilWrite = true; m.stencilRef = 1; m.stencilFunc = THREE.AlwaysStencilFunc; m.stencilZPass = THREE.ReplaceStencilOp; } });
+    }
+    const e = renderer.toneMappingExposure; renderer.toneMappingExposure = e * 0.7;
+    renderer.clear(false, false, true);
+    renderer.render(scene, camera);
+    renderer.toneMappingExposure = e;
+    for(const [m, sw, sr, sf, sz] of saved){ m.stencilWrite = sw; m.stencilRef = sr; m.stencilFunc = sf; m.stencilZPass = sz; }
+    saved.length = 0; seen.clear();
+    for(const s of [cur, gone]) if(s){ s.turn.scale.y = 1; s.blob.visible = !!s.inst; for(const m of s.ao) m.visible = true; s.outline.visible = !s.inst; }
+    // the sheets lie where the car stands now (it may be sliding across)
+    sheetScene.position.copy(cur.group.position);
+    const auto = renderer.autoClear; renderer.autoClear = false;
+    renderer.render(sheetScene, camera);
+    renderer.autoClear = auto;
+    renderer.clear(false, true, true);
+  }
+  const glow = new THREE.Color();
+  function setGlow(c){
+    glow.set(c);
+    bounce.color.copy(glow);
+    rim.color.copy(glow).lerp(new THREE.Color(0xffffff), 0.35);
   }
 
   function dispose(){
@@ -405,7 +526,9 @@ export function createStand({ renderer, el }){
   }
 
   return {
-    setCar, repaint, frame, dispose, scene, camera,
+    setCar, repaint, frame, dispose, scene, camera, setGlow,
+    // street: the backdrop's horizon (css px) and how far under it the tyres stand
+    setStreet(horizon, below = streetAt.below){ streetAt.horizon = horizon; streetAt.below = below; },
     get car(){ return cur.inst; },
     // the podium on screen now ({x, y, sway}, css px), or null while the box is not shown;
     // the host calls it before drawing what is behind, in the same frame

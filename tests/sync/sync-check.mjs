@@ -32,11 +32,13 @@ import { launchOptions, onGpu } from '../browser.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
-const PORT = 2577, PROXY = 2578;
+const PORT = +process.env.ND_PORT || 2577, PROXY = PORT + 1;   // ND_PORT: another port pair when these are taken
 const RUNS = Number(opt('runs', 1));
 const ONE_WAY = Number(opt('ping', 75)), JITTER = Number(opt('jitter', 25));   // ms each way
 const MODE = opt('mode', 'track');
-const CARD = MODE === 'traffic' ? '#mTraffic' : '#mTrack';
+const CARD = MODE === 'traffic' ? '#rTraffic' : '#rTrack';   // the room's mode, on the home deck
+// a home card: a click brings it to the middle, a click on the card in the middle goes in
+const tap2 = async (p, sel) => { await p.click(sel); await new Promise(r => setTimeout(r, 400)); if (await p.$eval(sel, e => !e.closest('[inert]') && e.getAttribute('aria-selected') === 'true').catch(() => false)) await p.click(sel); await new Promise(r => setTimeout(r, 400)); };
 // highway: two players' pictures of the same bot at the same server moment (each
 // player's clock error taken out, see below), and how far each clock may be off
 const LIMIT_BOT_MEAN = 0.3, LIMIT_BOT_P95 = 1.0, LIMIT_CLOCK = 40;
@@ -135,10 +137,10 @@ async function runOnce(browser) {
   const A = await openPlayer(browser, url, errors, 'A'), B = await openPlayer(browser, url, errors, 'B');
   let step = 'create room';
   try {
-    await A.evaluate(() => localStorage.setItem('nightdrift.name', 'A')); await A.click('#goOnline'); await A.click(CARD);   // the mode card makes the room
+    await A.evaluate(() => localStorage.setItem('nightdrift.name', 'A')); await tap2(A, '#goOnline'); await tap2(A, '#fHost'); await tap2(A, CARD);   // the mode card makes the room
     await A.waitForFunction(() => document.getElementById('roomCode').textContent !== '----');
     const code = (await A.innerText('#roomCode')).trim();
-    step = 'B joins'; await B.evaluate(() => localStorage.setItem('nightdrift.name', 'B')); await B.click('#goOnline'); await B.fill('#codeIn', code); await B.click('#joinRoom');
+    step = 'B joins'; await B.evaluate(() => localStorage.setItem('nightdrift.name', 'B')); await tap2(B, '#goOnline'); await tap2(B, '#fJoin'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
     await sleep(1500);                                   // clock sync settles
     step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false'); await A.click('#startRace');   // B: «Готово», then A: «Старт»
