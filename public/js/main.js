@@ -386,8 +386,13 @@ function frame(now){
   G.mode.hud(car,dt,info);
   if(G.toastT>0){ G.toastT-=dt; if(G.toastT<=0) $('toast').classList.remove('on'); }
   G.mode.drawMap(car);
+  if(hitDebug) hitDebug.frame(now);
   renderer.render(scene,camera);
 }
+// ?debug=hit: the cars' collision shapes, the walls the collision code uses and the drawn
+// ones, the last contact (core/hitdebug.js; not even loaded without the flag)
+let hitDebug=null;
+if(/[?&]debug=hit\b/.test(location.search)) import('./core/hitdebug.js').then(m=>{ hitDebug=m.createHitDebug({ car, G, NET, bots:()=>trafficMod&&trafficMod.botSource() }); });
 if(/[?&]debug/.test(location.search)) window.__nd={car,NET,G,camera,renderer,scene,get traffic(){ return trafficMod&&trafficMod.traffic; },get remote(){ return trafficMod&&trafficMod.remote; },setMode};
 requestAnimationFrame(frame);
 // The other cars' models load in the background once the first menu frame is up, one by

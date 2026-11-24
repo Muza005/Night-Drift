@@ -19,6 +19,7 @@
 // braked is always a soft hit.
 import { TYPES, STEP } from './sim.js';
 import { BUMP, hitImpulse } from '../../net/bump.js';
+import { HITLOG } from '../../core/hitlog.js';
 
 export const HARD_HIT = 9, HARD_SIDE = 14;       // m/s of closing speed: into a bot's back or front / into its side
 export const BOT_MASS = { sedan: 1.5, hatch: 1.3, van: 2, truck: 3, bus: 3 };   // the player's car = 1
@@ -76,6 +77,7 @@ export function collideWithTraffic(car, sim, hooks) {
     const push = Math.min(C.pen, BUMP.PUSH);
     car.x += C.nx * push; car.z += C.nz * push;
     const vn = (car.vx - P.vx) * C.nx + (car.vz - P.vz) * C.nz;
+    if (HITLOG.on) HITLOG.push('bot', C.cx, C.cz, -C.nx, -C.nz, -vn, push);   // (?debug=hit: n into the bot, the push out)
     if (vn >= 0) continue;                                       // already moving apart
     const carInto = -(car.vx * C.nx + car.vz * C.nz), botInto = P.vx * C.nx + P.vz * C.nz;
     const M = BOT_MASS[T.name], H = hitImpulse(car, P, C, 1, M);

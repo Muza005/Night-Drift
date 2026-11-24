@@ -23,6 +23,7 @@ const newSeed = () => (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
 export const traffic = createTraffic(1);
 export const remote = createRemoteTraffic({ now: serverNow, send: (t, m) => NET.room && NET.room.send(t, m), rtt: () => NET.rtt });
 let src = traffic;
+export const botSource = () => src;          // (?debug=hit draws the bots in use)
 
 // Online crash: stopped and blinking for 3 s, then back on a free lane at traffic
 // speed and 1.5 s in which bots and other cars pass through (the server keeps the same

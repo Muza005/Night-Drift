@@ -17,7 +17,7 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2599;
+const PORT = Number(process.env.ND_PORT) || 2599;   // ND_PORT=4120 npm run test:perf: another port
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {

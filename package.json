@@ -6,6 +6,8 @@
     "test": "node --test tests/*.test.mjs",
     "test:sync": "node tests/sync/sync-check.mjs",
     "test:hits": "node tests/sync/hits/hits.mjs",
+    "test:walls": "node tests/sync/walls/walls.mjs",
+    "scan:maps": "node tests/tools/map-scan.mjs",
     "test:stand": "node tests/stand/stand-check.mjs",
     "test:garage": "node tests/garage/garage-check.mjs",
     "test:lobby": "node tests/lobby/lobby-check.mjs",

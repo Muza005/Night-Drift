@@ -6,8 +6,12 @@
 // local radius (geometry.js safeOffsets) and checked for folds, so on a hairpin tighter
 // than the offset the line narrows instead of looping over itself ("broken curbs").
 import { scene, cv, tex, glowTex, winTex } from '../../core/render.js';
-import { P, NM, TG, DIST, Y, TB, RAD, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, SHORTCUTS, CEIL, LEVELS, safeOffsets, onMapChange } from './geometry.js';
+import { P, NM, TG, DIST, Y, TB, RAD, BRIDGE, MAP, N, ROAD, HALF, CURB, WALL, START, SHORTCUTS, CEIL, LEVELS, onMapChange } from './geometry.js';
 import { buildParking, hazardMat } from './scene-parking.js';
+// the offset lines, the shortcuts' gaps in the main road's walls, the distance to the centre
+// line and the strips' heights: shared with the ?debug=hit overlay and the map scan
+// (tests/tools/map-scan.mjs), so what they check is what is drawn
+import { offsetLine, inCut, mainDist, drawnWalls, STRIP_Y, GROUND_Y } from './wall-lines.js';
 
 // Road texture: 512 px across the 16 m road (32 px/m), one tile = ROAD_TILE m along it.
 // Edge lines 5 px = 0.156 m, 0.5 m in from the asphalt edge; centre line 4 px = 0.125 m,
@@ -64,16 +68,6 @@ const checkerTex = (() => {
   const [c,g]=cv(256,32); for(let x=0;x<16;x++) for(let y=0;y<2;y++){ g.fillStyle=(x+y)%2?'#111':'#f2f2f2'; g.fillRect(x*16,y*16,16,16);} return tex(c,false);
 })();
 
-// An offset line along the track: off (m, > 0 left) or a per-point array. Returns the
-// points x, y (on the banked road surface plus yOff), z. A point that would step backwards
-// along the track (a fold) is pulled onto the previous one, so no quad turns inside out.
-function offsetLine(off, yOff){
-  const O=typeof off==='number'?safeOffsets(off):off, x=new Float64Array(N), y=new Float64Array(N), z=new Float64Array(N);
-  for(let i=0;i<N;i++){ const o=O[i]; x[i]=P[i].x+NM[i].x*o; z[i]=P[i].z+NM[i].z*o; y[i]=Y[i]+o*TB[i]+yOff; }
-  for(let pass=0;pass<2;pass++) for(let i=0;i<N;i++){ const j=(i+1)%N, t=TG[i];
-    if((x[j]-x[i])*t.x+(z[j]-z[i])*t.z<0){ x[j]=x[i]; z[j]=z[i]; } }
-  return {x,y,z};
-}
 // skip(i): leave out the piece from point i to i+1
 function ribbon(o0,o1,yOff,vScale,colorFn,skip){
   const pos=[],uv=[],nor=[],col=[]; const L0=offsetLine(o0,yOff), L1=offsetLine(o1,yOff);
@@ -168,17 +162,6 @@ function cutWall(sc, o, y0, y1, skip){
     pos.push(ax,ya+y0,az, bx,yb+y0,bz, ax,ya+y1,az, ax,ya+y1,az, bx,yb+y0,bz, bx,yb+y1,bz); }
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.computeVertexNormals(); return g;
 }
-// whether (x, z) is inside some shortcut's walls (plus `m` m): the main road's walls open there
-function inCut(x, z, m=0){
-  for(const sc of SHORTCUTS){ const b=sc.box; if(x<b[0]-m || x>b[1]+m || z<b[2]-m || z>b[3]+m) continue;
-    let k=0, bd=1e18; for(let i=0;i<sc.n;i++){ const dx=x-sc.x[i], dz=z-sc.z[i], d=dx*dx+dz*dz; if(d<bd){bd=d;k=i;} }
-    const rx=x-sc.x[k], rz=z-sc.z[k], along=rx*sc.tx[k]+rz*sc.tz[k];
-    if((k===0 && along<0) || (k===sc.n-1 && along>0)) continue;
-    if(Math.abs(rx*sc.nx[k]+rz*sc.nz[k])<=sc.wall+m) return true; }
-  return false;
-}
-// how far (x, z) is from the main road's centre line (the nearest of every second point)
-function mainDist(x, z){ let bd=1e18; for(let i=0;i<N;i+=2){ const dx=P[i].x-x, dz=P[i].z-z, d=dx*dx+dz*dz; if(d<bd) bd=d; } return Math.sqrt(bd); }
 
 // The track points (every second one) within `r` m of horizontal point (x, z), at any
 // height (for lamps and pillars: nothing stands on another road or under a bridge).
@@ -197,20 +180,20 @@ function build(){
   if(groundMat.map!==theme.ground){ groundMat.map=theme.ground; groundMat.needsUpdate=true; }
   runoffMat.color.setHex(theme.runoff);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400,2400).rotateX(-Math.PI/2), groundMat);
-  if(!flatMap) ground.position.set(cx,-.02,cz);   // («Ночной город» keeps its ground where it always was)
+  if(!flatMap) ground.position.set(cx,GROUND_Y,cz);   // («Ночной город» keeps its ground where it always was)
   ground.receiveShadow = true; B.add(ground);
 
   // (a car park: concrete off the street, on its floors, ramps and roof)
   const deckRoad = i => LEVELS && (CEIL[i]<8 || Y[i]>.3) && (CEIL[(i+1)%N]<8 || Y[(i+1)%N]>.3);
-  for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10, null, LEVELS ? deckRoad : undefined), runoffMat); m.receiveShadow=true; B.add(m);
-    if(LEVELS){ const c=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, .012, 10, null, i=>!deckRoad(i)), parkRunoffMat); c.receiveShadow=true; B.add(c); } }
+  for(const s of [1,-1]){ const m=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, STRIP_Y.runoff, 10, null, LEVELS ? deckRoad : undefined), runoffMat); m.receiveShadow=true; B.add(m);
+    if(LEVELS){ const c=new THREE.Mesh(ribbon(s*(HALF+CURB), s*WALL, STRIP_Y.runoff, 10, null, i=>!deckRoad(i)), parkRunoffMat); c.receiveShadow=true; B.add(c); } }
   // (a car park: its own floor under the ceilings, asphalt in the open)
   const under = i => CEIL[i] < 8 && CEIL[(i+1)%N] < 8;
-  const road = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE, null, LEVELS ? under : undefined), roadMat);
+  const road = new THREE.Mesh(ribbon(-HALF, HALF, STRIP_Y.road, ROAD_TILE, null, LEVELS ? under : undefined), roadMat);
   road.receiveShadow = true; B.add(road);
-  if(LEVELS){ const r = new THREE.Mesh(ribbon(-HALF, HALF, .02, ROAD_TILE, null, i => !under(i)), parkRoadMat); r.receiveShadow = true; B.add(r); }
+  if(LEVELS){ const r = new THREE.Mesh(ribbon(-HALF, HALF, STRIP_Y.road, ROAD_TILE, null, i => !under(i)), parkRoadMat); r.receiveShadow = true; B.add(r); }
   const zebra = MAP.curb==='zebra';
-  for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,.035,1,zebra?()=>cConcrete:i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; B.add(m); }
+  for(const [a,b] of [[HALF,HALF+CURB],[-HALF-CURB,-HALF]]){ const m=new THREE.Mesh(ribbon(a,b,STRIP_Y.curb,1,zebra?()=>cConcrete:i=>Math.floor(DIST[i]/3)%2?cRed:cWhite), curbMat); m.receiveShadow=true; B.add(m); }
   if(zebra){
     // the hatching's width: up to 3.2 m on the outside of turns under ~110 m radius, widest
     // at the tightest (a running maximum over ±12 points, then smoothed over ±6)
@@ -221,14 +204,16 @@ function build(){
     for(const s of [1,-1]){
       const on=i=>sm[i]*s>.08, O0=new Float64Array(N), O1=new Float64Array(N);
       for(let i=0;i<N;i++){ O0[i]=s*(HALF-.12); O1[i]=s*(HALF+(on(i)?.6+2.6*Math.abs(sm[i]):.6)); }
-      const m=new THREE.Mesh(ribbon(O0,O1,.04,2.2,null,i=>!on(i)||!on((i+1)%N)||(SHORTCUTS.length&&inCut(P[i].x+NM[i].x*O1[i],P[i].z+NM[i].z*O1[i]))), zebraMat);
+      const m=new THREE.Mesh(ribbon(O0,O1,STRIP_Y.zebra,2.2,null,i=>!on(i)||!on((i+1)%N)||(SHORTCUTS.length&&inCut(P[i].x+NM[i].x*O1[i],P[i].z+NM[i].z*O1[i]))), zebraMat);
       m.renderOrder=1; B.add(m); }
   }
-  for(const s of [1,-1]){
+  // the walls' lines and gaps (wall-lines.js drawnWalls: what ?debug=hit and the map scan check)
+  const DW=drawnWalls();
+  for(const W of DW.main){ const s=W.s;
     // the neon strip 2 cm inside the wall, also where a hairpin pulls the wall in; open
     // where a shortcut passes through
-    const O=safeOffsets(s*WALL), In=O.map(o=>o-Math.sign(o)*.02);
-    const gap=SHORTCUTS.length ? (()=>{ const g=new Uint8Array(N); for(let i=0;i<N;i++) g[i]=inCut(P[i].x+NM[i].x*O[i], P[i].z+NM[i].z*O[i], .3)?1:0; return i=>g[i]||g[(i+1)%N]; })() : null;
+    const O=W.O, In=O.map(o=>o-Math.sign(o)*.02);
+    const gap=SHORTCUTS.length ? i=>!W.on[i] : null;
     B.add(new THREE.Mesh(vribbon(O,0,.95,gap), LEVELS ? barrierMat : wallMat));
     B.add(new THREE.Mesh(vribbon(In,LEVELS?.62:.78,.95,gap), LEVELS ? hazardSide : neonMat[s]));
   }
@@ -237,12 +222,12 @@ function build(){
   for(const sc of SHORTCUTS){
     const dm=Float64Array.from({length:sc.n},(_,k)=>mainDist(sc.x[k],sc.z[k]));
     const onMain=(k,r)=>dm[k]<r||dm[k+1]<r;
-    B.add(new THREE.Mesh(cutRibbon(sc,-sc.wall,sc.wall,.01,10,k=>onMain(k,WALL-.5)), runoffMat));
+    B.add(new THREE.Mesh(cutRibbon(sc,-sc.wall,sc.wall,STRIP_Y.cutRunoff,10,k=>onMain(k,WALL-.5)), runoffMat));
     // (its asphalt runs on over the main road's curb up to the edge of its asphalt, a little
     // above the curb, so the mouth is one clean surface)
-    const road=new THREE.Mesh(cutRibbon(sc,-sc.half,sc.half,.04,6,k=>dm[k]<HALF-.3&&dm[k+1]<HALF-.3), cutMat); road.receiveShadow=true; B.add(road);
-    for(const [a,b] of [[sc.half,sc.half+.5],[-sc.half-.5,-sc.half]]) B.add(new THREE.Mesh(cutRibbon(sc,a,b,.035,1,k=>onMain(k,HALF+CURB),k=>Math.floor(sc.d[k]/1.5)%2?cRed:cWhite), curbMat));
-    for(const s of [1,-1]){ const skip=k=>onMain(k,WALL);
+    const road=new THREE.Mesh(cutRibbon(sc,-sc.half,sc.half,STRIP_Y.cutRoad,6,k=>dm[k]<HALF-.3&&dm[k+1]<HALF-.3), cutMat); road.receiveShadow=true; B.add(road);
+    for(const [a,b] of [[sc.half,sc.half+.5],[-sc.half-.5,-sc.half]]) B.add(new THREE.Mesh(cutRibbon(sc,a,b,STRIP_Y.cutCurb,1,k=>onMain(k,HALF+CURB),k=>Math.floor(sc.d[k]/1.5)%2?cRed:cWhite), curbMat));
+    for(const s of [1,-1]){ const C=DW.cuts.find(c=>c.sc===sc && c.s===s), skip=k=>!C.on[k];
       B.add(new THREE.Mesh(cutWall(sc,s*sc.wall,0,.95,skip), wallMat));
       B.add(new THREE.Mesh(cutWall(sc,s*(sc.wall-.02),.78,.95,skip), neonMat[s])); }
   }

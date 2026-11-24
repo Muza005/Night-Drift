@@ -29,6 +29,7 @@
      elsewhere drawn only (lift()). */
 import { carMass, carById } from '../core/cars.js';
 import { stepCar } from '../core/physics.js';
+import { HITLOG } from '../core/hitlog.js';
 
 export const BUMP = Object.freeze({
   R: 1.05, OFF: 1.15,     // circle radius, and how far ahead and behind the middle each circle sits (m)
@@ -155,17 +156,20 @@ export function collideStep(car, g, mem, ctx) {
   const rv = { vx: g.rvx ?? g.vx, vz: g.rvz ?? g.vz };
   const real = Math.hypot(car.vx - rv.vx, car.vz - rv.vz);
   const vn = (car.vx - g.vx) * C.nx + (car.vz - g.vz) * C.nz;
+  // (?debug=hit: the contact, n into the other car, and how far our car was pushed out)
+  const log = p => { if (HITLOG.on) HITLOG.push('car', C.cx, C.cz, -C.nx, -C.nz, -vn, p); };
   if (vn >= 0) {
     // moving apart: only the push out, and only by the side that decided the hit
-    if (!recent) return { wait: true };
+    if (!recent) { log(0); return { wait: true }; }
     const p = Math.min(BUMP.PUSH, C.pen * mine);
     car.x += C.nx * p; car.z += C.nz * p;
+    log(p);
     return { impact: 0, other: null };
   }
   // the other side decided a hit a moment ago: that was this contact
-  if (ctx.now - mem.gotAt < BUMP.QUIET) { mem.role = 'wait'; return { wait: true }; }
+  if (ctx.now - mem.gotAt < BUMP.QUIET) { mem.role = 'wait'; log(0); return { wait: true }; }
   if (!mem.role) { mem.role = judges(car, g) ? 'judge' : 'wait'; mem.since = ctx.now; }
-  if (mem.role === 'wait') return { wait: true };
+  if (mem.role === 'wait') { log(0); return { wait: true }; }
   const H = hitImpulse(car, g, C, ctx.mMe, ctx.mOther, real);
   if (!H) return null;
   // one contact hands out at most what its closing speed can give
@@ -182,6 +186,7 @@ export function collideStep(car, g, mem, ctx) {
   mn.vx += H.me.vx; mn.vz += H.me.vz; mn.w += H.me.w;
   const p = Math.min(BUMP.PUSH, C.pen * mine);
   car.x += C.nx * p; car.z += C.nz * p;
+  log(p);
   const q = Math.min(BUMP.PUSH, C.pen - p);
   mem.judgedAt = ctx.now;
   // the other car's share goes out (added up while the cars scrape, sent every SEND_GAP)

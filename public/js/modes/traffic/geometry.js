@@ -7,6 +7,8 @@
 // keeps each road chunk in its own local coordinates (see scene.js), so the picture
 // does not shake far from the start either.
 import { wallKeep, wallAlign } from '../../core/physics.js';
+import { HITLOG } from '../../core/hitlog.js';
+import { WALL_ALLOW } from '../../core/contact.js';
 
 export const LANES = 4, LANE_W = 4;
 export const HALF = LANES * LANE_W / 2;        // 8 m: edge of the asphalt
@@ -44,10 +46,11 @@ export function startPose(slot) {
 // drag as there (exp(-0.45·dt)) holds full throttle to ~83 km/h, so the shoulder is
 // no way round the traffic. The rails stop the car before the grass.
 export function constrainToHighway(car, dt, hooks) {
-  const lat = car.x, lim = RAIL - 1.25;
+  const lat = car.x, lim = RAIL - WALL_ALLOW;
   if (Math.abs(lat) > lim) {
     const s = Math.sign(lat), push = Math.abs(lat) - lim; car.x -= s * push;
     const vn = car.vx * s;
+    if (HITLOG.on) HITLOG.push('wall', car.x + s * WALL_ALLOW, car.z, s, 0, vn, push);   // (?debug=hit)
     wallAlign(car, s, 0, dt);
     if (vn > 0) { const k = wallKeep(vn); car.vx -= s * vn * 1.45; car.vx *= k; car.vz *= k; if (vn > 2.5) hooks.onWall(vn); }
   }
@@ -61,7 +64,7 @@ export function constrainToHighway(car, dt, hooks) {
 // through it (up to 8 m beyond, measured at 200 km/h). So a prediction past the rail is
 // bounced back the way the rail bounces the car (keeping 45 % of the overshoot).
 export function keepOnRoad(p) {
-  const lim = RAIL - 1.25, over = Math.abs(p.x) - lim;
+  const lim = RAIL - WALL_ALLOW, over = Math.abs(p.x) - lim;
   if (over > 0) p.x = Math.sign(p.x) * (lim - Math.min(1.5, 0.45 * over));
   return p;
 }

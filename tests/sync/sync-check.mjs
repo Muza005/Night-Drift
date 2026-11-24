@@ -7,6 +7,7 @@
 //                                           see the server's bots in the same places)
 //   npm run test:sync -- --headed         (two real windows on the GPU instead of software
 //                                           rendering at a few frames a second)
+//   ND_PORT=4110 npm run test:sync        (the server on 4110, the proxy on 4111)
 //
 // What it does:
 // 1. Starts the game server and a proxy that adds ~150 ms of ping with jitter
@@ -32,7 +33,8 @@ import { launchOptions, onGpu } from '../browser.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
-const PORT = 2577, PROXY = 2578;
+// ports: ND_PORT for the game server, the proxy on the next one (default 2577, 2578)
+const PORT = Number(process.env.ND_PORT) || 2577, PROXY = PORT + 1;
 const RUNS = Number(opt('runs', 1));
 const ONE_WAY = Number(opt('ping', 75)), JITTER = Number(opt('jitter', 25));   // ms each way
 const MODE = opt('mode', 'track');

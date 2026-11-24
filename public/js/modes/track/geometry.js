@@ -12,6 +12,8 @@
 import { wallKeep, wallAlign } from '../../core/physics.js';
 import { closedCurve } from './curve.js';
 import { MAPS, DEFAULT_MAP } from './maps/index.js';
+import { HITLOG } from '../../core/hitlog.js';
+import { WALL_ALLOW } from '../../core/contact.js';
 
 export const CURB = 1.4, GRAV = 9.81;
 export let MAP = null, N = 0, ROAD = 16, HALF = 8, WALL = 14, START = 0, TRACK_LEN = 0, SC = 1, FLAT = true;
@@ -149,7 +151,7 @@ function buildShortcut(g, s, k){
   const half = (s.width || 5) / 2, wall = half + CUT_VERGE, m = wall + 2;
   let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for(let i=0;i<n;i++){ x0=Math.min(x0,x[i]); x1=Math.max(x1,x[i]); z0=Math.min(z0,z[i]); z1=Math.max(z1,z[i]); }
   const span = (X - E + N) % N, skipped = (DIST[X] - DIST[E] + TRACK_LEN) % TRACK_LEN;
-  return { k, E, X, span, n, x, z, y, d, tx, tz, nx, nz, gr, len, half, wall, lim: wall - 1.25,
+  return { k, E, X, span, n, x, z, y, d, tx, tz, nx, nz, gr, len, half, wall, lim: wall - WALL_ALLOW,
     box: [x0-m, x1+m, z0-m, z1+m], saves: skipped - len };
 }
 // The lap's checkpoints: about one every 150 m (at least 6), counted from the start line,
@@ -298,7 +300,7 @@ export function keepInWalls(p, memo){
   if(LEVELS && q0.y!==undefined){ const dx=P[i].x-p.x, dz=P[i].z-p.z, w=WALL+1;
     if(dx*dx+dz*dz>w*w || Math.abs(Y[i]-q0.y)>SAME_LEVEL){ q0.idx=i; i=nearest(q0, true); } }
   memo.idx=i;
-  const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-1.25, over=Math.abs(lat)-lim;
+  const q=P[i], n=NM[i], lat=(p.x-q.x)*n.x+(p.z-q.z)*n.z, lim=WALL-WALL_ALLOW, over=Math.abs(lat)-lim;
   // on a shortcut: kept inside the shortcut's walls instead
   // (a prediction a little past a shortcut's wall is found too, and put back against it,
   // not thrown across onto the main road)
@@ -368,7 +370,7 @@ export function constrainToTrack(car,dt,hooks){
   const ni=nearest(car,false);
   moveIdx(car, ni);
   const p=P[ni], n=NM[ni];
-  const lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-1.25;
+  const lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-WALL_ALLOW;
   if(Math.abs(lat)>lim) wallHit(car, n.x, n.z, Math.sign(lat), Math.abs(lat)-lim, dt, hooks);
   car.off=Math.abs(lat)>HALF+CURB;
   if(car.off && !car.air){ const k=Math.exp(-VDRAG*dt); car.vx*=k; car.vz*=k; }   // off the asphalt: the map's verge drag (VDRAG, default .45/s)
@@ -379,6 +381,8 @@ export function constrainToTrack(car,dt,hooks){
 function wallHit(car, nx, nz, s, push, dt, hooks){
   car.x-=nx*s*push; car.z-=nz*s*push;
   const vn=(car.vx*nx+car.vz*nz)*s;
+  // (?debug=hit: the contact is where the car's allowance meets the wall)
+  if(HITLOG.on) HITLOG.push('wall', car.x+nx*s*WALL_ALLOW, car.z+nz*s*WALL_ALLOW, nx*s, nz*s, vn, push);
   wallAlign(car, nx*s, nz*s, dt);
   if(vn>0){ const k=wallKeep(vn); car.vx-=nx*s*vn*1.45; car.vz-=nz*s*vn*1.45; car.vx*=k; car.vz*=k; if(vn>2.5) hooks.onWall(vn); }
 }
@@ -433,7 +437,7 @@ function mainNear(s, car){
   for(const c of [s.E, s.X]) for(let k=-40;k<=40;k++){ const j=(c+k+N)%N, dx=P[j].x-car.x, dz=P[j].z-car.z, d=dx*dx+dz*dz; if(d<bd){bd=d;bj=j;} }
   const rx=car.x-P[bj].x, rz=car.z-P[bj].z;
   MN.j=bj; MN.lat=rx*NM[bj].x+rz*NM[bj].z;
-  MN.in=Math.abs(MN.lat)<=WALL-1.25 && Math.abs(rx*TG[bj].x+rz*TG[bj].z)<3;
+  MN.in=Math.abs(MN.lat)<=WALL-WALL_ALLOW && Math.abs(rx*TG[bj].x+rz*TG[bj].z)<3;
   return MN;
 }
 // The road surface on a shortcut: its height, grade along it; no bank, no crest.
@@ -456,7 +460,7 @@ function constrainWithCuts(car,dt,hooks){
   let s=car.cut>=0 ? SHORTCUTS[car.cut] : null, onRoad=false;
   if(!s){
     const ni=nearest(car,false); moveIdx(car, ni);
-    const p=P[ni], n=NM[ni], lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-1.25;
+    const p=P[ni], n=NM[ni], lat=(car.x-p.x)*n.x+(car.z-p.z)*n.z, lim=WALL-WALL_ALLOW;
     const c=Math.abs(lat)>HALF ? cutAt(car) : null;
     if(c && Math.abs(lat)>lim){ s=c.s; car.cut=s.k; }                    // through the gap in the wall: onto the shortcut
     else {
