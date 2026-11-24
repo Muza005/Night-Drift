@@ -55,6 +55,7 @@ function makeRow(id){
   const li = el('li', 'pl');
   const ava = el('span', 'pl-ava'); ava.setAttribute('aria-hidden', 'true');
   const num = el('b', 'pl-num'); ava.append(num); ava.insertAdjacentHTML('beforeend', CROWN);
+  if(mine) ava.append(el('span', 'pl-you', 'вы'));          // (the name keeps its room: «вы» goes up by the number)
   // my own row is a button: a click renames me
   const who = el(mine ? 'button' : 'span', 'pl-who');
   if(mine){ who.type = 'button'; who.addEventListener('click', startRename); }
@@ -87,7 +88,7 @@ function fillRow(r, id, p, i, s){
   if(ready && r.ready === false && !reduced.matches){ r.li.classList.remove('pl-yes'); void r.li.offsetWidth; r.li.classList.add('pl-yes'); }
   if(!ready) r.li.classList.remove('pl-yes');
   r.ready = ready;
-  r.name.textContent = p.name + (r.mine ? ' (вы)' : '');
+  r.name.textContent = p.name;
   r.sub.textContent = off ? 'нет связи' : (ready ? 'Готов · ' : '') + carById(p.car).name;
   r.said.textContent = `${i + 1}${host ? ', хост' : ''}${ready ? ', готов' : ''}: `;
   if(r.mine) r.who.setAttribute('aria-label', `${i + 1}${host ? ', хост' : ''}${ready ? ', готов' : ''}: ${p.name} (вы). Сменить имя`);
@@ -232,7 +233,7 @@ function startRename(){
     if(keep && v && v !== p.name && NET.room){
       NET.room.send('name', { name: v });
       try{ localStorage.setItem('nightdrift.name', v); }catch(e){}
-      r.name.textContent = v + ' (вы)';                 // shown at once; the room's answer follows
+      r.name.textContent = v;                           // shown at once; the room's answer follows
     }
     if(!keep || document.activeElement === document.body) r.who.focus({ preventScroll: true });
   };

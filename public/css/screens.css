@@ -65,9 +65,9 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
 .dcard[aria-selected="true"] > img, .dcard[aria-selected="true"] > video { opacity: 1; }
 .dcard::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, transparent 45%, rgba(5, 6, 16, 0.85)); }
 .dcard-name {
-  position: absolute; z-index: 1; inset-inline: calc(var(--deck-slant) * 0.2 + var(--sp-3)) calc(var(--deck-slant) + var(--sp-2)); inset-block-end: var(--sp-3);
-  font: 700 var(--fs-sm)/1.15 var(--f-display); color: var(--c-ink-1);
-  overflow-wrap: normal;
+  position: absolute; z-index: 1; inset-inline: calc(var(--deck-slant) * 0.2 + var(--sp-3)) calc(var(--deck-slant) + var(--sp-1)); inset-block-end: var(--sp-3);
+  font: 700 var(--fs-sm)/1.15 var(--f-display); letter-spacing: -0.01em; color: var(--c-ink-1);
+  overflow-wrap: normal; text-wrap: balance;
 }
 .dcard[aria-selected="true"] .dcard-name { color: var(--text); font-size: var(--fs-md); inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
 .dcard-bar { position: absolute; z-index: 2; inset-inline: 0 var(--deck-slant); inset-block-end: 0; block-size: 3px; background: var(--accent); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); }
@@ -76,7 +76,7 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
 .dcard-go {
   position: absolute; z-index: 2; inset-inline-end: calc(var(--deck-slant) + var(--sp-3)); inset-block-end: var(--sp-3);
   inline-size: 28px; block-size: 28px; display: grid; place-items: center; border-radius: var(--r-pill);
-  background: var(--accent); color: var(--c-night-1); opacity: 0; transition: opacity 160ms var(--ease-out);
+  background: var(--accent); color: var(--c-night-1); opacity: 0; transition: opacity 160ms var(--ease-out), scale var(--dur-press) var(--ease-out);
 }
 .dcard-go svg { inline-size: 16px; block-size: 16px; }
 .dcard[aria-selected="true"] .dcard-go { opacity: 1; transition-delay: 80ms; }
@@ -346,7 +346,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 }
 .gar-head { display: grid; justify-items: center; gap: var(--sp-1); text-align: center; }
 .gar-head h2 { margin: 0; font: 800 var(--fs-2xl)/1.05 var(--f-display); letter-spacing: -0.01em; text-wrap: balance; }
-.gar-tag { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--sp-2); max-inline-size: 62ch; color: var(--c-ink-1); font-size: var(--fs-sm); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+.gar-tag { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--sp-2); max-inline-size: min(100%, 110ch); text-wrap: balance; color: var(--c-ink-1); font-size: var(--fs-sm); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
 .gar-class { padding: 2px 10px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); color: var(--text); font: 800 var(--fs-xs)/1.6 var(--f-display); letter-spacing: 0.06em; background: var(--surface); }
 
 .gar-stage { position: relative; min-block-size: 0; }
@@ -367,7 +367,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 .gar-arrow svg { inline-size: 26px; block-size: 26px; }
 #garPrev { inset-inline-start: 0; }
 #garNext { inset-inline-end: 0; }
-.gar-arrow:active:not(:disabled) { scale: 0.92; }
+.gar-arrow:active:not(:disabled) { scale: 0.94; }
 .gar-arrow:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
 .gar-arrow:disabled { opacity: 0.28; cursor: default; }
 @media (hover: hover) and (pointer: fine) {
@@ -423,6 +423,8 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   }
 }
 @media (prefers-reduced-motion: no-preference) { .pop { translate: 0 -6px; } }
+/* closing is quicker than opening: the player has already moved on */
+.pop:not(:popover-open), .note-toast:not(:popover-open) { transition-duration: 120ms; }
 .pop h3 { margin: 0 0 var(--sp-3); font: 800 var(--fs-md) var(--f-display); }
 @supports (position-area: block-end) {
   .pop { inset: auto; margin-block-start: var(--sp-2); }
@@ -676,7 +678,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 .pl[data-off] { opacity: 0.55; }
 /* the seat's colour along the top edge */
 .pl-bar { position: absolute !important; inset: 0 0 auto; block-size: 3px; background: var(--seat); }
-.pl-ava { display: flex; align-items: center; gap: var(--sp-2); block-size: 26px; color: var(--seat); }
+.pl-ava { display: flex; align-items: center; gap: var(--sp-2); block-size: 26px; color: color-mix(in srgb, var(--seat) 84%, white); }   /* (lifted a touch: rose and blue reach 4.5:1 on the card) */
 .pl-num { font: 800 var(--fs-lg)/1 var(--f-display); }
 .pl-crown { inline-size: 22px; block-size: 15px; color: var(--record); display: none; }
 .pl[data-host] .pl-crown { display: block; }
@@ -700,13 +702,22 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 .pl-empty .pl-car { display: none; }
 
 .pl-who { align-self: end; grid-row: 3; display: grid; min-inline-size: 0; gap: 1px; text-align: start; font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; margin-inline: -4px; border-radius: var(--r-xs); }
-.pl-name { font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-name {
+  font-weight: 700; font-size: var(--fs-sm); line-height: 1.2; overflow-wrap: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+/* my seat: «вы» up by the number (the name keeps the whole width) */
+.pl-you {
+  margin-inline-start: auto; padding: 1px var(--sp-2); border-radius: var(--r-pill);
+  border: 1px solid color-mix(in srgb, var(--seat) 70%, transparent);
+  font: 700 var(--fs-xs)/1.5 var(--f-body); color: var(--text);
+}
 .pl-sub { font-size: var(--fs-xs); color: var(--text-quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl[data-ready] .pl-sub { color: var(--ready); }
 /* my card renames me: a pencil comes up on hover and focus */
-button.pl-who { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-1); cursor: text; transition: background-color var(--dur-hover) ease; }
-button.pl-who .pl-name, button.pl-who .pl-sub { grid-column: 1; }
-.pl-pen { grid-column: 2; grid-row: 1 / span 2; align-self: center; inline-size: 16px; block-size: 16px; color: var(--action); opacity: 0; transition: opacity var(--dur-hover) ease; }
+button.pl-who { position: relative; grid-template-columns: minmax(0, 1fr); cursor: text; transition: background-color var(--dur-hover) ease; }
+/* (over the end of the car's line, only while it shows: the name keeps the whole width) */
+.pl-pen { position: absolute; inset-inline-end: 4px; inset-block-end: 3px; inline-size: 16px; block-size: 16px; padding: 1px; border-radius: 50%; background: var(--c-night-1); color: var(--action); opacity: 0; transition: opacity var(--dur-hover) ease; }
 button.pl-who:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .pl-input {
@@ -813,7 +824,7 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .lob-cfg[data-guest] .stepper output { min-inline-size: 2ch; }
 .lob-cfg[data-guest] .seg-radio input:not(:checked) + span { display: none; }      /* only the value */
 .lob-cfg[data-guest] .seg-radio { background: none; border-color: transparent; padding: 0; }
-.lob-cfg[data-guest] .cfg-mode .seg-radio { flex: none; }
+.lob-cfg[data-guest] .cfg-mode { display: none; }
 
 /* the map: its diagram (as in the garage), its name, length and difficulty */
 .lob-map { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); padding-block: var(--sp-2); }
@@ -821,7 +832,7 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .lob-map-dg .dg { display: block; inline-size: 100%; block-size: 100%; }
 .lob-map-dg .dg-run { display: none; }
 .lob-map-txt { display: grid; gap: var(--sp-2); min-inline-size: 0; }
-.lob-map-name { font: 800 var(--fs-sm)/1.2 var(--f-display); text-wrap: balance; overflow-wrap: anywhere; }
+.lob-map-name { font: 800 var(--fs-sm)/1.2 var(--f-display); text-wrap: balance; overflow-wrap: break-word; }
 .lob-map-figs { display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); font-variant-numeric: tabular-nums; }
 .lob-map .map-btn { min-block-size: 36px; padding-inline: var(--sp-3); font-size: var(--fs-xs); }
 .lob-map .map-btn[hidden] { display: none; }
@@ -894,13 +905,17 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
    then its name, the seats (they scroll sideways), the panel (its rows in pairs), the button. */
 @media (max-width: 760px) {
   #pLobby {
-    --seat-w: 124px; --seat-h: 116px; --seat-slant: 14px;
+    --seat-w: 132px; --seat-h: 116px; --seat-slant: 14px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     grid-template-areas: "bar" "head" "." "seats" "side";
     gap: var(--sp-3);
   }
   .lob-mode { display: none; }                         /* the panel says the mode */
+  /* …a guest's panel does not (no switch there): the bar says it, in the title's place */
+  #pLobby:has(.lob-cfg[data-guest]) .lob-word { display: none; }
+  #pLobby:has(.lob-cfg[data-guest]) .lob-mode { display: inline; font: inherit; color: var(--text); padding: 0; border: 0; background: none; }
+  .lob-cfg[data-guest] .cfg-mode + * { border-block-start: 0; }
   .lob-code { padding-inline-start: var(--sp-3); }
   .lob-code .code { font-size: var(--fs-md); letter-spacing: 0.16em; }
   .lob-head { margin-block-start: calc(var(--sp-1) * -1); }
@@ -931,7 +946,7 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
    are short cards, the car's name one line. */
 @media (max-height: 500px) and (orientation: landscape) {
   #pLobby {
-    --lob-side: 268px; --seat-w: 112px; --seat-h: 84px; --seat-slant: 12px;
+    --lob-side: 280px; --seat-w: 120px; --seat-h: 84px; --seat-slant: 12px;
     gap: var(--sp-2) var(--sp-4);
   }
   .lobby .screen-bar .pill-btn, .lob-code { min-block-size: 38px; block-size: 38px; }
@@ -944,6 +959,7 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   .pl-ava { block-size: 20px; }
   .pl-car { inset-block-start: 24%; max-inline-size: 110px; }
   .pl-sub { display: none; }
+  .pl-name { font-size: var(--fs-xs); }
   .pl-ask { padding-block-start: var(--sp-3); }
   .pl-ask svg { inline-size: 20px; block-size: 20px; margin: 0; }
   .pl-ask-sub { display: none; }
@@ -951,7 +967,9 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   .lob-cfg > * { min-block-size: 42px; }
   .cfg-title { display: none; }
   .lob-map { padding-block: var(--sp-1); }
-  .lob-map-dg { inline-size: 64px; }
+  .lob-map-dg { inline-size: 56px; }
+  .lob-map { gap: var(--sp-2); }
+  .lob-map .map-btn { padding-inline: var(--sp-2); }
   .lob-side { gap: var(--sp-2); }
   .lob-side > .status { font-size: var(--fs-xs); min-block-size: 0; }
   .lob-side .cta { min-block-size: 44px; padding-block: 10px; font-size: var(--fs-md); }
@@ -1004,8 +1022,8 @@ body.touch #pOver .tip, body.touch #pPause .tip { display: none; }
    is drawn at (a phone held sideways draws some at 36-40 px to leave the stand its
    height). An invisible ::before grows the hit area by what is missing, the layout stays. */
 @media (pointer: coarse) {
-  .icon-btn, .pill-btn, .seg-radio label, button.pl-who { position: relative; }
-  .icon-btn::before, .pill-btn::before, .seg-radio label::before, button.pl-who::before {
+  .icon-btn, .pill-btn, .seg-radio label, button.pl-who, .swatch-btn { position: relative; }   /* (.gar-arrow is placed absolutely: its own box already holds the ::before) */
+  .icon-btn::before, .pill-btn::before, .seg-radio label::before, button.pl-who::before, .swatch-btn::before, .gar-arrow::before {
     content: ""; position: absolute;
     inset: min(0px, calc((100% - 44px) / 2));
   }
