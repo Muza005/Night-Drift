@@ -106,9 +106,19 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
 #toast{position:absolute;top:34%;left:50%;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;font-size:26px;text-align:center;opacity:0;transition:opacity .25s;text-shadow:0 0 20px rgba(62,240,255,.6);max-width:90vw;text-wrap:balance}
 #toast.on{opacity:1}
 #toast small{display:block;font-family:var(--f-num);font-weight:500;font-size:15px;color:var(--amber);margin-top:6px;text-shadow:none}
-#count{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-family:var(--f-display);font-weight:800;font-size:110px;color:var(--amber);text-shadow:0 0 30px rgba(255,194,61,.7)}
-#count.pop{animation:pop .9s ease-out}
-@keyframes pop{0%{transform:translate(-50%,-50%) scale(1.6);opacity:0}25%{opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:.9}}
+/* the countdown: big, amber like every time on the timing board; «Старт!» in the cyan of "go".
+   Each number lands with its beep (main.js showCount) and fades before the next. */
+#count{position:absolute;top:40%;left:50%;translate:-50% -50%;font-family:var(--f-display);font-weight:800;font-size:clamp(120px,30vmin,280px);line-height:1;color:var(--amber);text-shadow:0 0 42px rgba(255,194,61,.5),0 6px 30px rgba(0,0,0,.55);pointer-events:none;white-space:nowrap}
+#count.go{color:var(--cyan);font-size:clamp(64px,14vmin,150px);text-shadow:0 0 42px rgba(62,240,255,.55),0 6px 30px rgba(0,0,0,.55)}
+#count.tick{animation:tick 1s var(--ease-out) both}
+@keyframes tick{0%{opacity:0;scale:1.35}16%{opacity:1;scale:1}74%{opacity:1;scale:1}100%{opacity:0;scale:.94}}
+/* the way into a run: the menu dissolves, the picture it left goes after it (ui/hud.js) */
+#menu.leaving{pointer-events:none;animation:menu-out var(--dur-screen) var(--ease-out) both}
+#menu.leaving>.screen:not([hidden]){animation:menu-push var(--dur-screen) var(--ease-out) both}
+@keyframes menu-out{to{opacity:0}}
+@keyframes menu-push{to{scale:1.03}}
+.start-shot{position:fixed;inset:0;inline-size:100%;block-size:100%;z-index:4;pointer-events:none}
+.start-shot.go{animation:menu-out 360ms var(--ease-out) both}
 .float{position:absolute;top:calc(var(--top) + 110px);left:50%;transform:translateX(-50%);font-family:var(--f-display);font-weight:800;font-size:28px;color:var(--cyan);animation:rise 1.3s ease-out forwards;text-shadow:0 0 16px rgba(62,240,255,.7);white-space:nowrap}
 .float.bad{color:var(--rose);text-shadow:0 0 16px rgba(255,59,107,.7);font-size:22px}
 @keyframes rise{0%{opacity:0;transform:translate(-50%,10px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-50px)}}
@@ -237,7 +247,7 @@ body{font-family:var(--f-body);touch-action:none;-webkit-user-select:none;user-s
   .seg button{padding:10px 14px}
   .code-big .code{font-size:32px;line-height:50px;height:50px;width:222px;letter-spacing:36.8px;padding-left:14.4px;background-size:56px 50px}
 }
-@media (prefers-reduced-motion:reduce){#count.pop,.float{animation:none}}
+@media (prefers-reduced-motion:reduce){#count.tick,.float,#menu.leaving,.start-shot.go{animation:none}}
 @media (max-width:520px){#lapbox{min-width:0;padding:8px 10px}#lapbox .lapt{font-size:18px}#dpts{font-size:34px}#scorebox .sc{padding:8px 10px}#score{font-size:18px}.card .keys{font-size:13px}}
 #standings{position:absolute;left:var(--lft);top:calc(var(--top) + 162px);padding:8px 10px;display:grid;gap:4px;min-width:170px;font-size:13px}
 #standings .st{display:flex;align-items:center;gap:8px}
@@ -419,34 +429,34 @@ body{margin:0}
        room's code, the run's settings (the host changes them, everyone sees them) and the
        main button: «Старт» for the host, «Готово» for the others. js/ui/lobbyScreen.js. -->
   <section class="screen lobby" id="pLobby" hidden aria-labelledby="lobTitle">
-    <header class="screen-bar">
-      <button type="button" class="pill-btn" id="leaveLobby"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Выйти</button>
+    <!-- my car on the wet street (ui/stand.js draws into this box, behind everything) -->
+    <div class="lob-stand" id="lobStand"></div>
+    <header class="screen-bar lob-bar">
+      <button type="button" class="pill-btn" id="leaveLobby"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lob-leave-word">Выйти</span></button>
       <h1 id="lobTitle">Лобби <span class="lob-mode" id="lobMode">Дрифт</span></h1>
-      <button type="button" class="pill-btn" id="lobCar" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>Авто</button>
-      <button type="button" class="pill-btn map-btn" id="lobMapBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Карта: сменить карту" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 17.5c-2-2.2-1.6-6 .9-7.6 2-1.3 3.6.2 5.6-1.6 1.7-1.6 1.1-4.3 3.6-4.6 2.6-.3 4.4 2.4 3.9 5.4-.4 2.3-2.6 2.9-2.7 5.1-.1 2.3 2 3.1.9 4.8-1.3 2-5.2 1.3-7.4.9-2.1-.4-3.6-.9-4.8-2.4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M8.6 15.8h3.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><span class="map-btn-word">Карта</span></button>
-    </header>
-    <div class="lob-body">
-      <div class="lob-players">
-        <h2 id="plTitle">Игроки <span class="pl-count" id="plCount">1 из 6</span></h2>
-        <ol class="plist" id="plist" aria-labelledby="plTitle"></ol>
-      </div>
-      <div class="lob-car">
-        <div class="gar-head">
-          <h2 id="lobCarName">—</h2>
-          <p class="gar-tag"><span class="gar-class" id="lobCarClass"></span><span id="lobPaint"></span></p>
-        </div>
-        <div class="lob-stand" id="lobStand"></div>
-      </div>
-    </div>
-    <div class="lob-foot">
+      <span class="bar-gap"></span>
       <div class="lob-code">
         <span class="lbl" id="codeLbl">Код</span>
         <b class="code" id="roomCode">----</b>
         <button type="button" class="icon-btn copy-btn" id="copyCode" aria-label="Скопировать код комнаты"><svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 5.5v-.5a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 5v8A1.5 1.5 0 0 0 6 14.5h.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-done" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <span class="copy-tip" id="copyTip" role="status"></span>
       </div>
+      <button type="button" class="pill-btn" id="lobCar" aria-label="Авто: сменить машину или цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 15.5v-3l2.2-4.6A2 2 0 0 1 7.5 6.8h9a2 2 0 0 1 1.8 1.1l2.2 4.6v3a1 1 0 0 1-1 1h-1.2M3.5 15.5a1 1 0 0 0 1 1h1.2M9.3 16.5h5.4M4.6 11.6h14.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="16.5" cy="16.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.9"/></svg><span class="lob-car-word">Авто</span></button>
+    </header>
+    <div class="lob-head">
+      <h2 id="lobCarName">—</h2>
+      <p class="gar-tag"><span class="gar-class" id="lobCarClass"></span><span id="lobPaint"></span></p>
+    </div>
+    <!-- the seats: a card per player (its car's silhouette in its paint), then the free ones;
+         the first free one invites (the link, in one tap) -->
+    <div class="lob-players">
+      <h2 class="vh" id="plTitle">Игроки <span class="pl-count" id="plCount">1 из 6</span></h2>
+      <ol class="plist" id="plist" aria-labelledby="plTitle"></ol>
+    </div>
+    <!-- the run: one panel, the host changes it, everyone sees it; the main button under it -->
+    <aside class="lob-side">
       <div class="lob-cfg" id="lobCfg" role="group" aria-labelledby="cfgTitle">
-        <h3 class="cfg-title" id="cfgTitle">Заезд <small id="cfgWho">меняет хост</small></h3>
+        <h3 class="cfg-title" id="cfgTitle">Заезд</h3>
         <fieldset class="cfg-mode" id="cfgMode">
           <legend class="vh">Режим</legend>
           <div class="seg-radio">
@@ -454,6 +464,11 @@ body{margin:0}
             <label><input type="radio" name="lobMode" value="traffic"><span>Трасса</span></label>
           </div>
         </fieldset>
+        <div class="lob-map" id="lobMap">
+          <span class="lob-map-dg" id="lobMapThumb"></span>
+          <span class="lob-map-txt"><b class="lob-map-name" id="lobMapName">Ночной город</b><span class="lob-map-figs" id="lobMapFigs"></span></span>
+          <button type="button" class="pill-btn map-btn" id="lobMapBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Сменить карту" hidden><span class="map-btn-word">Сменить</span></button>
+        </div>
         <div class="cfg-row" id="rowLaps">
           <span class="set-name" id="cfgLapsName">Круги</span>
           <div class="stepper" role="group" aria-labelledby="cfgLapsName">
@@ -478,15 +493,20 @@ body{margin:0}
             <label><input type="radio" name="lobDens" value="high"><span>Высокий</span></label>
           </div>
         </fieldset>
-        <div class="lob-map" id="lobMap">
-          <span class="map-thumb" id="lobMapThumb"></span>
-          <span class="lob-map-txt"><span class="set-name">Карта</span><b class="lob-map-name" id="lobMapName">Ночной город</b></span>
-        </div>
+        <fieldset class="cfg-ghost" id="cfgGhost" aria-describedby="cfgGhostHint">
+          <legend class="set-name">Призраки</legend>
+          <div class="seg-radio">
+            <label><input type="radio" name="lobGhost" value="off"><span>Выкл</span></label>
+            <label><input type="radio" name="lobGhost" value="on"><span>Вкл</span></label>
+          </div>
+          <span class="cfg-hint" id="cfgGhostHint">Машины проходят сквозь друг друга</span>
+        </fieldset>
       </div>
+      <p class="status" id="lobbyStatus" role="status"></p>
       <button type="button" class="cta" id="startRace">Старт</button>
-    </div>
-    <p class="status" id="lobbyStatus" role="status"></p>
+    </aside>
     <p class="vh" id="lobMapLive" role="status"></p>
+    <p class="vh" id="lobInviteLive" role="status"></p>
 
     <div class="pop kick-pop" id="kickPop" popover aria-labelledby="kickQ">
       <p id="kickQ">Выгнать игрока?</p>

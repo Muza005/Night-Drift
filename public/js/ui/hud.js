@@ -31,7 +31,7 @@ export function showPanel(id, dir){
   const menu=$('menu'), to=$(id), gen=++panelGen;
   const from=menu.hidden ? null : PANELS.map(p=>$(p)).find(p=>!p.hidden);
   for(const p of PANELS) $(p).style.viewTransitionName='';
-  const swap=()=>{ if(gen!==panelGen) return; for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
+  const swap=()=>{ if(gen!==panelGen) return; dropPicture(); menu.classList.remove('leaving'); menu.inert=false; for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
   if(!dir || !from || from===to){ swap(); return Promise.resolve(); }
   document.documentElement.dataset.nav=dir;
   // the shared pictures on the way out: name → its element (only one that is on screen)
@@ -65,6 +65,57 @@ export function showPanel(id, dir){
     }
     return Promise.resolve();
   }
+}
+// The way into a run (plan 3, U4). The last menu screen does not vanish at once:
+//   holdPicture(draw)  before the screen closes: its picture (the car on the street) is drawn
+//                      once more and copied onto a canvas over the game's, under the menu
+//   dismissMenu()      the menu dissolves (--dur-screen: opacity, a slight push toward the
+//                      street) and is hidden after; a screen shown meanwhile (the room gone)
+//                      takes over and the menu stays
+//   releasePicture()   once the run is in place: the copy dissolves into the first frames
+//                      of the race (the camera's flight to the grid is main.js's, ui/startFx.js)
+// With reduced motion: no copy, the menu is hidden at once.
+let shot=null;
+export function holdPicture(draw){
+  dropPicture();
+  if(reducedMotion.matches) return;
+  try{
+    draw(performance.now());                      // (in this task: the buffer is still there to copy)
+    const src=$('c'), c=document.createElement('canvas');
+    c.className='start-shot'; c.width=src.width; c.height=src.height; c.setAttribute('aria-hidden','true');
+    c.getContext('2d').drawImage(src,0,0);
+    src.after(c); shot=c;
+  }catch(e){ dropPicture(); }
+}
+const freeShot=c=>{ c.width=c.height=0; c.remove(); };   // (its pixels freed at once, not when collected)
+export function releasePicture(){
+  const c=shot; if(!c) return; shot=null;
+  // two frames: the first race frame is on the canvas under it before it starts to go
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    c.classList.add('go');
+    c.addEventListener('animationend',()=>freeShot(c),{once:true});
+  }));
+  // gone in any case (a hidden tab runs no frames and no animations)
+  setTimeout(()=>{ if(c.isConnected) freeShot(c); },1500);
+}
+export function dropPicture(){ shot=null; for(const c of document.querySelectorAll('.start-shot')) freeShot(c); }
+// The menu gone at once, no fade (a quick restart, the pause panel's «Заново»).
+export function hideMenu(){
+  const menu=$('menu'); panelGen++;
+  for(const p of PANELS) $(p).style.viewTransitionName='';
+  dropPicture(); menu.classList.remove('leaving'); menu.inert=false; menu.hidden=true;
+}
+// Returns a promise: true once the menu is gone, false if a screen took over meanwhile. The
+// run is put in place after it (its first frame is the heavy one: the menu's fade is done
+// by then, and the kept picture covers the wait).
+export function dismissMenu(){
+  const menu=$('menu'), gen=++panelGen;
+  for(const p of PANELS) $(p).style.viewTransitionName='';
+  if(menu.hidden) return Promise.resolve(true);
+  if(reducedMotion.matches){ menu.hidden=true; return Promise.resolve(true); }
+  menu.classList.add('leaving'); menu.inert=true;
+  const ms=parseFloat(getComputedStyle(menu).getPropertyValue('--dur-screen'))||320;
+  return new Promise(done=>setTimeout(()=>{ const ok=gen===panelGen; if(ok) menu.hidden=true; menu.classList.remove('leaving'); menu.inert=false; done(ok); },ms));
 }
 export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s.classList.toggle('err',!!err); }
 

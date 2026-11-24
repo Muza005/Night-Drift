@@ -555,19 +555,6 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   #mapPop { position-area: block-end span-inline-start; position-try-fallbacks: flip-inline; }
 }
 
-/* the lobby's plate: the room's map under the run's settings */
-.lob-map { flex-basis: 100%; display: flex; align-items: center; gap: var(--sp-3); padding-block-start: var(--sp-3); border-block-start: 1px solid var(--line); }
-.lob-map[hidden] { display: none; }
-.lob-map .map-thumb { inline-size: 72px; flex: none; }
-.lob-map .bp .bp-road { stroke-width: 9px; }
-.lob-map .bp .bp-gap { stroke-width: 18px; }
-.lob-map .bp .bp-cut { stroke-width: 4px; }
-.lob-map-txt { display: grid; gap: 2px; min-inline-size: 0; }
-.lob-map-name { font: 800 var(--fs-sm)/1.2 var(--f-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* a passing note (the host picked another map): the calm cyan, not the alarm rose */
-.note-toast[data-info] { border-color: rgba(62, 240, 255, 0.5); background: linear-gradient(160deg, rgba(20, 34, 52, 0.97), rgba(10, 12, 26, 0.98)); box-shadow: var(--shadow-lift), var(--glow-action); }
-
 @media (max-width: 760px) {
   .map-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -576,8 +563,6 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   .map-name { font-size: var(--fs-sm); }
   .map-grid { gap: var(--sp-2); }
   .map-meta span:last-child { display: none; }          /* the dots say it; the word waits for room */
-  .lobby .map-btn { padding-inline: var(--sp-3); }
-  .lobby .map-btn-word { display: none; }              /* the icon only: its label says «Карта» */
   .garage .screen-bar { flex-wrap: wrap; row-gap: var(--sp-3); }
   .gar-map { order: 9; flex: 1 1 100%; margin-inline-start: 0; }
   .gar-map-dg { inline-size: 104px; }
@@ -589,99 +574,160 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   .map-grid { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 196px; overflow-x: auto; padding-block-end: var(--sp-1); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; overscroll-behavior-x: contain; }
   .map-thumb { aspect-ratio: 2 / 1; }
   .map-name { font-size: var(--fs-sm); }
-  .lob-map { flex-basis: auto; padding: 0; border: 0; gap: var(--sp-2); }
-  .lob-map .map-thumb { inline-size: 48px; }
-  .lob-map .set-name { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .map-card { transition-duration: 0s; }
 }
 
 /* ---------- the lobby ----------
-   The bar on top (Выйти, the title, Авто), the players on the left, my car on its stand
-   on the right, and along the bottom: the code, the run's settings, the main button.
-   On a phone: the players are a strip of avatars on top, the stand under it, the rest below. */
-#menu:has(#pLobby:not([hidden])) { background: radial-gradient(ellipse at 62% 45%, rgba(7, 8, 15, 0.12), rgba(7, 8, 15, 0.74)); }
-.lobby {
-  inline-size: 100%;
-  flex: 1 0 auto;
-  margin-block: 0;
-  min-block-size: min(100%, 100dvh);
-  grid-template-rows: auto minmax(300px, 1fr) auto auto;
-  gap: var(--sp-4);
+   «Стойка», as the home screen: my car on the wet street under the lamps (the stand's box is
+   the whole screen left of the panel, behind everything), the bar on top, the car's name over
+   the street, the seats as a strip of slanted cards along the bottom, and on the right one
+   panel for the run with the main button under it. On a phone upright: one column, the
+   seats scroll sideways, the panel's rows pair up. Sideways: the panel keeps its column. */
+#menu:has(> #pLobby:not([hidden])) {
+  padding: 0; overflow: hidden;
+  /* the side and the floor darker, where the panel and the cards are read */
+  background: linear-gradient(90deg, transparent 55%, rgba(7, 8, 15, 0.5)), linear-gradient(180deg, transparent 62%, rgba(7, 8, 15, 0.55));
 }
-.lobby > *, .lob-players, .lob-car { min-inline-size: 0; }      /* a long strip scrolls inside, the page never does */
-.lobby .screen-bar h1 { margin-inline: auto; display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-xl); }
-.lob-mode { font: 700 var(--fs-sm) var(--f-body); color: var(--c-ink-1); padding: 3px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: var(--surface); }
+#pLobby {
+  position: relative;
+  inline-size: 100%; block-size: 100dvh; margin: 0;
+  padding: var(--top) var(--rgt) var(--bot) var(--lft);
+  grid-template-columns: minmax(0, 1fr) var(--lob-side);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "bar bar" ". side" "head side" "seats side";
+  gap: var(--sp-3) var(--sp-5);
+}
+#pLobby > :not(.lob-stand, [popover], .vh) { position: relative; z-index: 1; min-inline-size: 0; }
+.lob-stand { position: absolute; z-index: 0; inset: 0 calc(var(--lob-side) + var(--rgt)) 0 0; touch-action: pan-y; }
+
+.lob-bar { grid-area: bar; }
+.lobby .screen-bar h1 { display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-md)/var(--btn-h) var(--f-display); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7); white-space: nowrap; }
+.lob-mode { font: 700 var(--fs-xs)/1.6 var(--f-body); color: var(--c-ink-1); padding: 1px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: var(--surface); }
 .pill-btn svg { inline-size: 20px; block-size: 20px; flex: none; }
 .pill-btn:disabled { opacity: 0.4; cursor: default; }
 
-.lob-body { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); gap: var(--sp-5); min-block-size: 0; }
-.lob-players {
-  display: grid; grid-template-rows: auto 1fr; gap: var(--sp-3); align-content: start; align-self: start;
-  padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-lg);
-  background: var(--surface); backdrop-filter: var(--blur-panel);
+/* the code: in the bar, a pill with the four letters and its copy button */
+.lob-code {
+  position: relative; display: flex; align-items: center; gap: var(--sp-2);
+  block-size: var(--btn-h); padding-inline: var(--sp-4) 3px;
+  border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); backdrop-filter: var(--blur-panel);
 }
-.lob-players h2 { margin: 0; display: flex; align-items: baseline; justify-content: space-between; font: 800 var(--fs-md) var(--f-display); }
-.pl-count { font: 700 var(--fs-sm) var(--f-num); color: var(--text-quiet); font-variant-numeric: tabular-nums; }
-.plist { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--sp-2); align-content: start; }
+.lob-code .lbl { font-weight: 700; font-size: var(--fs-xs); color: var(--text-quiet); }
+.lob-code .code { font: 700 var(--fs-lg)/1 var(--f-num); letter-spacing: 0.22em; margin-inline-end: calc(var(--sp-1) - 0.22em); }
+.lob-code .icon-btn { inline-size: 36px; block-size: 36px; border-color: transparent; background: none; }
+.lob-code .icon-btn svg { inline-size: 18px; block-size: 18px; }
+.copy-btn svg { position: absolute; transition: opacity var(--dur-hover) ease, scale var(--dur-pop) var(--ease-out); }
+.copy-btn { position: relative; }
+.copy-btn .i-done { opacity: 0; scale: 0.6; color: var(--ready); }
+.copy-btn[data-copied] .i-copy { opacity: 0; scale: 0.6; }
+.copy-btn[data-copied] .i-done { opacity: 1; scale: 1; }
+.copy-btn[data-failed] { color: var(--worse); }
+/* the bubble is also the live region: it is shown and hidden by opacity only */
+.copy-tip {
+  position: absolute; inset-block-start: calc(100% + 8px); inset-inline-end: 0;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  background: var(--c-night-4); border: 1px solid var(--line-strong);
+  font-weight: 700; font-size: var(--fs-xs); white-space: nowrap; pointer-events: none;
+  opacity: 0; translate: 0 -4px;
+  transition: opacity var(--dur-pop) var(--ease-out), translate var(--dur-pop) var(--ease-out);
+}
+.copy-tip:not(:empty) { opacity: 1; translate: 0 0; }
 
-/* one player: a square avatar with the seat number (in the seat's colour), the name, the car */
+/* my car's name, over the street */
+.lob-head { grid-area: head; display: grid; gap: var(--sp-1); justify-items: start; }
+.lob-head h2 { margin: 0; font: 800 var(--fs-xl)/1.05 var(--f-display); letter-spacing: -0.01em; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.75); }
+.lob-head .gar-tag { justify-content: start; font-size: var(--fs-xs); }
+
+/* ---------- the seats: a strip of slanted cards ----------
+   A card's shape is its clip-path; its 1 px edge is the card's own colour showing round a
+   fill that is clipped 1 px smaller (::before). The number and the crown at the top, the
+   car's silhouette on a pool of its seat's light, the name and the car at the bottom. */
+.lob-players { grid-area: seats; }
+.plist {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; gap: 0;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+  scroll-snap-type: x proximity; scroll-padding-inline: var(--lft);
+}
+.plist::-webkit-scrollbar { display: none; }
 .pl {
-  --seat: var(--seat-1);
-  position: relative;
-  display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3);
-  min-block-size: 58px; padding: 6px var(--sp-2) 6px 6px;
-  border-radius: var(--r-md); background: rgba(255, 255, 255, 0.035);
-  border: 1px solid transparent;
+  --seat: var(--seat-1); --paint: var(--c-ink-2); --s: var(--seat-slant);
+  position: relative; flex: 1 0 var(--seat-w); min-inline-size: var(--seat-w); max-inline-size: calc(var(--seat-w) * 1.35);
+  block-size: var(--seat-h);
+  margin-inline-end: calc(var(--s) * -1 + var(--sp-2));
+  scroll-snap-align: start;
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: var(--sp-2) calc(var(--s) + var(--sp-2)) var(--sp-3) calc(var(--s) * 0.5 + var(--sp-3));
+  background: var(--line);
+  clip-path: polygon(var(--s) 0, 100% 0, calc(100% - var(--s)) 100%, 0 100%);
 }
-.pl[data-me] { border-color: var(--line); }
-.pl-ava {
-  position: relative; display: grid; place-items: center;
-  inline-size: 46px; block-size: 46px; border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--seat) 20%, var(--c-night-2));
-  border: 2px solid var(--seat);
-  color: var(--seat);
+.pl:last-child { margin-inline-end: 0; }
+.pl::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  clip-path: polygon(calc(var(--s) + 1.4px) 1px, calc(100% - 1px) 1px, calc(100% - var(--s) - 1.4px) calc(100% - 1px), 1px calc(100% - 1px));
+  background:
+    radial-gradient(ellipse 58% 34% at 50% 66%, color-mix(in srgb, var(--seat) 24%, transparent), transparent 72%),
+    linear-gradient(180deg, rgba(21, 24, 51, 0.9), rgba(7, 8, 15, 0.94));
 }
+.pl > * { position: relative; }
+.pl[data-me] { background: color-mix(in srgb, var(--seat) 55%, transparent); }
+.pl[data-off] { opacity: 0.55; }
+/* the seat's colour along the top edge */
+.pl-bar { position: absolute !important; inset: 0 0 auto; block-size: 3px; background: var(--seat); }
+.pl-ava { display: flex; align-items: center; gap: var(--sp-2); block-size: 26px; color: var(--seat); }
 .pl-num { font: 800 var(--fs-lg)/1 var(--f-display); }
-/* "Готово": a green ring around the avatar, outside its seat colour, so the two never mix.
-   The ring is ready-made; only its opacity changes. */
-.pl-ava::after {
-  content: ""; position: absolute; inset: -6px; border-radius: calc(var(--r-sm) + 5px);
-  box-shadow: var(--glow-ready); opacity: 0; scale: 0.92;
-  transition: opacity var(--dur-hover) ease, scale var(--dur-pop) var(--ease-out);
-}
-.pl[data-ready] .pl-ava::after { opacity: 1; scale: 1; }
-.pl-crown { position: absolute; inset-block-start: -13px; inset-inline-start: 50%; translate: -50% 0; inline-size: 24px; block-size: 16px; color: var(--record); filter: drop-shadow(0 0 6px rgba(255, 194, 61, 0.55)); display: none; }
+.pl-crown { inline-size: 22px; block-size: 15px; color: var(--record); display: none; }
 .pl[data-host] .pl-crown { display: block; }
-.pl-who { display: grid; min-inline-size: 0; gap: 2px; text-align: start; font: inherit; color: inherit; background: none; border: 0; padding: 4px 6px; border-radius: var(--r-xs); }
-.pl-name { font-weight: 700; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the car: one picture, two masks: its whole shape dark (glass, tyres), its body in the paint
+   with a sheen from above; a hairline of light round it so a black car still reads */
+.pl-car {
+  position: absolute !important; inset-inline: calc(var(--s) * 0.5 + var(--sp-1)) calc(var(--s) * 0.5 + var(--sp-1)); inset-block-start: 25%;
+  margin-inline: auto; max-inline-size: 210px; aspect-ratio: 3 / 1;
+  filter: drop-shadow(0 0 0.6px rgba(238, 240, 255, 0.55)) drop-shadow(0 6px 6px rgba(0, 0, 0, 0.6));
+}
+.pl-car::before, .pl-car::after {
+  content: ""; position: absolute; inset: 0;
+  -webkit-mask: var(--sil) center / contain no-repeat; mask: var(--sil) center / contain no-repeat;
+}
+.pl-car::before { background: var(--c-night-0); }
+.pl-car::after {
+  mask-mode: luminance; -webkit-mask-source-type: luminance;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--paint) 55%, white) 8%, var(--paint) 40%, color-mix(in srgb, var(--paint) 72%, black) 78%);
+}
+.pl-empty .pl-car { display: none; }
+
+.pl-who { align-self: end; grid-row: 3; display: grid; min-inline-size: 0; gap: 1px; text-align: start; font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; margin-inline: -4px; border-radius: var(--r-xs); }
+.pl-name { font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-sub { font-size: var(--fs-xs); color: var(--text-quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl[data-ready] .pl-sub { color: var(--ready); }
-.pl[data-off] { opacity: 0.6; }
-/* my row renames me: a pencil comes up on hover and focus */
-button.pl-who { position: relative; grid-template-columns: minmax(0, 1fr) auto; cursor: text; transition: background-color var(--dur-hover) ease; }
+/* my card renames me: a pencil comes up on hover and focus */
+button.pl-who { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-1); cursor: text; transition: background-color var(--dur-hover) ease; }
 button.pl-who .pl-name, button.pl-who .pl-sub { grid-column: 1; }
-.pl-pen { grid-column: 2; grid-row: 1 / span 2; align-self: center; inline-size: 18px; block-size: 18px; color: var(--action); opacity: 0; transition: opacity var(--dur-hover) ease; }
-button.pl-who:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.pl-pen { grid-column: 2; grid-row: 1 / span 2; align-self: center; inline-size: 16px; block-size: 16px; color: var(--action); opacity: 0; transition: opacity var(--dur-hover) ease; }
+button.pl-who:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .pl-input {
-  min-inline-size: 0; block-size: 40px; padding: 0 var(--sp-3);
+  grid-row: 3; align-self: end; min-inline-size: 0; inline-size: 100%; block-size: 36px; padding: 0 var(--sp-2);
   border: 1px solid var(--action); border-radius: var(--r-xs); background: var(--surface-sunk);
-  color: var(--text); font: 700 var(--fs-md) var(--f-body);
+  color: var(--text); font: 700 var(--fs-sm) var(--f-body);
 }
-.pl-input:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.pl-input:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* the host's ✕: on hover or focus with a mouse, always on a touch screen */
 .pl-kick {
-  display: grid; place-items: center; inline-size: 36px; block-size: 36px; padding: 0;
+  position: absolute !important; inset-block-start: var(--sp-2); inset-inline-end: var(--sp-2);
+  display: grid; place-items: center; inline-size: 32px; block-size: 32px; padding: 0;
   border-radius: 50%; border: 1px solid var(--line); background: var(--surface-sunk); color: var(--text);
   cursor: pointer; opacity: 1;
   transition: opacity var(--dur-hover) ease, border-color var(--dur-hover) ease, color var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
 }
+.pl-kick::before { content: ""; position: absolute; inset: -6px; }        /* a 44 px target */
 .pl-kick[hidden] { display: none; }
-.pl-kick svg { inline-size: 18px; block-size: 18px; }
+.pl-kick svg { inline-size: 16px; block-size: 16px; }
 .pl-kick:active { scale: 0.9; }
-.pl-kick:focus-visible { outline: var(--focus-ring); outline-offset: 2px; opacity: 1; }
+.pl-kick:focus-visible { outline: var(--focus-ring); outline-offset: -1px; opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
   .pl-kick { opacity: 0; }
   .pl:hover .pl-kick, .pl:focus-within .pl-kick, .pl-kick:focus-visible, .pl-kick[style*="--kick"] { opacity: 1; }
@@ -689,55 +735,74 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   button.pl-who:hover { background: rgba(62, 240, 255, 0.07); }
   button.pl-who:hover .pl-pen { opacity: 1; }
 }
-.pl-empty { background: none; border: 1px dashed var(--line); }
-.pl-empty .pl-ava { background: none; border-style: dashed; border-color: var(--line-strong); color: var(--text-quiet); }
-.pl-empty .pl-who { color: var(--text-quiet); font-size: var(--fs-sm); }
 
-/* my car */
-.lob-car { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: var(--sp-2); min-block-size: 0; }
-.lob-car .gar-head h2 { font-size: var(--fs-xl); }
-.lob-stand { position: relative; min-block-size: 240px; }
-
-/* the bottom: code | settings | the main button */
-.lob-foot { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: var(--sp-4); }
-.lob-code {
-  position: relative; display: flex; align-items: center; gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
-  border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); backdrop-filter: var(--blur-panel);
+/* «Готово»: a green bar along the bottom (it grows from the left), and once, when it is
+   pressed, a band of green light across the card. Both on their own layers: only
+   transform and opacity move. */
+.pl::after {
+  content: ""; position: absolute; inset-inline: 0 var(--s); inset-block-end: 0; block-size: 4px;
+  background: var(--ready); box-shadow: 0 0 14px rgba(61, 255, 138, 0.6);
+  transform-origin: 0 50%; scale: 0 1; opacity: 0;
+  transition: scale var(--dur-screen) var(--ease-out), opacity var(--dur-hover) ease;
 }
-.lob-code .lbl { font-weight: 700; font-size: var(--fs-sm); color: var(--c-ink-1); }
-.lob-code .code { font: 700 var(--fs-xl)/1 var(--f-num); letter-spacing: 0.22em; margin-inline-end: -0.22em; }
-.copy-btn svg { position: absolute; transition: opacity var(--dur-hover) ease, scale var(--dur-pop) var(--ease-out); }
-.copy-btn { position: relative; }
-.copy-btn .i-done { opacity: 0; scale: 0.6; color: var(--ready); }
-.copy-btn[data-copied] .i-copy { opacity: 0; scale: 0.6; }
-.copy-btn[data-copied] .i-done { opacity: 1; scale: 1; }
-.copy-btn[data-copied] { border-color: var(--ready); }
-.copy-btn[data-failed] { border-color: var(--worse); }
-/* the bubble is also the live region: it is shown and hidden by opacity only */
-.copy-tip {
-  position: absolute; inset-block-end: calc(100% + 8px); inset-inline-end: 0;
-  padding: 6px 12px; border-radius: var(--r-pill);
-  background: var(--c-night-4); border: 1px solid var(--line-strong);
-  font-weight: 700; font-size: var(--fs-xs); white-space: nowrap; pointer-events: none;
-  opacity: 0; translate: 0 4px;
-  transition: opacity var(--dur-pop) var(--ease-out), translate var(--dur-pop) var(--ease-out);
+.pl[data-ready]::after { scale: 1 1; opacity: 1; }
+.pl-flash {
+  position: absolute !important; inset: 0; pointer-events: none; opacity: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(61, 255, 138, 0.3) 47%, rgba(220, 255, 235, 0.45) 50%, rgba(61, 255, 138, 0.3) 53%, transparent 70%);
 }
-.copy-tip:not(:empty) { opacity: 1; translate: 0 0; }
+.pl-yes .pl-flash { animation: seat-yes 420ms var(--ease-out) both; }
+@keyframes seat-yes { 0% { translate: -110% 0; opacity: 1; } 80% { opacity: 1; } 100% { translate: 110% 0; opacity: 0; } }
 
+/* a free seat: a quiet number; the first one invites */
+.pl-empty::before { background: rgba(10, 12, 24, 0.55); }
+.pl-empty { background: rgba(120, 140, 255, 0.16); }
+.pl-empty .pl-ava { color: var(--text-off); }
+.pl-empty .pl-bar { opacity: 0.25; }
+.pl-free { grid-row: 3; align-self: end; font-size: var(--fs-xs); color: var(--text-quiet); }
+.pl-free[hidden], .pl-ask[hidden] { display: none; }
+.pl-invite { background: rgba(62, 240, 255, 0.4); }
+.pl-ask {
+  position: absolute !important; inset: 0; z-index: 1;
+  display: grid; align-content: center; justify-items: center; gap: 2px;
+  padding: var(--sp-5) var(--s) 0; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--dur-hover) ease;
+}
+.pl-ask svg { inline-size: 26px; block-size: 26px; color: var(--action); margin-block-end: var(--sp-1); transition: scale var(--dur-press) var(--ease-out); }
+.pl-ask-word { font: 800 var(--fs-sm)/1.2 var(--f-display); }
+.pl-ask-sub { font-size: var(--fs-xs); color: var(--text-quiet); }
+.pl-ask[data-copied] .pl-ask-sub { color: var(--ready); }
+.pl-ask:active svg { scale: 0.9; }
+.pl-ask:focus-visible { outline: var(--focus-ring); outline-offset: -4px; }
+.pl-invite:has(.pl-ask:focus-visible) { background: var(--focus); }
+.pl-invite:has(.pl-ask:focus-visible) .pl-ask { background: rgba(62, 240, 255, 0.08); }
+@media (hover: hover) and (pointer: fine) {
+  .pl-ask:hover { background: rgba(62, 240, 255, 0.07); }
+}
+
+/* ---------- the run: one panel ----------
+   Rows of a name and its control: the mode, the map, laps or minutes and traffic, ghosts. */
+.lob-side { grid-area: side; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--sp-3); min-block-size: 0; }
 .lob-cfg {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5);
-  justify-self: end;
-  padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-lg);
+  display: grid; gap: 0;
+  padding: var(--sp-2) var(--sp-4) var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
   background: var(--surface); backdrop-filter: var(--blur-panel);
+  min-block-size: 0; overflow-y: auto; scrollbar-width: none;
 }
-.cfg-title { margin: 0; display: grid; font: 800 var(--fs-sm) var(--f-display); }
-.cfg-title small { font: 600 var(--fs-xs) var(--f-body); color: var(--text-quiet); }
-.lob-cfg fieldset { margin: 0; padding: 0; border: 0; min-inline-size: 0; }
-.cfg-dens { display: flex; align-items: center; gap: var(--sp-3); }
-.cfg-dens legend { float: left; margin-inline-end: var(--sp-3); }
-.cfg-row { display: flex; align-items: center; gap: var(--sp-3); }
-.lob-cfg .seg-radio span { padding: 8px 12px; }
+.lob-cfg > * { min-block-size: 52px; border-block-start: 1px solid var(--line); }
+.lob-cfg > :first-child, .lob-cfg > [hidden] + :not([hidden]):nth-child(2) { border-block-start: 0; }
+.lob-cfg > [hidden] { display: none; }
+.cfg-title { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); min-block-size: 40px; padding-block-start: var(--sp-2); font: 800 var(--fs-sm) var(--f-display); border: 0; }
+.lob-cfg fieldset { margin: 0; padding: 0; border-inline: 0; border-block-end: 0; min-inline-size: 0; }
+.cfg-mode { display: flex; align-items: center; border-block-start: 0 !important; padding-block-end: var(--sp-2) !important; }
+.cfg-mode .seg-radio { flex: 1; }
+.cfg-row, .cfg-dens, .cfg-ghost { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.cfg-dens legend, .cfg-ghost legend { float: left; margin-inline-end: var(--sp-3); }
+/* «Призраки»: what it does, one quiet line under it */
+.cfg-ghost { flex-wrap: wrap; row-gap: 2px; padding-block: var(--sp-2) !important; }
+.cfg-hint { flex-basis: 100%; order: 3; font-size: var(--fs-xs); color: var(--text-quiet); }
+.lob-cfg .seg-radio span { padding: 7px 12px; }
 .lob-cfg .icon-btn { inline-size: 36px; block-size: 36px; }
 .lob-cfg .icon-btn svg { inline-size: 18px; block-size: 18px; }
 .lob-cfg .icon-btn[hidden] { display: none; }
@@ -746,29 +811,49 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .seg-radio input:disabled { cursor: default; }
 .seg-radio input:disabled:not(:checked) + span { opacity: 0.45; }
 .lob-cfg[data-guest] .stepper output { min-inline-size: 2ch; }
+.lob-cfg[data-guest] .seg-radio input:not(:checked) + span { display: none; }      /* only the value */
+.lob-cfg[data-guest] .seg-radio { background: none; border-color: transparent; padding: 0; }
+.lob-cfg[data-guest] .cfg-mode .seg-radio { flex: none; }
 
-.lob-foot .cta { min-inline-size: 12rem; text-align: center; }
-/* «Старт» is off until everyone is ready (still focusable: it says why on a press) */
-.cta[aria-disabled="true"] { opacity: 0.42; box-shadow: none; transform: none; cursor: not-allowed; }
+/* the map: its diagram (as in the garage), its name, length and difficulty */
+.lob-map { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); padding-block: var(--sp-2); }
+.lob-map-dg { display: block; inline-size: 96px; aspect-ratio: 380 / 215; border-radius: var(--r-xs); background: var(--c-night-1); }
+.lob-map-dg .dg { display: block; inline-size: 100%; block-size: 100%; }
+.lob-map-dg .dg-run { display: none; }
+.lob-map-txt { display: grid; gap: var(--sp-2); min-inline-size: 0; }
+.lob-map-name { font: 800 var(--fs-sm)/1.2 var(--f-display); text-wrap: balance; overflow-wrap: anywhere; }
+.lob-map-figs { display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); font-variant-numeric: tabular-nums; }
+.lob-map .map-btn { min-block-size: 36px; padding-inline: var(--sp-3); font-size: var(--fs-xs); }
+.lob-map .map-btn[hidden] { display: none; }
+
+.lob-side > .status { margin: 0; min-block-size: 1.4em; color: var(--c-ink-1); font-size: var(--fs-sm); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); text-wrap: balance; }
+.lob-side .cta { justify-self: stretch; inline-size: 100%; min-block-size: 56px; text-align: center; font-size: var(--fs-lg); }
+/* «Старт» is off until everyone is ready (still focusable: it says why on a press): a dark
+   glass pill, not a faded cyan one */
+.cta[aria-disabled="true"] { background: var(--surface); color: var(--text-quiet); box-shadow: inset 0 0 0 1px var(--line-strong); transform: none; cursor: not-allowed; }
 /* …and when it lights: one short flash of its glow, once */
 .cta.armed { animation: cta-arm 520ms var(--ease-out) 1; }
 @keyframes cta-arm {
   0% { scale: 0.96; filter: brightness(1.6); }
-  45% { scale: 1.04; }
+  45% { scale: 1.03; }
   100% { scale: 1; filter: none; }
 }
 /* «Готово» pressed: green, a tick before the word */
 .cta[aria-pressed="true"] { background: linear-gradient(180deg, #9dffc2, var(--ready)); box-shadow: 0 8px 30px rgba(61, 255, 138, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
 .cta[aria-pressed="true"]::before { content: "✓ "; }
 .cta.danger { background: linear-gradient(180deg, var(--c-rose-hi), var(--brand)); box-shadow: var(--glow-brand); color: var(--c-night-1); }
-.lobby > .status { margin: 0; justify-self: end; text-align: end; color: var(--c-ink-1); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+
+/* the map picker from the lobby: in the middle of the screen (its button is low on the right) */
+@supports (position-area: block-end) {
+  #pLobby #mapPop { position-area: none; inset: 0; margin: auto; }
+}
 
 /* the ✕ panel: next to the ✕ it came from */
 .kick-pop { display: none; }
 .kick-pop:popover-open { display: flex; align-items: center; gap: var(--sp-3); }
 .kick-pop p { margin: 0; font-weight: 700; }
 @supports (position-area: block-end) {
-  #kickPop { position-anchor: --kick; position-area: inline-end; margin: 0 0 0 var(--sp-2); position-try-fallbacks: flip-inline, block-end span-inline-start; }
+  #kickPop { position-anchor: --kick; position-area: block-start; margin: 0 0 var(--sp-2); position-try-fallbacks: flip-block; }
 }
 
 /* the note at the top of the page (popover="manual": it stays until its time is up) */
@@ -794,74 +879,87 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .note-toast p { margin: 0; font-weight: 700; }
 .note-toast .icon-btn { inline-size: 36px; block-size: 36px; }
 .note-toast .icon-btn svg { inline-size: 18px; block-size: 18px; }
+/* a passing note (the host picked another map): the calm cyan, not the alarm rose */
+.note-toast[data-info] { border-color: rgba(62, 240, 255, 0.5); background: linear-gradient(160deg, rgba(20, 34, 52, 0.97), rgba(10, 12, 26, 0.98)); box-shadow: var(--shadow-lift), var(--glow-action); }
 
 /* the results: «Авто» next to the buttons */
 #pResults .pill-btn { min-block-size: 46px; }
 
-@media (max-width: 960px) {
-  .lob-foot { grid-template-columns: auto minmax(0, 1fr); }
-  .lob-cfg { grid-column: 1 / -1; grid-row: 1; justify-self: stretch; }
-  .lob-foot .cta { justify-self: end; }
+/* a narrower screen: the panel a little narrower, the seats smaller */
+@media (max-width: 1100px) {
+  #pLobby { --lob-side: 300px; --seat-w: 128px; }
+  .lob-code .lbl { display: none; }
 }
+/* a phone upright (and any narrow window): one column. The car on the street fills the top,
+   then its name, the seats (they scroll sideways), the panel (its rows in pairs), the button. */
 @media (max-width: 760px) {
-  .lobby { grid-template-rows: auto auto minmax(220px, 1fr) auto auto; gap: var(--sp-3); }
-  .lob-body { display: contents; }
-  /* the players: a strip of avatars, names under them */
-  .lob-players { padding: var(--sp-3); }
-  .lob-players h2 { font-size: var(--fs-sm); }
-  .plist { display: flex; gap: var(--sp-2); overflow-x: auto; padding-block: 14px 2px; scrollbar-width: none; }
-  .pl { flex: none; inline-size: 76px; min-block-size: 0; grid-template-columns: 1fr; justify-items: center; gap: 4px; padding: 0 0 4px; background: none; border: 0; }
-  .pl[data-me] { border: 0; }
-  .pl-who { justify-items: center; text-align: center; padding: 2px; }
-  button.pl-who { grid-template-columns: 1fr; }
-  .pl-name { font-size: var(--fs-xs); max-inline-size: 72px; }
-  .pl-sub, .pl-pen { display: none; }
-  .pl-kick { position: absolute; inset-block-start: -10px; inset-inline-end: 0; inline-size: 30px; block-size: 30px; }
-  .pl-empty { border: 0; }
-  .pl-empty .pl-who { display: none; }
-  .pl-input { inline-size: 76px; padding-inline: 6px; font-size: var(--fs-xs); }
-  .lob-car .gar-head h2 { font-size: var(--fs-lg); }
-  .lob-stand { min-block-size: 200px; }
-  .lobby > .status { justify-self: stretch; text-align: center; }
+  #pLobby {
+    --seat-w: 124px; --seat-h: 116px; --seat-slant: 14px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "bar" "head" "." "seats" "side";
+    gap: var(--sp-3);
+  }
+  .lob-mode { display: none; }                         /* the panel says the mode */
+  .lob-code { padding-inline-start: var(--sp-3); }
+  .lob-code .code { font-size: var(--fs-md); letter-spacing: 0.16em; }
+  .lob-head { margin-block-start: calc(var(--sp-1) * -1); }
+  .lob-stand { inset: 0; }
+  .lob-players { margin-inline: calc(var(--lft) * -1) calc(var(--rgt) * -1); }
+  .plist { padding-inline: var(--lft) var(--rgt); }
+  .pl { flex: 0 0 var(--seat-w); }
+  .pl-car { inset-block-start: 30%; }
+  .lob-head h2 { font-size: var(--fs-lg); }
+  .lob-head .gar-tag span:not(.gar-class) { display: none; }
+  .lob-leave-word, .lob-car-word { display: none; }
+  .lob-bar .pill-btn { padding-inline: var(--sp-3); }
+  .lob-code .lbl { display: none; }
+  .lob-side { gap: var(--sp-2); }
+  .lob-cfg { padding: var(--sp-1) var(--sp-3); }
+  .lob-cfg > * { min-block-size: 46px; }
+  .cfg-title { display: none; }
+  .cfg-mode { border-block-start: 0 !important; }
+  .lob-map { padding-block: var(--sp-1); }
+  .lob-map-dg { inline-size: 76px; }
+  .lob-side .cta { min-block-size: 52px; }
+  .lob-side > .status { text-align: center; font-size: var(--fs-xs); min-block-size: 0; }
   @supports (position-area: block-end) {
-    #kickPop { position-area: block-end; margin: var(--sp-2) 0 0; position-try-fallbacks: flip-block; }
+    #kickPop { position-area: block-start; }
   }
 }
-@media (max-width: 560px) {
-  .lob-foot { grid-template-columns: 1fr; }
-  .lob-code { justify-self: stretch; justify-content: space-between; }
-  .lob-foot .cta { justify-self: stretch; }
-  .lob-cfg { justify-content: space-between; }
-  .lobby .screen-bar { gap: var(--sp-2); }
-  .lobby .screen-bar .pill-btn { padding-inline: var(--sp-3); }
-  .lob-mode { display: none; }                         /* the settings below say the mode */
-  .lob-cfg { gap: var(--sp-2) var(--sp-3); }
-  .cfg-title { flex-basis: 100%; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: var(--sp-2); }
-}
-/* a phone held sideways: little height, so the stand and the players share the row */
+/* a phone held sideways: little height. The panel keeps its column on the right, the seats
+   are short cards, the car's name one line. */
 @media (max-height: 500px) and (orientation: landscape) {
-  .lobby { grid-template-rows: auto minmax(150px, 1fr) auto auto; gap: var(--sp-2); }
-  .lobby .screen-bar h1 { font-size: var(--fs-lg); }
-  .lobby .screen-bar .pill-btn { min-block-size: 38px; }
-  .lob-players { align-self: stretch; }
-  .lob-body { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: var(--sp-3); }
-  .lob-players { padding: var(--sp-2) var(--sp-3); overflow-y: auto; }
-  .plist { gap: 4px; }
-  .pl { min-block-size: 44px; grid-template-columns: 36px minmax(0, 1fr) auto; padding: 3px; }
-  .pl-ava { inline-size: 36px; block-size: 36px; }
+  #pLobby {
+    --lob-side: 268px; --seat-w: 112px; --seat-h: 84px; --seat-slant: 12px;
+    gap: var(--sp-2) var(--sp-4);
+  }
+  .lobby .screen-bar .pill-btn, .lob-code { min-block-size: 38px; block-size: 38px; }
+  .lob-code .icon-btn { inline-size: 32px; block-size: 32px; }
+  .lob-leave-word, .lob-car-word, .lob-code .lbl { display: none; }
+  .lob-head h2 { font-size: var(--fs-md); }
+  .lob-head .gar-tag { display: none; }
+  .pl { padding-block: var(--sp-1) var(--sp-2); }
   .pl-num { font-size: var(--fs-md); }
+  .pl-ava { block-size: 20px; }
+  .pl-car { inset-block-start: 24%; max-inline-size: 110px; }
   .pl-sub { display: none; }
-  .pl-empty { display: none; }
-  .lob-stand { min-block-size: 140px; }
-  .lob-car .gar-head h2 { font-size: var(--fs-md); }
-  .gar-tag { display: none; }
-  .lob-foot { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .lob-cfg { grid-column: auto; grid-row: auto; justify-self: end; padding: var(--sp-2) var(--sp-3); }
+  .pl-ask { padding-block-start: var(--sp-3); }
+  .pl-ask svg { inline-size: 20px; block-size: 20px; margin: 0; }
+  .pl-ask-sub { display: none; }
+  .lob-cfg { padding: var(--sp-1) var(--sp-3); }
+  .lob-cfg > * { min-block-size: 42px; }
   .cfg-title { display: none; }
+  .lob-map { padding-block: var(--sp-1); }
+  .lob-map-dg { inline-size: 64px; }
+  .lob-side { gap: var(--sp-2); }
+  .lob-side > .status { font-size: var(--fs-xs); min-block-size: 0; }
+  .lob-side .cta { min-block-size: 44px; padding-block: 10px; font-size: var(--fs-md); }
 }
 @media (prefers-reduced-motion: reduce) {
   .cta.armed { animation: none; }
-  .pl-ava::after { transition-duration: var(--dur-hover), 0s; }
+  .pl::after { transition-duration: 0s, 0s; }
+  .pl-yes .pl-flash { animation: none; }
 }
 
 /* ---------- a phone held sideways (little height): everything tighter ----------

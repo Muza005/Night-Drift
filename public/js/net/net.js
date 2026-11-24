@@ -37,8 +37,9 @@ import { addMark, emitSmoke, clearMarks } from '../core/fx.js';
 import { clearInput } from '../core/input.js';
 import { audioInit } from '../core/audio.js';
 import { crash, bank, dropDrift } from '../game.js';
-import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note, cancelPanels } from '../ui/hud.js';
-import { renderLobby as drawLobby, openLobby, leaveLobby, openRoomGarage } from '../ui/lobbyScreen.js';
+import { flash, fmtT, fmtN, hex, el, info, showPanel, netStatus, note, dismissMenu, holdPicture, releasePicture, dropPicture } from '../ui/hud.js';
+import { fly, DUR as FLY } from '../ui/startFx.js';
+import { renderLobby as drawLobby, openLobby, leaveLobby, openRoomGarage, lobbyPicture } from '../ui/lobbyScreen.js';
 import { roster, seatOf, seatHex } from '../ui/seats.js';
 import { carMass, keepOut, newMem, collideStep, takeOut, receive, catchUp, kickStart, kickAt, kickUpdate } from './bump.js';
 import { predict, newView, correct, settle, reset as resetView, newStats, statArrive, statErr, errPct } from './ghostsync.js';
@@ -164,17 +165,26 @@ function onPhase(ph){
   if(ph==='lobby'||ph==='countdown') for(const g of NET.ghosts.values()) forget(g);   // a new run: last run's states are gone
   if(ph==='lobby'){ const from=G.state; leaveLobby(); G.state='lobby'; openLobby(from==='menu'||from==='results'?'forward':undefined); }
   else if(ph==='countdown'||ph==='race'){
+    // the way in: the lobby (or the garage opened from it) leaves its picture, dissolves, and
+    // the camera flies to the grid during the countdown's dark first second (hud.js, startFx.js)
+    const racing=G.state==='race'||G.state==='count', draw=!racing && ph==='countdown' && lobbyPicture();
+    if(draw) holdPicture(draw);
     leaveLobby();                                      // a garage opened from the lobby goes too
-    if(G.state==='race'||G.state==='count') return;   // already racing (e.g. after a reconnect)
+    if(racing) return;                                 // already racing (e.g. after a reconnect)
     const go=()=>{
-      if(!NET.room || G.state==='race'||G.state==='count') return;
-      cancelPanels(); $('menu').hidden=true; canvas.focus();
+      if(!NET.room || G.state==='race'||G.state==='count'){ dropPicture(); return; }
+      canvas.focus();
+      dismissMenu().then(ok=>{ if(ok && NET.room && G.state!=='race' && G.state!=='count') enter(); else dropPicture(); });
+    };
+    const enter=()=>{
       G.mode.enter(car,{slot:NET.me?NET.me.slot:0, online:true});
       G.raceT=0; G.lapT=0; G.lap=1; G.score=0; dropDrift(); clearMarks();
       NET.finished=false; NET.laps=s.laps; NET.sendT=0;
       const p=NET.room.state.phase;
-      if(p==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); }
-      else { G.state='count'; G.prevCount=99; }
+      if(p==='race'){ G.state='race'; G.lapT=Math.max(0,(serverNow()-s.startAt)/1000); fly(false); }
+      // (the flight only if it ends before the green light: a slow load leaves less time)
+      else { G.state='count'; G.prevCount=99; fly(!!draw && (s.startAt-serverNow())/1000 > FLY+0.2); }
+      releasePicture();
     };
     // the room's map and mode decide the scene (the highway module may still need to load)
     if(G.setMap) G.setMap(s.map);

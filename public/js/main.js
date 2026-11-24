@@ -10,13 +10,14 @@ import { trackMode } from './modes/track/index.js';
 import { car } from './player.js';
 import { addMark, emitSmoke, clearMarks, updateSmoke } from './core/fx.js';
 import { input, NOINPUT, KEYMAP, clearInput } from './core/input.js';
-import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft, audioRumble } from './core/audio.js';
+import { audioInit, audioUpdate, toggleSound, audioSuspend, audioResume, audioDraft, audioRumble, beep } from './core/audio.js';
 import { stepCar } from './core/physics.js';
 import { rig } from './core/cameraRig.js';
 import { scoring, dropDrift, resetToTrack, physicsHooks } from './game.js';
 import { collideGhosts, updateGhosts, sendState, leaveOnline, connectRoom, inviteCode } from './net/net.js';
 import { lift } from './net/bump.js';
-import { setT, fmtN, fmtT, showPanel, netStatus } from './ui/hud.js';
+import { setT, fmtN, fmtT, showPanel, netStatus, dismissMenu, hideMenu, releasePicture, dropPicture } from './ui/hud.js';
+import { fly, flying, flyCamera } from './ui/startFx.js';
 import { openGarage, garage } from './ui/garageScreen.js';
 import { lobby } from './ui/lobbyScreen.js';
 import { homeScreen, openHome as openHomeDeck } from './ui/homeScreen.js';
@@ -101,16 +102,31 @@ $('bPause').addEventListener('click',()=>{ if(NET.online) leaveOnline(); else if
 
 /* ---------- flow ---------- */
 // quick: straight after a crash, skip the 3-2-1 (back on the road in under a second)
-function startRace(quick=false){
+// flight: from the garage. The garage dissolves (its last picture was kept: hud.js
+// holdPicture), the camera flies to the car on the grid during a dark first second, then 3-2-1.
+function startRace(quick=false, flight=false){
   audioInit();
-  $('menu').hidden=true; canvas.focus();
+  canvas.focus();
+  if(flight){ dismissMenu().then(ok=>{ if(ok && G.state!=='race' && G.state!=='count') enterRun(quick, flight); else dropPicture(); }); return; }
+  hideMenu();                                                 // a restart: straight back on the road
+  enterRun(quick, flight);
+}
+function enterRun(quick, flight){
   G.mode.enter(car,{slot:0}); loadRecords();
   G.raceT=0; G.lapT=0; G.lap=1; G.score=0; G.runBest=0; G.runRecord=false; G.runEnd=false; dropDrift(); clearMarks();
   G.state='count';
+  fly(flight); releasePicture();
   if(quick){ G.cd=0.45; G.prevCount=1; $('count').textContent=''; }
+  else if(flying()){ G.cd=4; G.prevCount=4; $('count').textContent=''; }   // (no flight, reduced motion: 3 at once)
   else { G.cd=3; G.prevCount=3; showCount('3'); }
 }
-function showCount(t){ const c=$('count'); c.textContent=t; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
+// A number of the countdown: it lands with its beep (core/audio.js beep), «Старт!» higher.
+function showCount(t){
+  const c=$('count'), go=t==='Старт!';
+  c.textContent=t; c.classList.toggle('go',go);
+  c.classList.remove('tick'); void c.offsetWidth; c.classList.add('tick');
+  beep(go);
+}
 function pause(){ G.state='pause'; clearInput(); audioSuspend(); showPanel('pPause'); $('resume').focus(); }
 function resume(){ $('menu').hidden=true; G.state=G.cd>0?'count':'race'; audioResume(); canvas.focus(); }
 function toMenu(){
@@ -192,7 +208,7 @@ async function pick(id){
 // goes back to the mode cards and drops it.
 function openSoloGarage(dir){
   return openGarage({ kind:'solo', mode:G.mode.id, car:choice.car, paint:choice.paint, dir,
-    onGo(carId, paint){ savePick(carId, paint); applyLook(carId, paint); startRace(); },
+    onGo(carId, paint){ savePick(carId, paint); applyLook(carId, paint); startRace(false, true); },
     // back to the deck it came from: the map deck (on the map) or the modes (on «Трасса»)
     onBack(){ if(G.mode.id==='track') openHomeDeck({ level:'maps', dir:'back', focus: trackMode.mapId }); else openHome('back'); },
     // a map picked in the garage: the track switches to it now, its records come with it
@@ -366,6 +382,7 @@ function frame(now){
     menuA+=dt*.22; menuView();
   } else {
     G.mode.camera(car,dt);
+    flyCamera(camera,car,rig.look,dt,G.state==='race');                         // the way in: to the grid (ui/startFx.js)
   }
   camera.updateProjectionMatrix();
   moon.position.set(car.x+30,60+cy,car.z+20); moon.target.position.set(car.x,cy,car.z);

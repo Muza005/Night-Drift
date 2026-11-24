@@ -79,6 +79,16 @@ try {
   const want = JSON.stringify([['1', 'Ann', true, false], ['2', 'Bob', false, false], ['3', 'Cid', false, false]]);
   check('all three see the same list: host first with the crown, then by order', lists.every(l => JSON.stringify(l) === want), JSON.stringify(lists[1]));
   check('three free seats are left', await A.$$eval('#plist .pl-empty', e => e.length) === 3);
+  // the first free seat invites: one press puts the room's link on the clipboard
+  await A.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://localhost:${PORT}` });
+  check('only the first free seat invites', await A.$$eval('#plist .pl-empty', e => e.map(x => !x.querySelector('.pl-ask').hidden).join()) === 'true,false,false');
+  await A.click('#plist .pl-invite .pl-ask');
+  await A.waitForFunction(() => document.querySelector('#plist .pl-invite .pl-ask').hasAttribute('data-copied'), null, { timeout: 3000 }).catch(() => {});
+  const link = await A.evaluate(() => navigator.clipboard.readText()).catch(e => 'unread: ' + e.message);
+  check('«Позвать» copies the room\'s link (?room=CODE) and says so', new URL(link, 'http://x').searchParams.get('room') === code && /скопирована/.test(await A.innerText('#plist .pl-invite .pl-ask-sub')), link);
+  // «Призраки» (stage 4b): the row is there only when the room's state has the setting
+  const ghost = await A.evaluate(() => ({ hidden: document.getElementById('cfgGhost').hidden, known: typeof __nd.NET.room.state.ghostMode === 'boolean' }));
+  check('«Призраки» shows only with a server that has it', ghost.hidden === !ghost.known, JSON.stringify(ghost));
   check('the host has «Старт», the others «Готово»', await A.innerText('#startRace') === 'Старт' && await B.innerText('#startRace') === 'Готово' && await C.innerText('#startRace') === 'Готово');
 
   // «Старт» lights only after both others are ready
@@ -115,11 +125,11 @@ try {
   await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
 
   // the map: the plate for everyone, «Карта» for the host only
-  const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.bp') }));
+  const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.dg') }));
   for (const p of [A, B, C]) await p.waitForFunction(() => !document.getElementById('lobMap').hidden);
   await A.waitForFunction(() => !document.getElementById('lobMapBtn').hidden);
   const plates = await Promise.all([A, B, C].map(plate));
-  check('the plate under the settings: «Ночной город» with its blueprint, for everyone', plates.every(x => x.shown && x.bp && x.name === 'Ночной город'), JSON.stringify(plates[1]));
+  check('the plate in the settings panel: «Ночной город» with its diagram, for everyone', plates.every(x => x.shown && x.bp && x.name === 'Ночной город'), JSON.stringify(plates[1]));
   check('«Карта» for the host only', !(await A.$eval('#lobMapBtn', b => b.hidden)) && await B.$eval('#lobMapBtn', b => b.hidden) && await C.$eval('#lobMapBtn', b => b.hidden));
   await B.evaluate(() => document.getElementById('lobMapBtn').click()); await sleep(250);
   check('a guest cannot open the picker', !(await B.evaluate(() => document.getElementById('mapPop').matches(':popover-open'))));
@@ -224,6 +234,8 @@ try {
   check('in the race the host sees Bob\'s model and paint', seenByA.car === bCar[0] && seenByA.paint === 0xd3202a, JSON.stringify(seenByA));
   check('…and Bob sees the host\'s', seenByB.car === CARS[0][0], JSON.stringify(seenByB));
   check('seat colours: the host cyan, the second rose', seenByB.accent === 0x3ef0ff && seenByA.accent === 0xff3b6b);
+  // (the menu dissolves into the run first: --dur-screen, then it is hidden)
+  await A.waitForFunction(() => document.getElementById('menu').hidden, null, { timeout: 2000 }).catch(() => {});
   check('the lobby is gone in the race (no menu, no stand drawing)', await A.evaluate(() => document.getElementById('menu').hidden));
   void cCar;
 

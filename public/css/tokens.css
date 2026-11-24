@@ -137,6 +137,11 @@
   --deck-gap: 10px;
   --dur-focus: 220ms;            /* a card opening as focus reaches it */
   --dur-level: 320ms;            /* one deck rolling out, the next one in */
+  /* the lobby: the run's panel on the right, the seat cards along the bottom */
+  --lob-side: clamp(300px, 24vw, 360px);
+  --seat-w: clamp(132px, 11vw, 190px);
+  --seat-h: clamp(128px, 17vh, 164px);
+  --seat-slant: 18px;
 
   /* safe areas: phones with notches and home bars */
   --top: calc(14px + env(safe-area-inset-top, 0px));

@@ -13,7 +13,7 @@ import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
 import { renderer, drawBackdrop, menuPixels, backdropState } from '../core/render.js';
 import { createStand } from './stand.js';
-import { showPanel, hex, el, fmtT } from './hud.js';
+import { showPanel, hex, el, fmtT, holdPicture } from './hud.js';
 import { openMapPicker, mapPicker, diagram, km, DIFF_NAME } from './mapPicker.js';
 import { records } from '../records.js';
 import { MAPS } from '../modes/track/maps/index.js';
@@ -166,6 +166,7 @@ function leave(){
 $('garGo').addEventListener('click', () => {
   if(!S.open) return;
   const pick = [CARS[S.idx].id, S.paint], go = S.onGo;
+  if(S.kind === 'solo') holdPicture(frame);            // a run starts: the car on its stand stays a moment (hud.js)
   leave(); go && go(...pick);
 });
 $('garBack').addEventListener('click', back);
