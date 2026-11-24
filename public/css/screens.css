@@ -686,7 +686,8 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
 .cfg-title small { font: 600 var(--fs-xs) var(--f-body); color: var(--text-quiet); }
 .lob-cfg fieldset { margin: 0; padding: 0; border: 0; min-inline-size: 0; }
 .cfg-dens { display: flex; align-items: center; gap: var(--sp-3); }
-.cfg-dens legend { float: left; margin-inline-end: var(--sp-3); }
+.cfg-dens legend, .cfg-ghost legend { float: left; margin-inline-end: var(--sp-3); }
+.cfg-ghost { display: flex; align-items: center; gap: var(--sp-3); }
 .cfg-row { display: flex; align-items: center; gap: var(--sp-3); }
 .lob-cfg .seg-radio span { padding: 8px 12px; }
 .lob-cfg .icon-btn { inline-size: 36px; block-size: 36px; }

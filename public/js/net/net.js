@@ -48,6 +48,7 @@ import { carMass, keepOut, newMem, collideStep, takeOut, receive, catchUp, kickS
 import { predict, newView, correct, settle, reset as resetView, newStats, statArrive, statErr, errPct } from './ghostsync.js';
 import { decodeState } from './statecodec.js';
 import { PROTOCOL, UPDATED, UPDATED_CODE } from './protocol.js';
+import { playersCollide, ghostAlpha, setCarAlpha, disposeAlpha } from './ghostmode.js';
 
 function endpoint(){
   try{ const q=new URLSearchParams(location.search).get('server'); if(q) return q; }catch(e){}
@@ -161,6 +162,7 @@ function bindRoom(room){
   room.state.listen('duration',()=>renderLobby());
   room.state.listen('density',()=>renderLobby());
   room.state.listen('laps',()=>renderLobby());
+  room.state.listen('ghostMode',()=>renderLobby());
   room.state.listen('phase',ph=>onPhase(ph));
   room.onLeave(code=>onRoomLeave(room,code));
 }
@@ -253,7 +255,7 @@ function addGhost(id,p){
   const ac=accent(id), m=makeCar(look(p),false), label=makeLabel(p.name,ac); m.root.add(label); m.root.visible=false;
   m.under.material.color.setHex(ac);
   const fx=createWake(); scene.add(fx.root);              // its slipstream air (core/draftfx.js)
-  const g={id,p,m,fx,trail:createTrail(),label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0,view:newView(),stats:newStats()};
+  const g={id,p,m,fx,trail:createTrail(),label,color:p.color,car:p.car,name:p.name,accent:ac,buf:[],x:0,z:0,view:newView(),stats:newStats(),alpha:1,seeThrough:new Map()};
   NET.ghosts.set(id,g);
   dressCar(m,p.car,p.color);                              // their car's own model (it loads once)
 }
@@ -261,6 +263,7 @@ function addGhost(id,p){
 // model, the paint, the name tag and the glow under the car follow.
 function ghostLook(g,p){
   const ac=accent(g.id);
+  if(g.car!==p.car || g.color!==p.color) solid(g);          // repaint the real materials, not a see-through copy
   if(g.car!==p.car){ g.car=p.car; g.color=p.color; setPaint(g.m.paint, look(p)); dressCar(g.m,p.car,p.color); }
   else if(g.color!==p.color){ g.color=p.color; g.m.wantCode=p.color; setPaint(g.m.paint, look(p)); if(g.m.model) g.m.model.code=p.color; }
   if(g.name===p.name && g.accent===ac) return;
@@ -272,7 +275,7 @@ function ghostLook(g,p){
 }
 // seats move when a player leaves: every tag again
 function relabel(){ if(!NET.room) return; NET.room.state.players.forEach((p,id)=>{ const g=NET.ghosts.get(id); if(g) ghostLook(g,p); }); }
-function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; g.m.dressing=(g.m.dressing||0)+1; disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
+function removeGhost(id){ const g=NET.ghosts.get(id); if(!g) return; g.m.dressing=(g.m.dressing||0)+1; solid(g); disposeCar(g.m); scene.remove(g.fx.root); disposeWake(g.fx); NET.ghosts.delete(id); }
 function clearGhosts(){ for(const id of [...NET.ghosts.keys()]) removeGhost(id); }
 // A state of that car arrived (at our server clock `arrival`). Its t is the sender's clock
 // (synced to the server) at the moment the state was true; an older one than we have is dropped.
@@ -283,7 +286,9 @@ function pushSnap(g,s,arrival){
   b.push(s);
   if(b.length>2) b.shift();
 }
-function forget(g){ g.buf.length=0; g.last=g.lastPrev=null; resetView(g.view); g.kick=null; }
+function forget(g){ g.buf.length=0; g.last=g.lastPrev=null; resetView(g.view); g.kick=null; solid(g); }
+// ghost mode's see-through look off, its material copies freed (ghostmode.js)
+function solid(g){ if(g.alpha<1) g.alpha=setCarAlpha(g.m.root,1,g.seeThrough); disposeAlpha(g.seeThrough); }
 const plus=(p,k)=>({x:p.x+k.x,z:p.z+k.z,h:p.h+k.h,vx:p.vx+k.vx,vz:p.vz+k.vz,w:p.w+k.w});
 // g.kick: our local guess of how an opponent reacts to a hit we just decided (bump.js
 // kickStart/kickAt), drawn until their own updates show the real reaction.
@@ -293,9 +298,10 @@ const plus=(p,k)=>({x:p.x+k.x,z:p.z+k.z,h:p.h+k.h,vx:p.vx+k.vx,vz:p.vz+k.vz,w:p.
    other decides it (one judge per hit), changes its own car and sends the other car's share
    through the server; the other player applies only that, lined up with what the judge
    already shows. While it waits, the other car is drawn out of its own (updateGhosts). */
-// Can our car and g touch right now? (both racing, neither a blinking crashed car, same level)
+// Can our car and g touch right now? (both racing, neither a blinking crashed car, same level,
+// and not in a ghost-mode room: there players' cars pass through each other, ghostmode.js)
 function touchable(g,nowS){
-  return NET.online && NET.room && G.state==='race' && !NET.finished && !(G.mode.isGhost && G.mode.isGhost())
+  return NET.online && NET.room && playersCollide(NET.room.state) && G.state==='race' && !NET.finished && !(G.mode.isGhost && G.mode.isGhost())
     && g.m.root.visible && !g.p.finished && g.vx!==undefined && nowS>=g.p.ghostUntil
     && Math.abs((g.y||0)-(car.y||0))<=(G.mode.sameLevel||3);
 }
@@ -319,6 +325,7 @@ export function collideGhosts(dt=1/120){
 function onBump(m){
   if(G.state!=='race' || NET.finished || !m) return;
   if(G.mode.isGhost && G.mode.isGhost()) return;
+  if(NET.room && !playersCollide(NET.room.state)) return;   // ghost mode: no hits (the server drops them too)
   const g=NET.ghosts.get(m.from); if(!g) return;
   const mem=g.mem||(g.mem=newMem());
   const hit=receive(car,m,mem,{now:performance.now(),tS:serverNow(),mMe:carMass(car.carId),mOther:carMass(g.car),meId:NET.room&&NET.room.sessionId,fromId:m.from,rtt:NET.rtt,air:!!G.mode.hops});
@@ -387,6 +394,9 @@ export function updateGhosts(dt){
         const o=g.view.off, n=Math.hypot(o.x,o.z), cap=PIN_MAX; if(n>cap){ o.x*=cap/n; o.z*=cap/n; } } }
     g.x=s.x; g.z=s.z; g.h=s.h; g.y=s.y||0;
     m.root.position.set(s.x,g.y+(G.mode.hops?0:kd.y),s.z); m.root.rotation.y=s.h;   // (with heights their own hop comes in y)
+    // ghost mode: a car near ours is see-through, so ours shows through it (ghostmode.js)
+    { const a=ghostAlpha(G.state==='race' && NET.room && !playersCollide(NET.room.state), Math.hypot(s.x-car.x,s.z-car.z));
+      if((a<1 || g.alpha<1) && Math.abs(a-g.alpha)>0.005) g.alpha=setCarAlpha(m.root,a,g.seeThrough); }   // only when it changes
     // a name tag right at the camera (that car is just behind ours) would fill the screen:
     // it fades out closer than 16 m and is gone by 8 m (the tags are for cars further off;
     // the cars around ours are named in the standings)

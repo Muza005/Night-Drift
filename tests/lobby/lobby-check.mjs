@@ -13,6 +13,8 @@
 // plate under the settings shows the map to all; a new map: the guests get a short note
 // and every «Готово» goes; a player who comes in later sees the room's map; the race
 // starts on it in all three browsers.
+// «Призраки» (plan 3 stage 4b): off by default, shown to everyone in both modes, only the
+// host can switch it (a guest's message is refused too), a change takes back every «Готово».
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -21,7 +23,9 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2598;
+const PORT = Number(process.env.ND_PORT) || 2598;
+// SHOT_DIR=dir: screenshots of the lobby with «Призраки» on (the host's and a guest's view)
+const SHOT_DIR = process.env.SHOT_DIR;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {
@@ -109,8 +113,31 @@ try {
   await A.click('#cfgMinsUp'); await A.click('#cfgMinsUp'); await A.click('#cfgDens label:nth-child(3)');
   await B.waitForFunction(() => __nd.NET.room.state.duration === 300 && __nd.NET.room.state.density === 'high');
   check('«Трасса»: the host sets 5 minutes and high traffic, the others see them', await B.innerText('#cfgMins') === '5' && await B.$eval('#rowLaps', e => e.hidden) && await B.$eval('#cfgDens input[value="high"]', i => i.checked));
+  check('«Трасса»: «Призраки» is there too', await B.$eval('#cfgGhost', e => !e.hidden && e.offsetParent !== null));
   await A.click('#cfgMode label:nth-child(1)');
   await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
+
+  // «Призраки»: the host's switch, everyone sees it
+  const ghostUi = p => p.evaluate(() => ({ shown: document.getElementById('cfgGhost').offsetParent !== null,
+    on: document.querySelector('#cfgGhost input[value="on"]').checked, off: document.querySelector('#cfgGhost input[value="off"]').checked,
+    locked: [...document.querySelectorAll('#cfgGhost input')].every(i => i.disabled), state: __nd.NET.room.state.ghostMode }));
+  for (const p of [A, B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="off"]').checked);
+  let gs = await Promise.all([A, B, C].map(ghostUi));
+  check('«Призраки»: off by default, shown to everyone', gs.every(g => g.shown && g.off && !g.on && g.state === false), JSON.stringify(gs[1]));
+  check('…only the host can switch it', !gs[0].locked && gs[1].locked && gs[2].locked);
+  await B.evaluate(() => __nd.NET.room.send('config', { ghostMode: true })); await sleep(400);
+  check('…a guest\'s message is refused, «Готово» stays', await A.evaluate(() => __nd.NET.room.state.ghostMode) === false && !(await startOff(A)));
+  await A.click('#cfgGhost label:nth-child(2)');
+  for (const p of [B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="on"]').checked);
+  gs = await Promise.all([A, B, C].map(ghostUi));
+  check('the host turns it on: everyone sees «Вкл»', gs.every(g => g.on && g.state === true));
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  check('…and every «Готово» is taken back', await B.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false' && await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false');
+  if (SHOT_DIR) { await sleep(400); await A.screenshot({ path: path.join(SHOT_DIR, 'lobby-ghost-host.png') }); await B.screenshot({ path: path.join(SHOT_DIR, 'lobby-ghost-guest.png') }); }
+  await A.click('#cfgGhost label:nth-child(1)');
+  for (const p of [B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="off"]').checked);
+  await B.click('#startRace'); await C.click('#startRace');
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
 
   // the map: the plate for everyone, «Карта» for the host only
   const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.bp') }));

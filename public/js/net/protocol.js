@@ -7,7 +7,9 @@
 // (net/bump.js, net/statecodec.js, the cars' hitboxes and masses).
 //   1  (none sent) up to plan 3 stage 3: two-circle car hits
 //   2  plan 3 stage 4: hits between the cars' hitbox polygons, rigid bodies
-export const PROTOCOL = 2;
+//   3  plan 3 stage 4b: ghost mode (room state ghostMode, config { ghostMode }): no hits
+//      between players while it is on
+export const PROTOCOL = 3;
 export const UPDATED = 'Игра обновилась — обновите страницу.';
 // the close/error code a refused game gets (Colyseus: 4000-4999 are the room's own)
 export const UPDATED_CODE = 4400;

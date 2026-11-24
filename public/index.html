@@ -579,6 +579,14 @@ body{margin:0}
             <label><input type="radio" name="lobDens" value="high"><span>Высокий</span></label>
           </div>
         </fieldset>
+        <fieldset class="cfg-ghost" id="cfgGhost" aria-describedby="cfgGhostHint">
+          <legend class="set-name">Призраки</legend>
+          <div class="seg-radio">
+            <label><input type="radio" name="lobGhost" value="off"><span>Выкл</span></label>
+            <label><input type="radio" name="lobGhost" value="on"><span>Вкл</span></label>
+          </div>
+          <span class="vh" id="cfgGhostHint">Включено — машины игроков проходят друг сквозь друга, ударов между игроками нет</span>
+        </fieldset>
         <div class="lob-map" id="lobMap">
           <span class="map-thumb" id="lobMapThumb"></span>
           <span class="lob-map-txt"><span class="set-name">Карта</span><b class="lob-map-name" id="lobMapName">Ночной город</b></span>

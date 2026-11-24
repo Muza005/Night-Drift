@@ -143,6 +143,7 @@ class RaceState extends Schema {
     this.map = 'neon';       // drift map id (public/js/modes/track/maps/), picked by the host in the lobby
     this.duration = 180;     // traffic: run length, s (60..600, whole minutes)
     this.density = 'mid';    // traffic: low | mid | high
+    this.ghostMode = false;  // «Призраки»: players' cars pass through each other, no hits between them
     this.endAt = 0;          // traffic: server clock (ms) when the run ends
     this.seed = 0;           // traffic: seed of this run's traffic
     this.players = new MapSchema();
@@ -150,7 +151,8 @@ class RaceState extends Schema {
 }
 defineTypes(RaceState, {
   phase: 'string', hostId: 'string', laps: 'uint8', startAt: 'number',
-  mode: 'string', map: 'string', duration: 'uint16', density: 'string', endAt: 'float64', seed: 'uint32',
+  mode: 'string', map: 'string', duration: 'uint16', density: 'string', ghostMode: 'boolean',
+  endAt: 'float64', seed: 'uint32',
   players: { map: Player },
 });
 
@@ -243,7 +245,8 @@ class RaceRoom extends Room {
       p.name = cleanName(m.name);
     });
 
-    // Host only, between runs: the mode, map and laps (track), run length and density (traffic).
+    // Host only, between runs: the mode, map and laps (track), run length and density (traffic),
+    // and ghost mode (both modes: true or false only).
     // A value out of range is ignored, the rest of the message still counts.
     this.onMessage('config', (client, m) => {
       if (client.sessionId !== this.state.hostId || !isObj(m) || !this.betweenRuns()) return;
@@ -257,6 +260,11 @@ class RaceRoom extends Room {
       if (Number.isInteger(m.laps) && m.laps >= MIN_LAPS && m.laps <= MAX_LAPS) this.state.laps = m.laps;
       if (okDuration(m.duration)) this.state.duration = m.duration;
       if (DENSITIES.includes(m.density)) this.state.density = m.density;
+      // ghost mode changes how the race is driven: it takes back everyone's «Готово» too
+      if (typeof m.ghostMode === 'boolean' && m.ghostMode !== this.state.ghostMode) {
+        this.state.ghostMode = m.ghostMode;
+        for (const p of this.state.players.values()) p.ready = false;
+      }
     });
 
     // Host only, between runs: send a player out of the room for good. They are told
@@ -392,8 +400,10 @@ class RaceRoom extends Room {
     //   more than MAX_DV; spin and hop only as much as that hit can give, push within PUSH;
     // - at most 10 hits a second from one player to another (a burst of 3), the game sends
     //   one per 100 ms while two cars scrape.
+    // In ghost mode there are no hits between players at all (the games don't send them;
+    // one that does is not passed on).
     this.onMessage('bump', (client, m) => {
-      if (this.state.phase !== 'race' || !isObj(m) || typeof m.to !== 'string') return;
+      if (this.state.phase !== 'race' || this.state.ghostMode || !isObj(m) || typeof m.to !== 'string') return;
       const from = this.state.players.get(client.sessionId), to = this.state.players.get(m.to);
       if (!from || !to || m.to === client.sessionId || from.finished || to.finished) return;
       const now = Date.now();

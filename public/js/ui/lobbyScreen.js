@@ -200,6 +200,7 @@ function drawSettings(s){
   $('cfgWho').textContent = host ? 'меняете вы' : 'меняет хост';
   for(const r of document.querySelectorAll('#cfgMode input')){ r.checked = r.value === s.mode; r.disabled = !host; }
   for(const r of document.querySelectorAll('#cfgDens input')){ r.checked = r.value === (s.density || 'mid'); r.disabled = !host; }
+  for(const r of document.querySelectorAll('#cfgGhost input')){ r.checked = r.value === (s.ghostMode ? 'on' : 'off'); r.disabled = !host || !between(); }
   $('rowLaps').hidden = !track;
   $('rowMins').hidden = $('cfgDens').hidden = track;
   $('cfgLaps').textContent = s.laps; $('cfgMins').textContent = mins;
@@ -228,6 +229,8 @@ $('cfgMinsDown').addEventListener('click', () => step('mins', -1));
 $('cfgMinsUp').addEventListener('click', () => step('mins', +1));
 for(const r of document.querySelectorAll('#cfgMode input')) r.addEventListener('change', () => { if(r.checked) config({ mode: r.value }); });
 for(const r of document.querySelectorAll('#cfgDens input')) r.addEventListener('change', () => { if(r.checked) config({ density: r.value }); });
+// ghost mode («Призраки», plan 3 stage 4b): one setting for the room, players' cars pass through each other
+for(const r of document.querySelectorAll('#cfgGhost input')) r.addEventListener('change', () => { if(r.checked) config({ ghostMode: r.value === 'on' }); });
 // an arrow that just went out hands its focus to the other one
 for(const [a, b] of [['cfgLapsDown', 'cfgLapsUp'], ['cfgMinsDown', 'cfgMinsUp']]) for(const [x, y] of [[a, b], [b, a]])
   $(x).addEventListener('click', () => requestAnimationFrame(() => { if($(x).disabled && document.activeElement === $(x)) $(y).focus(); }));

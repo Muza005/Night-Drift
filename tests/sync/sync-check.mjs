@@ -8,6 +8,9 @@
 //   npm run test:sync -- --headed         (two real windows on the GPU instead of software
 //                                           rendering at a few frames a second)
 //   ND_PORT=4110 npm run test:sync        (the server on 4110, the proxy on 4111)
+//   npm run test:sync -- --ghost          (ghost mode, plan 3 stage 4b: the host turns
+//                                           «Призраки» on in the lobby; A drives through B
+//                                           and must not push it, feel a hit or see B jump)
 //
 // What it does:
 // 1. Starts the game server and a proxy that adds ~150 ms of ping with jitter
@@ -38,6 +41,7 @@ const PORT = Number(process.env.ND_PORT) || 2577, PROXY = PORT + 1;
 const RUNS = Number(opt('runs', 1));
 const ONE_WAY = Number(opt('ping', 75)), JITTER = Number(opt('jitter', 25));   // ms each way
 const MODE = opt('mode', 'track');
+const GHOST = args.includes('--ghost');
 const CARD = MODE === 'traffic' ? '#mTraffic' : '#mTrack';
 // highway: two players' pictures of the same bot at the same server moment (each
 // player's clock error taken out, see below), and how far each clock may be off
@@ -142,6 +146,11 @@ async function runOnce(browser) {
     const code = (await A.innerText('#roomCode')).trim();
     step = 'B joins'; await B.evaluate(() => localStorage.setItem('nightdrift.name', 'B')); await B.click('#goOnline'); await B.fill('#codeIn', code); await B.click('#joinRoom');
     await A.waitForFunction(() => window.__nd.NET.room.state.players.size === 2);
+    if (GHOST) {                                         // the host turns ghost mode on in the lobby; B sees it
+      step = 'ghost mode'; await A.check('#cfgGhost input[value=on]');
+      await B.waitForFunction(() => window.__nd.NET.room.state.ghostMode === true && document.querySelector('#cfgGhost input[value=on]').checked);
+      if (!(await B.evaluate(() => document.querySelector('#cfgGhost input[value=on]').disabled))) throw new Error('a guest can change ghost mode');
+    }
     await sleep(1500);                                   // clock sync settles
     step = 'race start'; await B.click('#startRace'); await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false'); await A.click('#startRace');   // B: «Готово», then A: «Старт»
     for (const p of [A, B]) await p.waitForFunction(() => window.__nd.NET.room.state.phase === 'race', null, { timeout: 20000 });
@@ -152,7 +161,7 @@ async function runOnce(browser) {
     // every frame, with the frame's time.
     await A.evaluate(() => { const nd = window.__nd, c = nd.car; for (const g of nd.NET.ghosts.values()) c.h = Math.atan2(g.x - c.x, g.z - c.z);
       window.__hit = []; const tick = ts => { if (!window.__hit) return; requestAnimationFrame(tick);
-        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'B') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz, g.off ? g.off.x : 0, g.off ? g.off.z : 0, g.last ? g.last.t : 0, g.kick ? (g.kick.run ? 2 : 1) : 0, g.last ? g.last.vx : 0, g.last ? g.last.vz : 0]); };
+        for (const g of nd.NET.ghosts.values()) if (g.p.name === 'B') window.__hit.push([ts, g.x, g.z, nd.car.vx, nd.car.vz, g.off ? g.off.x : 0, g.off ? g.off.z : 0, g.last ? g.last.t : 0, g.kick ? (g.kick.run ? 2 : 1) : 0, g.last ? g.last.vx : 0, g.last ? g.last.vz : 0, Math.hypot(g.x - nd.car.x, g.z - nd.car.z), g.alpha === undefined ? 1 : g.alpha]); };
       requestAnimationFrame(tick); });
     // and B its own velocity and its picture of A (A's hit reaches B in A's updates)
     await B.evaluate(() => { const nd = window.__nd;
@@ -164,7 +173,12 @@ async function runOnce(browser) {
     // Software rendering runs a few frames a second, and below 20 fps the game runs in slow
     // motion: A may need many seconds to cover the few metres. Drive until the hit lands
     // (or 12 s have passed), then a moment more for it to reach B.
-    for (let i = 0; i < 120; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B)); if (bump > MIN_BUMP) break; }
+    // Ghost mode: drive on until A has gone through B and out the other side (or 12 s).
+    let near = Infinity;
+    for (let i = 0; i < 120; i++) { await sleep(100); bump = Math.max(bump, await speedOf(B));
+      if (!GHOST) { if (bump > MIN_BUMP) break; continue; }
+      const d = await A.evaluate(() => { for (const g of window.__nd.NET.ghosts.values()) return Math.hypot(g.x - window.__nd.car.x, g.z - window.__nd.car.z); return Infinity; });
+      near = Math.min(near, d); if (near < 1.5 && d > 5) { await sleep(300); break; } }
     await A.keyboard.up('w'); await sleep(1000);
     const hitRec = await A.evaluate(() => { const r = window.__hit; window.__hit = null; return r; });
     const hitRecB = await B.evaluate(() => { const r = window.__hit; window.__hit = null; return r; });
@@ -186,6 +200,28 @@ async function runOnce(browser) {
     // B's picture of A from B's own hit on (B feels the hit when A's updates with A's own
     // reaction come in too): also judged on the GPU only
     const jumpB = jumpOf(hitRecB);
+    // Ghost mode: how close A came to B's centre, how see-through A drew B, and the most B's
+    // drawn speed changed from one frame to the next while A drove through it (no hit: all frames)
+    let ghost = null;
+    if (GHOST) {
+      let most = 0, closest = Infinity, alpha = 1;
+      for (let i = 2; i < hitRec.length; i++) {
+        const d1 = Math.max(4, hitRec[i][0] - hitRec[i - 1][0]), d0 = Math.max(4, hitRec[i - 1][0] - hitRec[i - 2][0]);
+        most = Math.max(most, Math.hypot((hitRec[i][1] - hitRec[i - 1][1]) / d1 - (hitRec[i - 1][1] - hitRec[i - 2][1]) / d0,
+          (hitRec[i][2] - hitRec[i - 1][2]) / d1 - (hitRec[i - 1][2] - hitRec[i - 2][2]) / d0) * 1000 / 60);
+        closest = Math.min(closest, hitRec[i][11]); alpha = Math.min(alpha, hitRec[i][12]);
+      }
+      // a hit on B would change A's velocity by more than 1.5 m/s in one frame while the
+      // cars' bodies can touch (centres within 5 m, both hitboxes' half-lengths), up to where A
+      // has gone through B and out the other side: right after, A meets the rail or wall the
+      // grid faces (on the highway ~6 m past B), which is no hit
+      let felt = false, through = false;
+      for (let i = 1; i < hitRec.length && !(through && hitRec[i][11] > 5); i++) {
+        if (hitRec[i][11] < 1.5) through = true;
+        if (hitRec[i][11] < 5 && Math.hypot(hitRec[i][3] - hitRec[i - 1][3], hitRec[i][4] - hitRec[i - 1][4]) > 1.5) felt = true;
+      }
+      ghost = { jump: +most.toFixed(2), closest: +closest.toFixed(2), alpha: +alpha.toFixed(2), felt };
+    }
 
     step = 'prediction drive';
     // Prediction: A drives, both record every frame.
@@ -263,7 +299,7 @@ async function runOnce(browser) {
       rtt: Math.round(rtt), fps: Math.round(fps), clock,
       speedKmh: Math.round(ra.reduce((s, r) => s + r[3], 0) / ra.length * 3.6),
       mean: +mean.toFixed(2), p95: +errs[Math.floor(errs.length * 0.95)].toFixed(2), bump: +bump.toFixed(2), errors,
-      jump: jump === null ? null : +jump.toFixed(2), jumpB: jumpB === null ? null : +jumpB.toFixed(2),
+      jump: jump === null ? null : +jump.toFixed(2), jumpB: jumpB === null ? null : +jumpB.toFixed(2), ghost,
       p50: +errs[Math.floor(errs.length * 0.5)].toFixed(2),
       fast: errsFast.length ? { n: errsFast.length, p95: +errsFast[Math.floor(errsFast.length * 0.95)].toFixed(2) } : null,
       net: net && { hz: Math.round(net.hz), delay: Math.round(net.delay), jitter: +net.jitter.toFixed(1), age: Math.round(net.age), p50: +net.p50.toFixed(2), p95: +net.p95.toFixed(2) },
@@ -285,10 +321,21 @@ try {
   for (let i = 0; i < RUNS; i++) {
     const r = await runOnce(browser);
     const bad = [];
-    if (r.bump < MIN_BUMP) bad.push(`hit did not reach player B (B speed ${r.bump} m/s)`);
-    if (HEADED && r.jump === null) bad.push('A never felt its hit on B');
-    if (HEADED && r.jump > LIMIT_JUMP) bad.push(`A's picture of B jumped ${r.jump} m in a frame after the hit > ${LIMIT_JUMP} m`);
-    if (HEADED && r.jumpB > LIMIT_JUMP) bad.push(`B's picture of A jumped ${r.jumpB} m in a frame after the hit > ${LIMIT_JUMP} m`);
+    if (GHOST) {
+      // ghost mode: A drives through B (their centres within 1.5 m), B is not pushed, A feels
+      // no hit, B is drawn see-through, and A's picture of B does not jump
+      const g = r.ghost;
+      if (r.bump >= MIN_BUMP) bad.push(`ghost mode: B was pushed to ${r.bump} m/s`);
+      if (g.felt) bad.push('ghost mode: A felt a hit on B');
+      if (!(g.closest < 1.5)) bad.push(`ghost mode: A did not drive through B (closest ${g.closest} m)`);
+      if (g.alpha > 0.55) bad.push(`ghost mode: B was not drawn see-through near A (alpha ${g.alpha})`);
+      if (HEADED && g.jump > LIMIT_JUMP) bad.push(`ghost mode: A's picture of B jumped ${g.jump} m in a frame > ${LIMIT_JUMP} m`);
+    } else {
+      if (r.bump < MIN_BUMP) bad.push(`hit did not reach player B (B speed ${r.bump} m/s)`);
+      if (HEADED && r.jump === null) bad.push('A never felt its hit on B');
+      if (HEADED && r.jump > LIMIT_JUMP) bad.push(`A's picture of B jumped ${r.jump} m in a frame after the hit > ${LIMIT_JUMP} m`);
+      if (HEADED && r.jumpB > LIMIT_JUMP) bad.push(`B's picture of A jumped ${r.jumpB} m in a frame after the hit > ${LIMIT_JUMP} m`);
+    }
     if (r.fast && r.fast.p95 > LIMIT_P95) bad.push(`p95 error ${r.fast.p95} m > ${LIMIT_P95} m where A's speed changes fast`);
     if (r.mean > LIMIT_MEAN) bad.push(`mean error ${r.mean} m > ${LIMIT_MEAN} m`);
     if (r.p95 > LIMIT_P95) bad.push(`p95 error ${r.p95} m > ${LIMIT_P95} m`);
@@ -300,7 +347,8 @@ try {
     }
     console.log(`run ${i + 1}: ping ${r.rtt} ms, ${r.fps} fps, clock error A ${r.clock[0]} ms B ${r.clock[1]} ms, A at ${r.speedKmh} km/h → B sees A off by ` +
       `mean ${r.mean} m, p50 ${r.p50} m, p95 ${r.p95} m (p95 ${r.fast ? r.fast.p95 : '-'} m where A's speed changes fast); bump pushed B to ${r.bump} m/s, ` +
-      `the picture of the other car jumped at most ${r.jump} m (A's of B) / ${r.jumpB} m (B's of A) in a frame after it` +
+      (r.ghost ? `ghost mode: A came within ${r.ghost.closest} m of B's centre, drew B at alpha ${r.ghost.alpha}, A's picture of B jumped at most ${r.ghost.jump} m in a frame, A felt a hit: ${r.ghost.felt}` :
+        `the picture of the other car jumped at most ${r.jump} m (A's of B) / ${r.jumpB} m (B's of A) in a frame after it`) +
       (r.net ? `; B's game: A's updates ${r.net.hz}/s, delay ${r.net.delay} ms, jitter ${r.net.jitter} ms, age ${r.net.age} ms, corrections p50 ${r.net.p50} m p95 ${r.net.p95} m` : '') +
       (r.bots ? `; bots: A and B differ by mean ${r.bots.mean} m, p95 ${r.bots.p95} m at the same server moment, ${r.bots.raw} m with the clock error (${r.bots.n} samples)` : '') +
       `  ${bad.length ? 'FAIL: ' + bad.join(', ') : 'ok'}`);
