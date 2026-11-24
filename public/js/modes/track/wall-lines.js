@@ -4,32 +4,48 @@
 // (tests/tools/map-scan.mjs). Pure (no DOM, no rendering): Node runs it.
 //
 // Two kinds of wall, which today are not the same line:
-// - drawn: drawnWalls(), the lines scene.js puts the wall meshes on.
+// - drawn: drawnWalls(), the polylines scene.js puts the wall meshes on (stage 2: walls.js,
+//   built by geometry.js setMap as WALLS; stage 3 collides with the same lines).
 // - collision: where constrainToTrack really stops the car. Not computed from the rules
 //   but measured: a still car is put at a point and constrainToTrack is run once; if it
 //   moved the car, the point is outside. Along a ray (out from the centre line, or from a
 //   shortcut's centre line) the first such point is the limit for the car's centre; the
 //   car's body (its allowance, WALL_ALLOW) reaches that much further, measured along the
 //   wall's normal there (the direction the car was pushed back).
-import { P, NM, TG, Y, TB, N, WALL, SHORTCUTS, SAME_LEVEL, safeOffsets, constrainToTrack } from './geometry.js';
+import { P, NM, TG, Y, TB, N, WALL, SHORTCUTS, SAME_LEVEL, WALLS, safeOffsets, constrainToTrack } from './geometry.js';
+import { offsetLineOf } from './walls.js';
 import { WALL_ALLOW } from '../../core/contact.js';
 import { HITLOG } from '../../core/hitlog.js';
 
 export const ALLOW = WALL_ALLOW;        // m: how close the car's centre may come to a wall
-// Heights above the road of the flat strips scene.js draws (m) and of the ground plane on a
-// map with heights (on a flat map the ground is at 0)
-export const STRIP_Y = { road: .02, curb: .035, runoff: .012, zebra: .04, cutRunoff: .01, cutRoad: .04, cutCurb: .035 };
+// Heights above the road of the flat strips scene.js draws (m). The main road, its curbs and
+// run-off lie on the road itself: they never overlap, and the ground under them and the
+// shortcuts' strips over them are kept apart by polygonOffset (scene.js LAYER), not by
+// height. The shortcuts' asphalt and curbs keep a few cm over the main road's (their mouths
+// are one clean surface), the zebra hatching over the curb.
+export const STRIP_Y = { road: 0, curb: 0, runoff: 0, zebra: .04, cutRunoff: 0, cutRoad: .04, cutCurb: .035 };
+// polygonOffset (factor = units) per layer: > 0 pushed back, < 0 drawn over
+export const LAYER = { ground: 4, cutRunoff: 2, main: 0, cutRoad: -1, zebra: -2, line: -3 };
 export const GROUND_Y = -.02;
+// The ground plane's height on the active map: 0 on a flat map («Ночной город», where it
+// always was); on a map with heights GROUND_Y, or, where some drivable surface (the banked
+// edge of the road, out to its walls, a shortcut) dips below that, 0.5 m under the lowest of
+// them (the walls then get a skirt down to the ground all round, scene.js).
+export const GROUND_DROP = .5;
+export function groundLevel(){
+  const flat = Y.every(y => y === 0), base = flat ? 0 : GROUND_Y;
+  let lo = Infinity;
+  for(const s of [1,-1]){ const L=offsetLine(s*WALL, 0); for(let i=0;i<N;i++) lo=Math.min(lo, L.y[i], Y[i]); }
+  for(const sc of SHORTCUTS) for(let k=0;k<sc.n;k++) lo=Math.min(lo, sc.y[k]);
+  if(WALLS) for(const L of WALLS.lines) for(let k=0;k<L.n;k++) lo=Math.min(lo, L.y[k]);
+  return lo < base + (flat ? -1e-6 : .01) ? Math.floor((lo - GROUND_DROP) * 100) / 100 : base;
+}
 
 // An offset line along the track: offset off (m, > 0 left, or per-point array) of every track point,
 // on the banked road plus yOff; a point that would step back along the track is pulled
 // onto the previous one
 export function offsetLine(off, yOff){
-  const O=typeof off==='number'?safeOffsets(off):off, x=new Float64Array(N), y=new Float64Array(N), z=new Float64Array(N);
-  for(let i=0;i<N;i++){ const o=O[i]; x[i]=P[i].x+NM[i].x*o; z[i]=P[i].z+NM[i].z*o; y[i]=Y[i]+o*TB[i]+yOff; }
-  for(let pass=0;pass<2;pass++) for(let i=0;i<N;i++){ const j=(i+1)%N, t=TG[i];
-    if((x[j]-x[i])*t.x+(z[j]-z[i])*t.z<0){ x[j]=x[i]; z[j]=z[i]; } }
-  return {x,y,z};
+  return offsetLineOf({ N, P, NM, TG, Y, TB }, typeof off==='number'?safeOffsets(off):off, yOff);
 }
 // whether (x, z) is inside some shortcut's walls (plus m): the main road's walls open there
 export function inCut(x, z, m=0){
@@ -43,28 +59,12 @@ export function inCut(x, z, m=0){
 // how far (x, z) is from the main road's centre line
 export function mainDist(x, z){ let bd=1e18; for(let i=0;i<N;i+=2){ const dx=P[i].x-x, dz=P[i].z-z, d=dx*dx+dz*dz; if(d<bd) bd=d; } return Math.sqrt(bd); }
 
-// The walls of the active map as drawn (scene.js builds its wall meshes from this):
-// main: per side s (1 left, -1 right): the offset per track point (O: safeOffsets(±WALL)),
-//   the line x, y, z, on[i]: the piece i → i+1 is drawn (not where a shortcut passes through)
-// cuts: per shortcut and side: x, y, z per sample, on[k]: the piece k → k+1 is drawn
-export function drawnWalls(){
-  const main=[], cuts=[];
-  for(const s of [1,-1]){
-    const O=safeOffsets(s*WALL), L=offsetLine(O,0), on=new Uint8Array(N);
-    const g=new Uint8Array(N); if(SHORTCUTS.length) for(let i=0;i<N;i++) g[i]=inCut(P[i].x+NM[i].x*O[i], P[i].z+NM[i].z*O[i], .3)?1:0;
-    for(let i=0;i<N;i++) on[i]=g[i]||g[(i+1)%N]?0:1;
-    main.push({ s, O, ...L, on });
-  }
-  for(const sc of SHORTCUTS){
-    const dm=Float64Array.from({length:sc.n},(_,k)=>mainDist(sc.x[k],sc.z[k]));
-    for(const s of [1,-1]){ const o=s*sc.wall, x=new Float64Array(sc.n), y=new Float64Array(sc.n), z=new Float64Array(sc.n), on=new Uint8Array(sc.n);
-      for(let k=0;k<sc.n;k++){ x[k]=sc.x[k]+sc.nx[k]*o; z[k]=sc.z[k]+sc.nz[k]*o; y[k]=sc.y[k]; }
-      for(let k=0;k<sc.n-1;k++) on[k]=(dm[k]<WALL||dm[k+1]<WALL)?0:1;
-      cuts.push({ sc, s, x, y, z, on }); }
-  }
-  return { main, cuts };
-}
-
+// The walls of the active map as drawn (scene.js builds its wall meshes from this): the
+// polylines of walls.js (geometry.js WALLS): { lines, fillets, ... }; each line: n points
+// x, y, z, closed or open, i (the main track point of a point, or -1), s (the side per
+// segment: 1 left, -1 right, the neon's colour), nx, nz (per segment) and px, pz (per point):
+// the normal into the drivable space. fillets: the rounded corners at the shortcuts' mouths.
+export function drawnWalls(){ return WALLS; }
 // --- the collision walls, measured ---
 const HOOKS = { onWall(){}, onLap(){}, onLand(){}, onTakeoff(){} };
 const probe = {};
@@ -102,8 +102,7 @@ function wallGrid(D){
   const add=(ax,az,bx,bz,y)=>{ const id=segs.length; segs.push([ax,az,bx,bz,y]);
     const x0=Math.floor(Math.min(ax,bx)/cell), x1=Math.floor(Math.max(ax,bx)/cell), z0=Math.floor(Math.min(az,bz)/cell), z1=Math.floor(Math.max(az,bz)/cell);
     for(let gx=x0;gx<=x1;gx++) for(let gz=z0;gz<=z1;gz++){ const k=gx+','+gz; if(!grid.has(k)) grid.set(k,[]); grid.get(k).push(id); } };
-  for(const W of D.main) for(let i=0;i<N;i++) if(W.on[i]){ const j=(i+1)%N; add(W.x[i],W.z[i],W.x[j],W.z[j],(W.y[i]+W.y[j])/2); }
-  for(const W of D.cuts) for(let k=0;k<W.x.length-1;k++) if(W.on[k]) add(W.x[k],W.z[k],W.x[k+1],W.z[k+1],(W.y[k]+W.y[k+1])/2);
+  for(const L of D.lines){ const m=L.closed?L.n:L.n-1; for(let k=0;k<m;k++){ const j=(k+1)%L.n; add(L.x[k],L.z[k],L.x[j],L.z[j],(L.y[k]+L.y[j])/2); } }
   // the nearest drawn wall along a ray (m), at about the ray's height (bank: per m), or NaN
   return (ox, oz, oy, bank, dx, dz, max) => {
     const seen=new Set(); let best=NaN;

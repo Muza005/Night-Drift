@@ -14,6 +14,7 @@ import { closedCurve } from './curve.js';
 import { MAPS, DEFAULT_MAP } from './maps/index.js';
 import { HITLOG } from '../../core/hitlog.js';
 import { WALL_ALLOW } from '../../core/contact.js';
+import { buildWalls, safeOffsetsOf, wallsNear as wallsNearIn } from './walls.js';
 
 export const CURB = 1.4, GRAV = 9.81;
 export let MAP = null, N = 0, ROAD = 16, HALF = 8, WALL = 14, START = 0, TRACK_LEN = 0, SC = 1, FLAT = true;
@@ -176,10 +177,16 @@ export function setMap(id){
   LEVELS = map.levels || null; YW = LEVELS ? 10 : 4; SAME_LEVEL = LEVELS ? LEVELS.gap / 2 : 3;
   for(const k of ['P','TG','NM','DIST','Y','GR','BANK','TB','HL','RAD','BRIDGE','CP','SHORTCUTS','GATES','CEIL']){ const a=ARRAYS[k]; a.length=0; for(const v of g[k]) a.push(v); }
   TRACK_LEN = g.TRACK_LEN; FLAT = g.FLAT; START = g.START; VDRAG = g.VDRAG; LAP_MIN = g.LAP_MIN;
+  WALLS = buildWalls({ N, P, NM, TG, Y, TB, RAD, WALL, HALF, SHORTCUTS, SAME_LEVEL, LEVELS });
   for(const fn of listeners) fn(MAP);
   return MAP;
 }
 const ARRAYS = { P, TG, NM, DIST, Y, GR, BANK, TB, HL, RAD, BRIDGE, CP, SHORTCUTS, GATES, CEIL };
+// The active map's walls as polylines (walls.js buildWalls): what scene.js draws, and (plan 3
+// stage 3) what the car collides with. Not used by constrainToTrack yet.
+export let WALLS = null;
+// the wall segments within r m of (x, z) at about height y (NaN: any): see walls.js wallsNear
+export function wallsNear(x, z, y, r, out){ return wallsNearIn(WALLS, x, z, y, r, out); }
 // the track point at control-point coordinate k
 export function sampleAt(k){
   const l=MAP.points.length; k=((k%l)+l)%l;
@@ -208,15 +215,7 @@ setMap(DEFAULT_MAP);
 // the left/+NM) for every track point, limited on the inside of a turn to 0.9 × the local
 // radius. The limit is a running minimum over ±W points, then a running average over ±W/2
 // (both keep it under 0.9·R everywhere), so a curb narrows smoothly instead of breaking.
-export function safeOffsets(off, W=8){
-  const lim=new Float64Array(N);
-  for(let i=0;i<N;i++){ const r=RAD[i]; lim[i] = (off*r<0) ? 0.9*Math.abs(r) : 1e9; }
-  const m=new Float64Array(N);
-  for(let i=0;i<N;i++){ let v=1e9; for(let k=-W;k<=W;k++) v=Math.min(v, lim[(i+k+N)%N]); m[i]=v; }
-  const out=new Float64Array(N), h=W>>1, a=Math.abs(off);
-  for(let i=0;i<N;i++){ let s=0; for(let k=-h;k<=h;k++) s+=Math.min(a, m[(i+k+N)%N]); out[i]=Math.sign(off)*s/(2*h+1); }
-  return out;
-}
+export function safeOffsets(off, W=8){ return safeOffsetsOf(N, RAD, off, W); }
 
 export function placeAt(car,i){
   // a short move (the R key) passes the checkpoints in between, as driving there would

@@ -5,7 +5,7 @@
 //   white    each car's car-to-car shape (net/bump.js: two circles); traffic bots: their box
 //   pink     each car's and bot's hitbox from its model (core/hitboxes.js, plan 3 stage 1):
 //            not used by the collision code yet, drawn next to today's shapes to compare
-//   cyan     the walls as drawn (scene.js: safeOffsets, the gaps at the shortcuts)
+//   cyan     the walls as drawn (wall polylines, modes/track/walls.js: what stage 3 collides with)
 //   red      where the car's centre is really stopped (measured with constrainToTrack,
 //            modes/track/wall-lines.js; on the highway RAIL - WALL_ALLOW)
 //   orange   red + the allowance (along the wall's normal): where the yellow circle
@@ -53,9 +53,9 @@ export function createHitDebug({ car, G, NET, bots }) {
   function buildTrack() {
     drawnLines = drop(drawnLines); limitLines = drop(limitLines);
     const S = segs(), D = drawnWalls();
-    for (const W of [...D.main, ...D.cuts]) for (let i = 0; i < W.x.length; i++) {
-      if (!W.on[i]) continue; const j = (i + 1) % W.x.length; if (j === 0 && W.sc) continue;
-      S.add(W.x[i], W.y[i] + LIFT, W.z[i], W.x[j], W.y[j] + LIFT, W.z[j], COL.drawn);
+    for (const L of D.lines) for (let k = 0; k < (L.closed ? L.n : L.n - 1); k++) {
+      const j = (k + 1) % L.n;
+      S.add(L.x[k], L.y[k] + LIFT, L.z[k], L.x[j], L.y[j] + LIFT, L.z[j], COL.drawn);
     }
     drawnLines = mesh(S, 999); builtFor = MAP; bad = -1;
     const J = job = { map: MAP, it: wallRays(D), rays: [] };
