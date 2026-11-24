@@ -50,22 +50,24 @@ try {
   // count what is drawn: the race scene, anything else; and long tasks
   await page.evaluate(() => {
     const r = __nd.renderer, draw = r.render.bind(r);
-    window.__draws = { race: 0, other: 0 };
-    r.render = (sc, cam) => { (sc === __nd.scene ? __draws.race++ : __draws.other++); return draw(sc, cam); };
+    // (core/warm.js draws the race scene once from under the garage, with its own camera, so
+    // the first run does not start with shader compiling: counted apart, at most once a screen)
+    window.__draws = { race: 0, other: 0, warm: 0 };
+    r.render = (sc, cam) => { (sc === __nd.scene ? (cam && cam.name === 'warm' ? __draws.warm++ : __draws.race++) : __draws.other++); return draw(sc, cam); };
     window.__long = []; new PerformanceObserver(l => { for (const e of l.getEntries()) __long.push(Math.round(e.duration)); }).observe({ type: 'longtask' });
   });
-  const reset = () => page.evaluate(() => { __draws.race = __draws.other = 0; __long.length = 0; });
+  const reset = () => page.evaluate(() => { __draws.race = __draws.other = __draws.warm = 0; __long.length = 0; });
   const read = () => page.evaluate(() => ({ ...__draws, long: __long.slice() }));
   const longOk = l => soft || l.length === 0;            // software rendering: every frame is a long task
 
   // 1. home, 10 s (after a moment to settle: the first picture is taken on arrival)
   await sleep(1500); await reset(); await sleep(10000);
   let r = await read();
-  check('home, 10 s: the race scene is not drawn under it', r.race === 0, `race ${r.race}, other ${r.other}`);
+  check('home, 10 s: the race scene is not drawn under it', r.race === 0 && r.warm === 0, `race ${r.race}, warm-up ${r.warm}, other ${r.other}`);
   check('home, 10 s: no task over 50 ms', longOk(r.long), soft ? 'software renderer: not judged' : r.long.join(', '));
   await page.click('#goSolo'); await sleep(1500); await reset(); await sleep(10000);
   r = await read();
-  check('mode cards, 10 s: the race scene is not drawn, no task over 50 ms', r.race === 0 && longOk(r.long), `race ${r.race}, long ${r.long.join(', ') || 'none'}`);
+  check('mode cards, 10 s: the race scene is not drawn, no task over 50 ms', r.race === 0 && r.warm === 0 && longOk(r.long), `race ${r.race}, warm-up ${r.warm}, long ${r.long.join(', ') || 'none'}`);
 
   // 2. the garage: the stand and the still only
   await page.click('#mTrack');
@@ -75,7 +77,7 @@ try {
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowLeft'); await sleep(450); }
   await sleep(1500); await reset(); await sleep(3000);
   r = await read();
-  check('garage: the stand is drawn, the race scene is not', r.race === 0 && r.other > 30, `race ${r.race}, other ${r.other}`);
+  check('garage: the stand is drawn, the race scene is not', r.race === 0 && r.warm <= 1 && r.other > 30, `race ${r.race}, warm-up ${r.warm}, other ${r.other}`);
 
   // 3. 50 flips, then the same counts
   const mem = async () => {

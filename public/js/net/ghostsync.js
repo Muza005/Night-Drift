@@ -21,15 +21,22 @@ export const SMOOTH = Object.freeze({
   W: 20,          // 1/s: the spring that fades a correction out (critically damped)
   ACC: 10,        // m/s²: the most change of speed the prediction carries on with
   ACC_T: 0.2,     // s: and for at most this long (a car does not brake or speed up for ever)
-  MAX_AGE: 0.5,   // s: no prediction further ahead than this
+  MAX_AGE: 0.5,   // s: straight on this far ahead; past it the car glides to a stop
+  FADE: 0.3,      // s: over this (exponentially): never further ahead than MAX_AGE + FADE
   RESET: 12,      // m: a correction this big is a reset (back to the track): no smoothing
 });
 
 // Where a car is at server time nowS (ms) and how it moves: its last update s1 moved on
 // by its velocity for the update's age, turning at the turn rate of s0 → s1, its speed
 // changing as it changed from s0 to s1 (for ACC_T s at most, never through a stop).
+// Plan 3 stage 5: an update older than MAX_AGE (a lost packet resent ~200 ms later on top of
+// a 200 ms ping) no longer stops the car dead at MAX_AGE (a jump of its whole speed in one
+// frame, then a correction of metres when the update came): it glides on, slowing smoothly
+// (its speed × e^(−over/FADE)).
 export function predict(s0, s1, nowS, P = SMOOTH) {
-  const age = Math.min(P.MAX_AGE, Math.max(0, (nowS - s1.t) / 1000));
+  const raw = Math.max(0, (nowS - s1.t) / 1000), over = raw - P.MAX_AGE;
+  const glide = over > 0 && P.FADE ? Math.exp(-over / P.FADE) : over > 0 ? 0 : 1;
+  const age = over > 0 ? P.MAX_AGE + (P.FADE || 0) * (1 - glide) : raw;
   let w = 0, a = 0;
   if (s0) {
     const span = (s1.t - s0.t) / 1000;
@@ -47,7 +54,7 @@ export function predict(s0, s1, nowS, P = SMOOTH) {
   const kv = v > 0.5 ? (v + a * ta) / v : 1, cw = Math.cos(-turn), sw = Math.sin(-turn);
   return {
     x: s1.x + (s1.vx * c - s1.vz * sn) * age * k, z: s1.z + (s1.vx * sn + s1.vz * c) * age * k, h: s1.h + turn,
-    vx: (s1.vx * cw - s1.vz * sw) * kv, vz: (s1.vx * sw + s1.vz * cw) * kv, w,
+    vx: (s1.vx * cw - s1.vz * sw) * kv * glide, vz: (s1.vx * sw + s1.vz * cw) * kv * glide, w,
   };
 }
 

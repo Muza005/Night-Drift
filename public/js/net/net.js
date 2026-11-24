@@ -27,7 +27,13 @@
 
    Plan 3, stage 4: car-to-car hits between the cars' hitbox polygons (bump.js), and the
    protocol number sent on creating or joining a room (protocol.js): a server of another
-   version turns the game away with "the game was updated, reload the page". */
+   version turns the game away with "the game was updated, reload the page".
+
+   Plan 3, stage 5 (the stutter at the start): the synced clock no longer steps (clocksync.js:
+   the median of the best samples, approached slowly while racing; a step moved every car
+   drawn here by its speed × the step in one frame), an update that comes late (a lost packet)
+   glides on instead of stopping the car at MAX_AGE (ghostsync.js), and the race scene is
+   compiled in the lobby (core/warm.js) instead of freezing the first frame of the countdown. */
 import { $, G, NET, serverNow } from '../state.js';
 import { car, applyLook } from '../player.js';
 import { choice } from '../ui/garage.js';
@@ -49,6 +55,8 @@ import { predict, newView, correct, settle, reset as resetView, newStats, statAr
 import { decodeState } from './statecodec.js';
 import { PROTOCOL, UPDATED, UPDATED_CODE } from './protocol.js';
 import { playersCollide, ghostAlpha, setCarAlpha, disposeAlpha } from './ghostmode.js';
+import { newClock, clockSample, clockTick } from './clocksync.js';
+import { warmAgain } from '../core/warm.js';
 
 function endpoint(){
   try{ const q=new URLSearchParams(location.search).get('server'); if(q) return q; }catch(e){}
@@ -102,16 +110,21 @@ export async function connectRoom(kind){
   finally{ connecting=false; $('pModes').removeAttribute('aria-busy'); $('joinRoom').disabled=false; }
 }
 
-// Clock samples from a worker thread that drawing never blocks (see clock-worker.js).
-// They feed the same shortest-round-trip choice as the WebSocket ping below.
+// Clock samples from a worker thread that drawing never blocks (see clock-worker.js), and
+// from the WebSocket ping below. Both go to clocksync.js: the median of the best ones, taken
+// at once out of a run, approached slowly (no step) in the countdown and the race.
+const racing = () => G.state==='count' || G.state==='race' || G.state==='crash';
+function clockIn(rtt, offset){
+  clockSample(NET.clock, rtt, offset, performance.now());
+  if(!racing()) NET.offset=clockTick(NET.clock, 0, false);
+}
 let clockWorker=null;
 function startClockWorker(){
   try{
     const ep=endpoint(); if(!ep) return;
     if(!clockWorker){
       clockWorker=new Worker(new URL('./clock-worker.js', import.meta.url));
-      clockWorker.onmessage=e=>{ const m=e.data; if(!NET.online||!m) return;
-        if(m.rtt<=NET.bestRtt){ NET.bestRtt=m.rtt; NET.offset=m.offset; } };
+      clockWorker.onmessage=e=>{ const m=e.data; if(!NET.online||!m) return; clockIn(m.rtt, m.offset); };
     }
     clockWorker.postMessage({url:ep.replace(/^ws/,'http').replace(/\/$/,'')+'/time'});
   }catch(e){ clockWorker=null; }
@@ -121,15 +134,15 @@ function stopClockWorker(){ if(clockWorker) clockWorker.postMessage({url:null});
 function bindRoom(room){
   clearGhosts();
   clearInterval(NET.pingTimer);
-  Object.assign(NET,{room,online:true,leaving:false,token:room.reconnectionToken,bestRtt:1e9});
+  // (a reconnect starts its samples afresh from the clock as it stands: no step in a race)
+  Object.assign(NET,{room,online:true,leaving:false,token:room.reconnectionToken,clock:{...newClock(),offset:NET.offset}});
   startClockWorker();
-  // Clock sync: keep the reply with the shortest round trip; it is the most accurate.
   const ping=()=>{ if(NET.room===room) room.send('ping',{t:Date.now()}); };
-  room.onMessage('pong',m=>{ const rtt=Date.now()-m.t;
+  room.onMessage('pong',m=>{ if(!m || typeof m.t!=='number' || typeof m.server!=='number') return; const rtt=Date.now()-m.t;
     NET.rtt=NET.rtt?NET.rtt*.7+rtt*.3:rtt;
-    if(rtt<=NET.bestRtt){ NET.bestRtt=rtt; NET.offset=m.server+rtt/2-Date.now(); } });
+    clockIn(rtt, m.server+rtt/2-Date.now()); });
   for(let i=0;i<6;i++) setTimeout(ping,i*180);
-  NET.pingTimer=setInterval(()=>{ NET.bestRtt+=10; ping(); },2000);
+  NET.pingTimer=setInterval(ping,2000);
   room.onMessage('event',m=>info(m.text));
   // highway: the server's traffic, 10 snapshots a second
   room.onMessage('tr',m=>{ if(G.mode.id==='traffic' && G.mode.netTraffic) G.mode.netTraffic(m); });
@@ -156,9 +169,9 @@ function bindRoom(room){
   room.state.players.onRemove((p,id)=>{ removeGhost(id); relabel(); renderLobby(); if(room.state.phase==='results') renderResults(); });
   room.state.listen('hostId',()=>{ relabel(); renderLobby(); renderResults(); });
   // between runs the scene behind the lobby follows the mode the host picked
-  room.state.listen('mode',m=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m).catch(e=>console.error('mode failed to load', m, e)); renderLobby(); });
+  room.state.listen('mode',m=>{ warmAgain(); if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMode) G.setMode(m).catch(e=>console.error('mode failed to load', m, e)); renderLobby(); });
   // the room's drift map: everyone in the room drives the same one (not mid-run)
-  room.state.listen('map',id=>{ if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMap && G.setMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } renderLobby(); });
+  room.state.listen('map',id=>{ warmAgain(); if(NET.room===room && room.state.phase!=='countdown' && room.state.phase!=='race' && G.setMap && G.setMap(id) && G.mode.id==='track'){ G.mode.idle(car); clearMarks(); } renderLobby(); });
   room.state.listen('duration',()=>renderLobby());
   room.state.listen('density',()=>renderLobby());
   room.state.listen('laps',()=>renderLobby());
@@ -333,6 +346,7 @@ function onBump(m){
   if(hit>3) crash(hit);
 }
 export function updateGhosts(dt){
+  if(NET.online && NET.clock) NET.offset=clockTick(NET.clock, dt, racing());   // (clocksync.js: no step while racing)
   const show=NET.online && (G.state==='count'||G.state==='race'||G.state==='results');
   const nowS=serverNow();
   // Slipstream: only racing, and not while either car is a blinking ghost after a crash.

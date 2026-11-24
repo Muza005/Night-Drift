@@ -18,7 +18,7 @@ export const G = {
 export const drift = { pts: 0, time: 0, grace: 0, mult: 1, active: false };
 
 // Online session. Every field is used exactly as in the single-file version.
-export const NET = {client:null,room:null,online:false,me:null,offset:0,bestRtt:1e9,ghosts:new Map(),
+export const NET = {client:null,room:null,online:false,me:null,offset:0,clock:null,ghosts:new Map(),
   sendT:0,standT:0,rtt:0,finished:false,leaving:false,token:null,laps:3,pingTimer:0,
   draft:{level:0}};   // slipstream push 0..1 (core/draft.js)
 

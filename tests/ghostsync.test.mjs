@@ -11,8 +11,26 @@ test('predict: straight on at a steady speed, exactly', () => {
   const s0 = { t: 1000, x: 0, z: 0, h: 0, vx: 0, vz: 20 }, s1 = { t: 1033, x: 0, z: 0.66, h: 0, vx: 0, vz: 20 };
   const p = predict(s0, s1, 1133);
   near(p.x, 0, 1e-9, 'x'); near(p.z, 0.66 + 2, 1e-9, 'z'); near(p.vz, 20, 1e-9, 'vz');
-  // never more than MAX_AGE ahead
-  near(predict(s0, s1, 1033 + 5000).z, 0.66 + 20 * SMOOTH.MAX_AGE, 1e-9, 'capped');
+  // never more than MAX_AGE + FADE ahead
+  near(predict(s0, s1, 1033 + 5000).z, 0.66 + 20 * (SMOOTH.MAX_AGE + SMOOTH.FADE), 1e-5, 'capped');
+});
+
+test('predict: an old update (a lost packet) glides to a stop, no sudden halt at MAX_AGE (stage 5)', () => {
+  const s0 = { t: 1000, x: 0, z: 0, h: 0, vx: 0, vz: 20 }, s1 = { t: 1033, x: 0, z: 0.66, h: 0, vx: 0, vz: 20 };
+  const at = ms => predict(s0, s1, 1033 + ms).z, dt = 1000 / 60;
+  // up to MAX_AGE exactly as before: straight on
+  near(at(SMOOTH.MAX_AGE * 1000), 0.66 + 20 * SMOOTH.MAX_AGE, 1e-9, 'at MAX_AGE');
+  // the drawn speed (per 60 fps frame) changes by little from one frame to the next across
+  // MAX_AGE: it used to drop from 20 m/s to 0 (0.33 m in a frame); now it slows at 20 m/s /
+  // FADE at most (~0.02 m a frame, about a hard braking's)
+  let most = 0;
+  for (let ms = 300; ms < 1500; ms += dt) {
+    const a = at(ms), b = at(ms + dt), c = at(ms + 2 * dt);
+    most = Math.max(most, Math.abs((c - b) - (b - a)));
+  }
+  assert.ok(most < 0.03, `a step in the drawn speed of ${most} m a frame`);
+  // and the velocity it reports slows with it
+  near(predict(s0, s1, 1033 + 1000 * (SMOOTH.MAX_AGE + SMOOTH.FADE)).vz, 20 * Math.exp(-1), 1e-9, 'glide speed');
 });
 
 test('predict: carries a change of speed on, for ACC_T at most, never through a stop', () => {

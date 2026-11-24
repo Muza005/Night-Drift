@@ -22,6 +22,7 @@ import { lobby } from './ui/lobbyScreen.js';
 import { choice, savePick } from './ui/garage.js';
 import { applyLook } from './player.js';
 import { preloadAll } from './core/carModels.js';
+import { warmStep } from './core/warm.js';
 
 if (isTouch) document.body.classList.add('touch');
 import { records, saveScore, migrate } from './records.js';
@@ -282,6 +283,12 @@ function frame(now){
   // return early and never reach the audio further down.
   const racing=G.state==='race'||G.state==='count'||G.state==='crash';
   if(!racing && !audioIdle){ audioUpdate(.2,0,0); audioRumble(0); audioDraft(0); audioIdle=true; } else if(racing) audioIdle=false;
+  // Before a run: the race scene is made ready to draw (core/warm.js), so the countdown does
+  // not start with a frame of shader compiling: in the garage (solo too: it leads to the
+  // start), in the lobby, on the results of an online run. The garage and the lobby draw
+  // over the whole canvas right after, so the scene may be drawn there too. (Not under home
+  // or the mode cards: a shader compiles in one piece and would show there as a hitch.)
+  if(garage.open || lobby.open || (NET.online && G.state==='results')) warmStep({draw:garage.open||lobby.open, at:car});
   if(garage.open){ stillKey=''; garage.frame(now); return; }
   if(lobby.open){ stillKey=''; lobby.frame(now); return; }        // the lobby: the same, with my car
   if(stillFrame()) return;
