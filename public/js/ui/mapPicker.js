@@ -6,6 +6,9 @@
 //                             the start line and an arrow the way the lap is driven. Seen
 //                             like the race minimap (modes/track/index.js), so it is the same
 //                             picture the player meets in the race.
+//   diagram(id)               the map as the home deck draws it (tilted, lifted by height,
+//                             cyan → rose along the lap): { svg, lap, len, diff, name }, cached;
+//                             the garage's header shows the same picture
 //   mapInfo(id)               what a card says: name, lap length, difficulty, badges
 //   openMapPicker({ current, source, onPick(id) })
 //                             the picker: a popover next to `source` (a bottom sheet on a
@@ -24,9 +27,9 @@ import { el, fmtT, fmtN } from './hud.js';
 // How hard a map is to drive clean (1-3), for the cards. UI data: the track files do not
 // rate themselves.
 const DIFF = { neon: 1, estakada: 2, serpantin: 3, parking: 3, pereval: 2, razvyazka: 2, _testhill: 1 };
-const DIFF_NAME = ['', 'лёгкая', 'средняя', 'сложная'];
+export const DIFF_NAME = ['', 'лёгкая', 'средняя', 'сложная'];
 
-const km = m => (m / 1000).toFixed(2).replace('.', ',') + ' км';
+export const km = m => (m / 1000).toFixed(2).replace('.', ',') + ' км';
 
 const info = new Map();
 export function mapInfo(id){
@@ -41,6 +44,68 @@ export function mapInfo(id){
     info.set(id, { id, name: m.name, desc: m.desc || '', len: b.len, diff: DIFF[id] || 2, badges });
   }
   return info.get(id);
+}
+
+/* ---------- a track as a diagram (the home map deck, the garage's header) ----------
+   The plan turned to the angle that fills the card best, tilted back (depth × 0.5), each
+   point lifted by its real height (× 3, so a 7 m bridge reads) over its shadow on the ground,
+   thin posts under what is up in the air. The route in short segments coloured from cyan at
+   the start line to rose at the end of the lap; drawn in bands of height, each band's dark
+   casing first, so a road crossing over another cuts a gap in it. Shortcuts dashed amber,
+   the start a white bar, and on the card in focus a light running the lap. */
+const diagrams = new Map();
+export function diagram(id, W = 380, H = 215){
+  const key = id + W + 'x' + H;
+  if(diagrams.has(key)) return diagrams.get(key);
+  const b = blueprint(id), info = mapInfo(id);
+  const all = b.path, step = Math.max(1, Math.round(all.length / 260));
+  const P = all.filter((_, i) => i % step === 0), n = P.length, st = Math.round(b.start.i / step) % n;
+  const TILT = 0.5, LIFT = 3, PAD = 18;
+  let best = null;
+  for(let a = 0; a < 180; a += 7.5){
+    const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for(const [x, z, h] of P){ const u = x * c - z * s, v = (x * s + z * c) * TILT; x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v - h * LIFT); y1 = Math.max(y1, v); }
+    const k = Math.min((W - 2 * PAD) / (x1 - x0), (H - 2 * PAD) / (y1 - y0));
+    if(!best || k > best.k) best = { c, s, k, x0, x1, y0, y1 };
+  }
+  const { c, s, k } = best, ox = (W - (best.x1 - best.x0) * k) / 2 - best.x0 * k, oy = (H - (best.y1 - best.y0) * k) / 2 - best.y0 * k;
+  const pr = (x, z, h = 0) => [(x * c - z * s) * k + ox, ((x * s + z * c) * TILT - h * LIFT) * k + oy];
+  const f = v => v.toFixed(1);
+  const cy = [62, 240, 255], ro = [255, 59, 107];
+  const col = t => `rgb(${cy.map((v, i) => Math.round(v + (ro[i] - v) * t)).join(',')})`;
+  const order = i => ((i - st + n) % n) / n;
+  const pts = P.map(p => pr(p[0], p[1], p[2])), gnd = P.map(p => pr(p[0], p[1], 0));
+  const ring = a => 'M' + a.map(p => f(p[0]) + ' ' + f(p[1])).join('L') + 'Z';
+  let posts = '';
+  for(let i = 0; i < n; i += 3) if(P[i][2] > 1.2) posts += `M${f(gnd[i][0])} ${f(gnd[i][1])}V${f(pts[i][1])}`;
+  const segs = [];
+  for(let i = 0; i < n; i++){ const j = (i + 1) % n; segs.push({ i, j, h: (P[i][2] + P[j][2]) / 2, d: (pts[i][1] + pts[j][1]) / 2 }); }
+  segs.sort((a, z) => a.h - z.h || a.d - z.d);
+  const w = 3.6, band = h => Math.round(h / 2.5), seg = sg => `M${f(pts[sg.i][0])} ${f(pts[sg.i][1])}L${f(pts[sg.j][0])} ${f(pts[sg.j][1])}`;
+  let route = '';
+  for(let lo = 0; lo < segs.length;){
+    let hi = lo; while(hi < segs.length && band(segs[hi].h) === band(segs[lo].h)) hi++;
+    const grp = segs.slice(lo, hi);
+    if(band(grp[0].h) > 0) route += `<path d="${grp.map(seg).join('')}" class="dg-case" stroke-width="${w + 4}"/>`;
+    for(const sg of grp) route += `<path d="${seg(sg)}" stroke="${col(order(sg.i))}" stroke-width="${w}"/>`;
+    lo = hi;
+  }
+  const cuts = b.shortcuts.map(sc => 'M' + sc.path.filter((_, i) => i % 3 === 0).map(p => pr(p[0], p[1], 0)).map(p => f(p[0]) + ' ' + f(p[1])).join('L')).join('');
+  const a = pts[st], q = pts[(st + 2) % n], L = Math.hypot(q[0] - a[0], q[1] - a[1]) || 1, nx = -(q[1] - a[1]) / L * 9, ny = (q[0] - a[0]) / L * 9;
+  const lap = ring(pts.slice(st).concat(pts.slice(0, st)));
+  const svg = `<svg class="dg" viewBox="0 0 ${W} ${H}" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="${ring(gnd)}" class="dg-shadow" stroke-width="${w + 5}" transform="translate(0 4)"/>
+    <path d="${ring(gnd)}" class="dg-ground"/>
+    ${posts ? `<path d="${posts}" class="dg-post"/>` : ''}
+    ${cuts ? `<path d="${cuts}" class="dg-cut"/>` : ''}
+    <g class="dg-glow">${route}</g><g>${route}</g>
+    <path d="M${f(a[0] - nx)} ${f(a[1] - ny)}L${f(a[0] + nx)} ${f(a[1] + ny)}" class="dg-start"/>
+    <circle class="dg-run" r="3.6" style="offset-path: path('${lap}')"/>
+  </svg>`;
+  const out = { svg, lap, len: info.len, diff: info.diff, name: info.name };
+  diagrams.set(key, out);
+  return out;
 }
 
 /* ---------- the blueprint ---------- */

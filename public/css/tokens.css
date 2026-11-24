@@ -70,14 +70,14 @@
 
   /* motion. Exits and entrances ease out (fast start, soft landing); things that move
      on their own and come back ease in and out. Times by what moves. */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
   --dur-press: 100ms;            /* a button pressed down */
   --dur-hover: 170ms;            /* hover in and out */
   --dur-pop: 190ms;              /* popovers, the colour panel */
   --dur-screen: 320ms;           /* one screen to the next */
-  --dur-bars: 400ms;             /* stat bars flowing to a new car */
+  --dur-bars: 360ms;             /* stat bars flowing to a new car */
   --dur-swap: 500ms;             /* one car leaves the stand, the next arrives */
 
   /* layers */

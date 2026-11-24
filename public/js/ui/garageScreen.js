@@ -11,10 +11,11 @@
 // drops it. The gear settings (laps, density) are saved as soon as they change.
 import { $, G } from '../state.js';
 import { CARS, PAINTS, carById, classById, garageBars, paintCode, paintHex, paintByCode } from '../core/cars.js';
-import { renderer, drawBackdrop, menuPixels } from '../core/render.js';
+import { renderer, drawBackdrop, menuPixels, backdropState } from '../core/render.js';
 import { createStand } from './stand.js';
-import { showPanel, hex, el } from './hud.js';
-import { openMapPicker, mapPicker } from './mapPicker.js';
+import { showPanel, hex, el, fmtT } from './hud.js';
+import { openMapPicker, mapPicker, diagram, km, DIFF_NAME } from './mapPicker.js';
+import { records } from '../records.js';
 import { MAPS } from '../modes/track/maps/index.js';
 
 const LS = {
@@ -25,8 +26,9 @@ export const MIN_LAPS = 1, MAX_LAPS = 10, DEFAULT_LAPS = 3;
 // Solo drift: how many laps a run has (the gear settings), remembered.
 { const n = parseInt(LS.get('nightdrift.laps'), 10); G.soloLaps = n >= MIN_LAPS && n <= MAX_LAPS ? n : DEFAULT_LAPS; }
 
-const stand = createStand({ renderer, el: $('garStand') });
-const S = { open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null, onMap: null };
+const stand = createStand({ renderer, el: $('garStand'), studio: true });
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const S = { opened: 0, open: false, kind: 'solo', mode: 'track', idx: 0, paint: -1, ref: null, onGo: null, onBack: null, onMap: null };
 const NAMES = garageBars(CARS[0].stats).map(b => b[0]);
 
 /* ---------- the bars ---------- */
@@ -83,7 +85,7 @@ $('garNext').addEventListener('click', () => flip(+1));
 const swatches = PAINTS.map(p => {
   const code = paintCode(p), b = el('button', 'swatch-btn'); b.type = 'button';
   b.setAttribute('aria-label', p.name); b.title = p.name;
-  b.addEventListener('click', () => { S.paint = code; stand.repaint(code); drawPaint(); });
+  b.addEventListener('click', () => { S.paint = code; stand.repaint(code, { flow: true }); drawPaint(); });
   $('garSwatches').append(b);
   return { b, code };
 });
@@ -108,17 +110,28 @@ for(const [pop, btn] of [['garPaintPop', 'garPaint'], ['garSetPop', 'garSet']]){
 }
 
 /* ---------- the map (solo «Дрифт») ----------
-   «Карта» with the map's name opens the picker; a pick is the next run's map at once
-   (onMap: the caller switches the track and keeps it). */
-function drawMap(){
-  const name = (MAPS[G.soloMap] || MAPS.neon).name;
-  $('garMapName').textContent = name;
-  $('garMap').setAttribute('aria-label', `Карта: ${name}. Сменить карту`);
+   The header carries the map: its diagram (the one on its card, flown here by the screen
+   change), its name, the lap's length, the difficulty bars and my best lap. A click opens the
+   picker; a pick is the next run's map at once (onMap: the caller switches the track and
+   keeps it), and the diagram changes with a short cross-fade. */
+const CUP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 0 1-10 0zM7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+let shownMap = null;
+function drawMap(fade){
+  const id = MAPS[G.soloMap] ? G.soloMap : 'neon', d = diagram(id), r = records(id);
+  const lap = r.lap ? fmtT(r.lap) : '';
+  $('garMapName').textContent = d.name;
+  $('garMapFigs').innerHTML = `<span class="num">${km(d.len)}</span><span class="diff d${d.diff}"><i></i><i></i><i></i></span>` + (lap ? `<span class="gar-map-rec num">${CUP}${lap}</span>` : '');
+  $('garMap').setAttribute('aria-label', `Карта: ${d.name}, ${km(d.len)}, сложность ${DIFF_NAME[d.diff]}` + (lap ? `, лучший круг ${lap}` : '') + '. Сменить карту');
+  if(shownMap === id) return;
+  shownMap = id;
+  const box = $('garMapDg');
+  box.innerHTML = d.svg;
+  if(fade && !reduced.matches) box.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
 }
 $('garMap').addEventListener('click', () => {
   if(!S.open || $('garMap').hidden) return;
   openMapPicker({ current: G.soloMap, source: $('garMap'),
-    onPick(id){ if(S.onMap) S.onMap(id); drawMap(); $('garLive').textContent = 'Карта: ' + MAPS[id].name; } });
+    onPick(id){ if(S.onMap) S.onMap(id); drawMap(true); $('garLive').textContent = 'Карта: ' + MAPS[id].name; } });
 });
 
 /* ---------- the run's settings (the gear, solo) ---------- */
@@ -174,7 +187,10 @@ export function openGarage({ kind = 'solo', mode = 'track', car, paint, dir = 'f
   $('garBack').setAttribute('aria-label', solo ? 'Назад к выбору режима' : 'Назад в лобби без изменений');
   $('pGarage').classList.remove('painting');
   drawSettings(); drawCar();
-  stand.setCar(S.ref, paint, 0);
+  street.shift = backdropState().shift; street.last = 0;
+  // the car on the stand; once it is there, the lamp's light runs over it once
+  const token = ++S.opened, carId = S.ref;
+  stand.setCar(S.ref, paint, 0).then(() => { if(S.open && S.opened === token && CARS[S.idx].id === carId && stand.car && stand.car.carId === carId && !stand.sliding) stand.sweep(1); });
   menuPixels(true);
   return showPanel('pGarage', dir);
 }
@@ -206,9 +222,22 @@ addEventListener('keydown', e => {
   $('pGarage').addEventListener('pointercancel', () => { start = null; });
 }
 
+/* ---------- the street behind ----------
+   The same street as the home screen, its kerb lamps a little lower, and a lamp straight
+   over the stand (render.js, studio); the street's sideways shift, where the home deck left
+   it, eases back to the middle. */
+const street = { shift: 0, last: 0, glow: new THREE.Color(0xffe2c4) };
+function frame(now){
+  const dt = street.last && now - street.last < 250 ? (now - street.last) / 1000 : 1 / 60; street.last = now;
+  street.shift *= reduced.matches ? 0 : Math.exp(-dt / 0.12);
+  const a = stand.measure();
+  drawBackdrop(a && { x: a.x, y: a.y, sway: a.sway, lamps: 0.6, studio: 1, glow: street.glow, shift: street.shift });
+  stand.frame(now);
+}
+
 export const garage = {
   get open(){ return S.open && !$('pGarage').hidden; },
-  frame(now){ drawBackdrop(stand.measure()); stand.frame(now); },
+  frame,
   close(){ if(S.open) leave(); },          // (S.open, not .open: also while its screen is still on its way in)          // a run starts (online) or the room is gone: no callback
   stand,
   get pick(){ return { car: CARS[S.idx].id, paint: S.paint }; },

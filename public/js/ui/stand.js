@@ -17,6 +17,14 @@
 //                                    own coupe stands there in the chosen paint, with a note:
 //                                    never an empty podium
 //   stand.repaint(paintCode)         recolours it at once
+//   stand.repaint(paintCode, { flow: true })   the new paint flows over the body behind a band
+//                                    of light (~0.5 s); the material and the label have the new
+//                                    colour at once, only the picture catches up
+//   stand.sweep(dir)                 a short band of light across the body (dir ±1: which way)
+//
+// createStand({ renderer, el, studio: true }) is the garage's: a light from straight above
+// (the stand under a lamp, as the street outside is under its lamps), and a car that comes on
+// the stand is swept by a band of light as it settles. Nothing of this with reduced motion.
 //   stand.frame(now)                 draws one frame (now: rAF time, ms); false if not drawn
 //   stand.measure()                  the podium on screen now, for the backdrop (or null)
 //   stand.dispose()
@@ -131,7 +139,38 @@ function coupeParts(){
   return COUPE;
 }
 
-export function createStand({ renderer, el, street = false }){
+// The paint's flow: the paint material (only on a stand) gets a few lines in its shader. A
+// point of the body further along x (world, so the band runs across the screen) than the
+// moving edge still shows the old colour; at the edge, a narrow band of light. uFlow 0 → 1
+// moves the edge from one side of the stand to the other; uOn 0 (no flow running) turns it
+// all off, wherever the car is on the stand. One
+// program for every car's paint (customProgramCacheKey), each material its own uniforms.
+const FLOW_SPAN = 3.2;            // m either side of the stand's middle the edge travels
+const PAINT_MS = 520, SWEEP_MS = 440;
+function flowCompile(sh){
+  Object.assign(sh.uniforms, this.userData.flow);
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying float vFlowX;')
+    .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvFlowX = (modelMatrix * vec4(transformed, 1.0)).x;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vFlowX;\nuniform float uFlow, uCx, uDir, uGlint, uSpan, uOn;\nuniform vec3 uFrom;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+	float ndX = (vFlowX - uCx) * uDir, ndE = mix(-uSpan, uSpan, uFlow);
+	diffuseColor.rgb = mix(diffuseColor.rgb, uFrom, uOn * smoothstep(-.22, .22, ndX - ndE));`)
+    .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );', `float ndB = (ndX - ndE) / .42;
+	outgoingLight += uOn * uGlint * exp(-ndB * ndB) * (vec3(.92, .94, 1.) * .32 + diffuseColor.rgb * 1.1);
+	gl_FragColor = vec4( outgoingLight, diffuseColor.a );`);
+}
+const flowKey = () => 'nd-paint-flow';
+function flowable(mat){
+  if(mat.userData.flow) return;
+  mat.userData.flow = { uOn: { value: 0 }, uFlow: { value: 1 }, uFrom: { value: mat.color.clone() }, uCx: { value: 0 }, uDir: { value: 1 }, uGlint: { value: 0 }, uSpan: { value: FLOW_SPAN } };
+  mat.onBeforeCompile = flowCompile;
+  mat.customProgramCacheKey = flowKey;
+}
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+export function createStand({ renderer, el, street = false, studio = false }){
   const scene = new THREE.Scene();
   const env = studioEnv(renderer);
   const own = [];                                   // what dispose() frees
@@ -146,6 +185,8 @@ export function createStand({ renderer, el, street = false }){
   // the card in focus (setGlow); it also tints the rim light
   const bounce = new THREE.DirectionalLight(0x3ef0ff, street ? 0.55 : 0); bounce.position.set(1.5, -1.2, 5);
   if(street){ scene.add(bounce); key.intensity = 1.25; }
+  // studio: a warm white lamp straight above the stand; the key steps back a little
+  if(studio){ const top = new THREE.DirectionalLight(0xfff0dc, 1.6); top.position.set(0.4, 10, 1.2); scene.add(top); key.intensity = 1.15; rim.intensity = 0.55; }
 
   // The podium: a low dark disc, a thin cyan rim on its top edge, a halo outside it, a dark
   // spot under it, and the car's own soft shadow (a blurred spot, no shadow map). Its parts
@@ -153,7 +194,7 @@ export function createStand({ renderer, el, street = false }){
   // are on show.
   const DISC_H = 0.14;
   const discGeo = keep(new THREE.CylinderGeometry(DISC_R, DISC_R + 0.05, DISC_H, 72));
-  const discMat = keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(0x141829).convertSRGBToLinear(), metalness: 0.2, roughness: 0.62, envMap: env, envMapIntensity: 0.22 }));   // an sRGB colour, as the paints
+  const discMat = keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(studio ? 0x262b42 : 0x141829).convertSRGBToLinear(), metalness: 0.2, roughness: 0.62, envMap: env, envMapIntensity: 0.22 }));   // an sRGB colour, as the paints
   const edgeGeo = keep(new THREE.TorusGeometry(DISC_R - 0.02, 0.022, 8, 120));
   const edgeMat = keep(new THREE.MeshBasicMaterial({ color: 0x3ef0ff, toneMapped: false }));
   const haloGeo = keep(new THREE.RingGeometry(DISC_R - 0.3, DISC_R + 0.55, 96, 1));
@@ -214,7 +255,7 @@ export function createStand({ renderer, el, street = false }){
     turn.add(blob, outline); group.add(disc, edge, halo, under, turn); scene.add(group);
     if(street){ disc.visible = edge.visible = halo.visible = under.visible = false; }
     // x, v, target: where it is across the stand, its speed, where it is going
-    return { group, turn, blob, outline, ao: [], inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0 };
+    return { group, turn, blob, outline, ao: [], inst: null, carId: null, ready: Promise.resolve(null), token: 0, alive: true, x: 0, v: 0, target: 0, flow: null, sweepIn: 0 };
   }
 
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
@@ -236,6 +277,7 @@ export function createStand({ renderer, el, street = false }){
       if(my !== slot.token || !slot.alive || disposed){ inst.dispose(); return null; }   // another car was asked for meanwhile
       if(slot.inst) slot.inst.dispose();
       slot.inst = inst;
+      if(!street) flowable(inst.paint);
       slot.outline.visible = false;
       if(slot === cur && wanted.code !== inst.code) inst.repaint(wanted.code);
       slot.turn.add(inst.root);
@@ -250,6 +292,7 @@ export function createStand({ renderer, el, street = false }){
       // never an empty podium: the game's own coupe stands in, in the paint asked for
       if(slot.inst) slot.inst.dispose();
       const inst = slot.inst = standInCoupe(id, slot === cur ? wanted.code : code);
+      if(!street) flowable(inst.paint);
       slot.outline.visible = false;
       slot.turn.add(inst.root);
       slot.blob.scale.set(inst.size.x * 1.55, inst.size.z * 1.22, 1);
@@ -302,6 +345,7 @@ export function createStand({ renderer, el, street = false }){
         cur.x = dir * span;
         cur.ready = fill(cur, id, code);
       }
+      if(studio) cur.sweepIn = -dir;                  // swept as it settles, the way it came
       gone.target = -dir * span; cur.target = 0;
       repaint(code);
       return cur.ready;
@@ -311,9 +355,41 @@ export function createStand({ renderer, el, street = false }){
     cur.ready = fill(cur, id, code);
     return cur.ready;
   }
-  function repaint(code){
+  function repaint(code, { flow = false } = {}){
     if(wanted) wanted.code = code;
-    if(cur.inst && cur.inst.code !== code){ cur.inst.repaint(code); describe(); }
+    if(!cur.inst || cur.inst.code === code) return;
+    // what the body shows now (half-way through a flow, still mostly the old colour)
+    const was = cur.flow && cur.flow.t < 0.5 ? cur.flow.from.clone() : cur.inst.paint.color.clone();
+    cur.inst.repaint(code); describe();
+    if(flow && !reduced.matches && cur.inst.paint.userData.flow) startFlow(cur, was, 1, PAINT_MS);
+    else endFlow(cur);
+  }
+  // a flow on a slot: from: the colour still ahead of the edge; dir: +1 left to right
+  function startFlow(slot, from, dir, ms){
+    const u = slot.inst && slot.inst.paint.userData.flow; if(!u) return;
+    slot.flow = { t: 0, ms, from, dir };
+    u.uFrom.value.copy(from); u.uDir.value = dir; u.uFlow.value = 0; u.uGlint.value = 1; u.uCx.value = slot.x; u.uOn.value = 1;
+  }
+  function endFlow(slot){
+    slot.flow = null;
+    const u = slot.inst && slot.inst.paint.userData.flow; if(!u) return;
+    u.uFlow.value = 1; u.uGlint.value = 0; u.uOn.value = 0;   // idle: the shader's lines change nothing
+  }
+  function tickFlow(slot, dt){
+    if(slot.sweepIn && slot.inst && Math.abs(slot.x - slot.target) < span * 0.12){
+      const d = slot.sweepIn; slot.sweepIn = 0;
+      if(!reduced.matches) startFlow(slot, slot.inst.paint.color, d, SWEEP_MS);
+    }
+    const f = slot.flow; if(!f) return;
+    if(!slot.inst || reduced.matches){ endFlow(slot); return; }
+    f.t = Math.min(1, f.t + dt * 1000 / f.ms);
+    const u = slot.inst.paint.userData.flow;
+    u.uFlow.value = easeOut(f.t); u.uCx.value = slot.x;
+    if(f.t >= 1) endFlow(slot);
+  }
+  function sweep(dir = 1){
+    if(reduced.matches || !cur.inst) return;
+    startFlow(cur, cur.inst.paint.color, dir, SWEEP_MS);
   }
   function describe(){
     showNote();
@@ -433,11 +509,19 @@ export function createStand({ renderer, el, street = false }){
       const dist = Math.max(reach / Math.tan(hFov / 2), 2.6 / Math.tan(vFov / 2));
       span = dist * Math.tan(hFov / 2) + DISC_R + 0.8;        // far enough to the side to be out of the box
       const elev = 0.24;                                    // ~14° from above
-      camera.aspect = aspect;
+      camera.aspect = aspect; camera.clearViewOffset();
       camera.position.set(0, LOOK.y + Math.sin(elev) * dist, Math.cos(elev) * dist);
       camera.lookAt(LOOK);
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld();                           // (render() would, but the anchor below is now)
+      // a tall narrow box (a phone upright): the podium stands lower in it, on the floor
+      // under the lamp, not in the middle of the sky with an empty floor beneath
+      if(studio && aspect < 1){
+        P.set(0, -DISC_H / 2, 0).project(camera);
+        const at = (1 - P.y) / 2 * r.height, want = r.height * 0.7;
+        camera.setViewOffset(r.width, r.height, 0, at - want, r.width, r.height);
+        camera.updateProjectionMatrix();
+      }
     }
     P.set(0, street ? 0 : -DISC_H / 2, 0).project(camera);
     anchor.x = r.left + (P.x + 1) / 2 * r.width; anchor.y = r.top + (1 - P.y) / 2 * r.height;
@@ -451,7 +535,7 @@ export function createStand({ renderer, el, street = false }){
     if(!r) return false;
     const vw = renderer.domElement.clientWidth || innerWidth, vh = renderer.domElement.clientHeight || innerHeight;
     step(dt);
-    for(const slot of [cur, gone]) if(slot){ slide(slot, dt); slot.turn.rotation.y = spin.angle; }
+    for(const slot of [cur, gone]) if(slot){ slide(slot, dt); slot.turn.rotation.y = spin.angle; tickFlow(slot, dt); }
     // the outline breathes (1.6 s), or holds still for reduced motion
     outlineMat.opacity = reduced.matches ? 0.6 : 0.42 + 0.3 * (0.5 + 0.5 * Math.sin(now / 1000 * TAU / 1.6));
     if(gone && Math.abs(gone.x) > span - 0.2){ drop(gone); gone = null; }   // out of the box: gone
@@ -526,7 +610,7 @@ export function createStand({ renderer, el, street = false }){
   }
 
   return {
-    setCar, repaint, frame, dispose, scene, camera, setGlow,
+    setCar, repaint, sweep, frame, dispose, scene, camera, setGlow,
     // street: the backdrop's horizon (css px) and how far under it the tyres stand
     setStreet(horizon, below = streetAt.below){ streetAt.horizon = horizon; streetAt.below = below; },
     get car(){ return cur.inst; },

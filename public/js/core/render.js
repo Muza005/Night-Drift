@@ -123,7 +123,7 @@ export function qualityTick(realDt, racing){
    motion).
    WebGL and not CSS: the stand draws into this same canvas over what is behind it, and a
    transparent canvas would make every race frame pay for blending with the page. */
-const BACK = { key: '', far: null, near: null, ov: 28, sway: 0, pool: 0, t: 0 };
+const BACK = { key: '', far: null, near: null, ov: 28, sway: 0, pool: 0, t: 0, lamps: 0, studio: 0 };
 // a lost and restored GL context: paint the skyline again into fresh textures
 canvas.addEventListener('webglcontextrestored', () => { BACK.key = ''; });
 const NEAR_SHIFT = 16, FAR_SHIFT = 5;             // css px the layers drift at full sway
@@ -134,13 +134,13 @@ const backMat = new THREE.ShaderMaterial({
     farMap: { value: null }, nearMap: { value: null },
     view: { value: new THREE.Vector2(1, 1) }, scale: { value: 1 }, horizon: { value: 0 },
     pod: { value: new THREE.Vector3() }, sway: { value: 0 },
-    glow: { value: new THREE.Color(0x3ef0ff) }, shift: { value: 0 }, lamps: { value: 0 },
+    glow: { value: new THREE.Color(0x3ef0ff) }, shift: { value: 0 }, lamps: { value: 0 }, studio: { value: 0 },
     farBox: { value: new THREE.Vector3() }, nearBox: { value: new THREE.Vector3() },
   },
   vertexShader: 'void main(){ gl_Position = vec4(position.xy, 0., 1.); }',
   // colours are sRGB values written straight out (no tone mapping): they are the tokens'
   fragmentShader: `uniform sampler2D farMap, nearMap; uniform vec2 view; uniform float scale, horizon, sway;
-    uniform vec3 pod, farBox, nearBox, glow; uniform float shift, lamps;
+    uniform vec3 pod, farBox, nearBox, glow; uniform float shift, lamps, studio;
     const vec3 ROSE = vec3(1., .231, .420), CYAN = vec3(.243, .941, 1.), HAZE = vec3(.17, .09, .25);
     // a layer of skyline: box = (left, width, height above the horizon), css px
     vec4 layer(sampler2D m, vec3 box, vec2 p){
@@ -156,7 +156,7 @@ const backMat = new THREE.ShaderMaterial({
     //   the card light: the focused card's colour, low in front of the car (where pod is)
     //   the street lamps: sodium amber on posts along both kerbs, shifting with the deck
     const float CAM = 1.3;
-    const vec3 SODIUM = vec3(1., .58, .22);
+    const vec3 SODIUM = vec3(1., .58, .22), STUDIO = vec3(1., .88, .74);
     float focal(){ return min(view.y * 1.1, view.x * .95); }
     vec3 lampAt(int i){                                    // (x, height, depth) m
       float fi = float(i), side = mod(fi, 2.) < .5 ? -1. : 1., row = floor(fi * .5);
@@ -241,6 +241,15 @@ const backMat = new THREE.ShaderMaterial({
         col += (hash(gl_FragCoord.xy * .37) - .5) * .012;                // the asphalt's grain
       }
       if(lamps > 0.) col = posts(p, col, lamps);
+      // the garage: a lamp straight over the stand, above the top of the screen, the same
+      // warm light as the street's but whiter: a soft beam down to the podium, narrow where
+      // it comes in and wide where it lands, and a pool on the wet floor round the podium
+      if(studio > 0. && abs(p.x - pod.x) < .9 * H && p.y < pod.y + .3 * H){   // (outside: nothing to add)
+        float t = clamp((pod.y - p.y) / max(pod.y, 1.), 0., 1.), w = mix(.3 * H, .05 * H, t);
+        float beam = exp(-pow((p.x - pod.x) / w, 2.)) * smoothstep(-.04 * H, .06 * H, pod.y - p.y) * (.55 + .45 * (1. - t));
+        vec2 e = (p - pod.xy) / vec2(.36 * H + 60., .09 * H + 18.);
+        col += STUDIO * (.2 * beam + .32 * exp(-dot(e, e) * 1.2)) * studio * pod.z;
+      }
       // dither: a triangular ±1/255, so the smooth parts do not band
       col += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 19.19) - 1.) / 255.;
       gl_FragColor = vec4(col, 1.);
@@ -321,10 +330,11 @@ export function captureBackdrop(){
   u.farBox.value.set(-BACK.ov, span, farH); u.nearBox.value.set(-BACK.ov, span, nearH);
 }
 // what the backdrop shows now (for tests): the horizon (css px from the top), the pool
-export const backdropState = () => ({ horizon: backMat.uniforms.horizon.value, pool: backMat.uniforms.pod.value.z, key: BACK.key });
+export const backdropState = () => ({ horizon: backMat.uniforms.horizon.value, pool: backMat.uniforms.pod.value.z, key: BACK.key, shift: backMat.uniforms.shift.value, lamps: BACK.lamps, studio: BACK.studio });
 export function drawBackdrop(anchor){
   captureBackdrop();
   const u = backMat.uniforms, w = innerWidth, h = innerHeight, now = performance.now();
+  const gap = now - BACK.t > 250;                     // not drawn for a while (a run): no easing from then
   const dt = now - BACK.t > 100 ? 1 / 60 : (now - BACK.t) / 1000; BACK.t = now;   // after a gap: a first frame
   u.view.value.set(w, h);
   u.scale.value = 1 / renderer.getPixelRatio();
@@ -335,7 +345,14 @@ export function drawBackdrop(anchor){
   if(anchor){ u.pod.value.x = anchor.x; u.pod.value.y = anchor.y; }
   // the home screen: the light's colour, the parallax shift (css px), the kerb lamps
   if(anchor && anchor.glow) u.glow.value.copy(anchor.glow); else u.glow.value.setHex(0x3ef0ff);
-  u.shift.value = anchor && anchor.shift || 0; u.lamps.value = anchor && anchor.lamps || 0;
+  // (the lamps and the studio light ease from one screen's to the next's, ~120 ms)
+  u.shift.value = anchor && anchor.shift || 0;
+  const ease = reducedMotion.matches || gap ? 1 : 1 - Math.exp(-dt / .12);
+  // (no anchor: a screen with no stand, after a run: the street's lights are off at once,
+  // not left over for the next menu screen to fade out)
+  if(!anchor){ BACK.lamps = BACK.studio = 0; }
+  else { BACK.lamps += ((anchor.lamps || 0) - BACK.lamps) * ease; BACK.studio += ((anchor.studio || 0) - BACK.studio) * ease; }
+  u.lamps.value = BACK.lamps < .002 ? 0 : BACK.lamps; u.studio.value = BACK.studio < .002 ? 0 : BACK.studio;
   BACK.pool = !anchor ? 0 : reducedMotion.matches ? 1 : BACK.pool + (1 - BACK.pool) * (1 - Math.exp(-dt / .08));
   u.pod.value.z = BACK.pool < .002 ? 0 : BACK.pool;
   // the drift follows the stand's turn slowly: a flick does not shake the city

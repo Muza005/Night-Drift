@@ -88,7 +88,7 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
 /* a map card: the track drawn from its centre line, not a frame from the game */
 .dcard-map { background: var(--c-night-1); }
 .dcard-map::after { background: linear-gradient(180deg, transparent 62%, rgba(5, 6, 16, 0.8)); }
-.dcard .dg { position: absolute; inset-inline-start: 50%; inset-block-start: 44%; inline-size: var(--deck-open); block-size: calc(var(--deck-h) * 0.86); translate: -50% -50%; opacity: 0.38; transition: opacity var(--dur-focus) var(--ease-out); }
+.dcard .dg { position: absolute; inset-inline-start: 50%; inset-block-start: 44%; inline-size: min(var(--deck-open), calc(var(--deck-h) * 0.86 * 380 / 215)); aspect-ratio: 380 / 215; translate: -50% -50%; opacity: 0.38; transition: opacity var(--dur-focus) var(--ease-out); }
 .dcard[aria-selected="true"] .dg { opacity: 1; }
 .dg-shadow { stroke: rgba(0, 0, 0, 0.55); }
 .dg-ground { stroke: var(--c-night-4); stroke-width: 1.2; }
@@ -147,13 +147,14 @@ body:has(#menu:not([hidden])) .hud { visibility: hidden; }
   .dcard-name { font-size: var(--fs-xs); }
   .dcard:not([aria-selected="true"]) .dcard-name { display: none; }   /* a narrow card: its picture only */
   .dcard[aria-selected="true"] .dcard-name { font-size: var(--fs-sm); }
-  .dcard .dg { inline-size: 62vw; }
+  .dcard .dg { inline-size: min(62vw, calc(var(--deck-h) * 0.86 * 380 / 215)); }
   .dcard-figs, .dcard[aria-selected="true"].dcard-map .dcard-name { inset-block: var(--sp-3) auto; inset-inline-end: calc(var(--deck-slant) + var(--sp-2)); font-size: var(--fs-xs); }
   .dcard[aria-selected="true"].dcard-map .dcard-name { inset-block: auto var(--sp-3); inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
   .deck-keys { display: none; }
 }
 @media (max-height: 500px) {
   #pHome { --deck-h: 132px; --deck-open: 300px; }
+  .dcard-map .dg { inline-size: min(170px, calc(var(--deck-h) * 0.86 * 380 / 215)); inset-inline-start: 34%; }   /* clear of the figures, top right */
   .dcard-figs { inset-block: var(--sp-3) auto; inset-inline-end: calc(var(--deck-slant) + var(--sp-2)); font-size: var(--fs-xs); }
   .dcard[aria-selected="true"].dcard-map .dcard-name { inset-inline-end: calc(var(--deck-slant) + var(--sp-3) + 40px); }
   .deck-keys { display: none; }
@@ -293,17 +294,51 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 /* ---------- the garage ----------
    The bar on top, the car's name, the stand in the middle (it takes what is left), the
    bars and the main button at the bottom. One screen high: nothing to scroll. */
-#menu:has(#pGarage:not([hidden])) { background: radial-gradient(ellipse at 50% 45%, rgba(7, 8, 15, 0.1), rgba(7, 8, 15, 0.7)); }
+#menu:has(#pGarage:not([hidden])) { background: radial-gradient(ellipse at 50% 45%, rgba(7, 8, 15, 0), rgba(7, 8, 15, 0.55)); padding: var(--top) var(--rgt) var(--bot) var(--lft); }
 .garage {
   touch-action: pan-y;            /* a sideways swipe is ours: it flips the cars */
-  inline-size: min(1200px, 100%);
+  inline-size: 100%;
   flex: 1 0 auto;
   margin-block: 0;
   min-block-size: min(100%, 100dvh);
   grid-template-rows: auto auto minmax(220px, 1fr) auto;
   gap: var(--sp-3);
 }
-.garage .screen-bar h1 { margin-inline-end: auto; }
+.garage .screen-bar { align-items: flex-start; }
+/* the title where the home deck had it: the same small «Дрифт» next to «‹» (the bar's
+   controls hang from its top line, so they do not move when the map plate makes it taller) */
+.garage .screen-bar h1 { font: 700 var(--fs-md)/var(--btn-h) var(--f-display); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7); white-space: nowrap; }
+.bar-gap { flex: 1 1 0; }
+/* the map of the run: its diagram (flown here from its card), the name, the figures */
+.gar-map {
+  display: flex; align-items: center; gap: var(--sp-3); min-inline-size: 0;
+  padding: var(--sp-1) var(--sp-4) var(--sp-1) var(--sp-1); margin-inline-start: var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); backdrop-filter: var(--blur-panel);
+  color: var(--text); text-align: start; cursor: pointer; font: inherit;
+  transition: border-color var(--dur-hover) ease, background-color var(--dur-hover) ease, scale var(--dur-press) var(--ease-out);
+}
+.gar-map[hidden] { display: none; }
+.gar-map:active { scale: 0.98; }
+.gar-map:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.gar-map[aria-expanded="true"] { border-color: var(--action); }
+@media (hover: hover) and (pointer: fine) {
+  .gar-map:hover { border-color: var(--line-strong); background: rgba(62, 240, 255, 0.06); }
+}
+.gar-map-dg { flex: none; display: block; inline-size: clamp(112px, 9vw, 148px); aspect-ratio: 380 / 215; border-radius: var(--r-sm); background: var(--c-night-1); }
+.gar-map-dg .dg { display: block; inline-size: 100%; block-size: 100%; }
+.gar-map-dg .dg-run { display: none; }
+.gar-map-txt { display: grid; gap: var(--sp-2); min-inline-size: 0; }
+.gar-map-name { font: 800 var(--fs-md)/1.15 var(--f-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gar-map-figs { display: flex; align-items: center; gap: var(--sp-3); font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); font-variant-numeric: tabular-nums; }
+.gar-map-rec { display: inline-flex; align-items: center; gap: 4px; color: var(--record); }
+.gar-map-rec svg { inline-size: 13px; block-size: 13px; }
+/* the shared picture between the map card and this header (hud.js showPanel) */
+::view-transition-group(map-dg) { animation-duration: var(--dur-screen); animation-timing-function: var(--ease-out); }
+::view-transition-old(map-dg), ::view-transition-new(map-dg) { block-size: 100%; animation-duration: var(--dur-screen); animation-timing-function: var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(map-dg), ::view-transition-new(map-dg) { animation: none; }
+  ::view-transition-old(map-dg) { animation: none; opacity: 0; }
+}
 /* the run's settings: a gear that turns one tooth on hover (45deg, so it lands looking the same) */
 .gar-set svg { transition: rotate var(--dur-hover) var(--ease-out); }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
@@ -339,7 +374,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   .gar-arrow:hover:not(:disabled) { border-color: var(--action); background: rgba(62, 240, 255, 0.1); }
 }
 
-.gar-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--sp-4); }
+.gar-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--sp-4); inline-size: min(1200px, 100%); justify-self: center; }
 .gar-foot .cta { min-inline-size: 11rem; text-align: center; }
 .gar-stats {
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-5);
@@ -360,6 +395,11 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 .stat-bar .stat-diff { background: transparent; }
 .stat-bar .stat-diff.up { background: var(--better); }
 .stat-bar .stat-diff.down { background: var(--worse); opacity: 0.55; }
+/* a new car: the bars run to it one after another, a beat apart */
+.stat:nth-child(2) .stat-bar i { transition-delay: 30ms; }
+.stat:nth-child(3) .stat-bar i { transition-delay: 60ms; }
+.stat:nth-child(4) .stat-bar i { transition-delay: 90ms; }
+.stat:nth-child(5) .stat-bar i { transition-delay: 120ms; }
 
 /* popovers: a small panel under its button */
 .pop {
@@ -440,7 +480,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
 }
 @media (prefers-reduced-motion: reduce) {
   .gar-stand { transition-duration: 0s; }                  /* the car moves aside at once */
-  .stat-bar i { transition-duration: var(--dur-hover); }   /* the bars still change, quickly */
+  .stat-bar i { transition: none; }                         /* the bars change at once */
 }
 
 /* ---------- the map: «Карта» (garage, lobby), the picker, the blueprints ----------
@@ -538,8 +578,9 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
   .map-meta span:last-child { display: none; }          /* the dots say it; the word waits for room */
   .lobby .map-btn { padding-inline: var(--sp-3); }
   .lobby .map-btn-word { display: none; }              /* the icon only: its label says «Карта» */
-  .garage .screen-bar { flex-wrap: wrap; }
-  .garage .map-btn { order: 9; flex: 1 1 100%; justify-content: center; }
+  .garage .screen-bar { flex-wrap: wrap; row-gap: var(--sp-3); }
+  .gar-map { order: 9; flex: 1 1 100%; margin-inline-start: 0; }
+  .gar-map-dg { inline-size: 104px; }
 }
 /* a phone held sideways: a sheet along the bottom with the cards in one row */
 @media (max-height: 500px) and (orientation: landscape) {
@@ -562,7 +603,7 @@ html[data-nav="back"]::view-transition-new(screen-in) { animation-name: screen-c
    On a phone: the players are a strip of avatars on top, the stand under it, the rest below. */
 #menu:has(#pLobby:not([hidden])) { background: radial-gradient(ellipse at 62% 45%, rgba(7, 8, 15, 0.12), rgba(7, 8, 15, 0.74)); }
 .lobby {
-  inline-size: min(1200px, 100%);
+  inline-size: 100%;
   flex: 1 0 auto;
   margin-block: 0;
   min-block-size: min(100%, 100dvh);
@@ -834,6 +875,10 @@ button.pl-who:focus-visible .pl-pen { opacity: 1; }
   .garage { grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: var(--sp-2); }
   .gar-head h2 { font-size: var(--fs-lg); }
   .gar-tag { display: none; }
+  .gar-map { gap: var(--sp-2); padding-inline-end: var(--sp-3); }
+  .gar-map-dg { inline-size: 72px; }
+  .gar-map-name { font-size: var(--fs-sm); }
+  .gar-map-txt { gap: var(--sp-1); }
   .gar-arrow { inline-size: 40px; block-size: 40px; }
   .gar-stats { padding: var(--sp-2) var(--sp-4); gap: var(--sp-1) var(--sp-4); }
   .stat-name { font-size: var(--fs-xs); }
