@@ -1,31 +1,32 @@
 // ?debug=hit (plan 3, stage 0): what the collision code sees, drawn over the game.
 // Loaded by main.js only with the flag (nothing of it exists otherwise).
 //
-//   yellow   each car's wall shape today: its centre and the allowance circle (1.25 m)
-//   white    each car's car-to-car shape (net/bump.js: two circles); traffic bots: their box
-//   pink     each car's and bot's hitbox from its model (core/hitboxes.js, plan 3 stage 1):
-//            not used by the collision code yet, drawn next to today's shapes to compare
-//   cyan     the walls as drawn (wall polylines, modes/track/walls.js: what stage 3 collides with)
-//   red      where the car's centre is really stopped (measured with constrainToTrack,
-//            modes/track/wall-lines.js; on the highway RAIL - WALL_ALLOW)
-//   orange   red + the allowance (along the wall's normal): where the yellow circle
-//            touches, the collision wall as the body feels it
-//   magenta  ticks where orange and cyan differ by more than 5 cm (invisible walls, walls
-//            the car goes through)
+//   pink     each car's and bot's hitbox (core/hitboxes.js): the one shape the collision
+//            code uses, against the walls (core/contact.js, stage 3), other players' cars
+//            (net/bump.js, stage 4) and the highway's traffic (modes/traffic/collide.js);
+//            a short line from its centre shows the nose
+//   cyan     the walls as drawn (wall polylines, modes/track/walls.js: what the cars collide with)
+//   red      where the centre of a car pointing along the road is stopped (measured with
+//            constrainToTrack, modes/track/wall-lines.js; on the highway the rail less the
+//            car's half width)
+//   orange   how far that car's body (its hitbox) then reaches along the ray: on the cyan
+//            line wherever the collision wall is the drawn one
+//   magenta  ticks where the stopped body is more than 5 cm from any drawn wall (an
+//            invisible wall) or reaches past the drawn wall (a wall the car goes through)
 //   green    the last contact: its point, and 2 m along the normal (into what was hit)
 // Lines only, drawn over everything. The track's lines are built once per map (the measured
 // ones over the next idle moments).
 import { scene } from './render.js';
 import { HITLOG } from './hitlog.js';
-import { BUMP } from '../net/bump.js';
 import { MAP, N } from '../modes/track/geometry.js';
-import { drawnWalls, wallRays, ALLOW } from '../modes/track/wall-lines.js';
+import { drawnWalls, wallRays } from '../modes/track/wall-lines.js';
+import { bodyOf } from './contact.js';
 import { RAIL } from '../modes/traffic/geometry.js';
 import { TYPES } from '../modes/traffic/sim.js';
 import { botPose } from '../modes/traffic/collide.js';
 import { worldPoly, hitbox } from './hitboxes.js';
 
-const COL = { car: [1, .85, .1], bump: [1, 1, 1], poly: [1, .25, .63], drawn: [.25, .95, 1], limit: [1, .15, .15], body: [1, .55, .1], bad: [1, .2, 1], hit: [.2, 1, .3] };
+const COL = { poly: [1, .25, .63], drawn: [.25, .95, 1], limit: [1, .15, .15], body: [1, .55, .1], bad: [1, .2, 1], hit: [.2, 1, .3] };
 const LIFT = .12;               // m above the road
 const mat = () => new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false, transparent: true, opacity: .95, toneMapped: false });
 
@@ -112,18 +113,9 @@ export function createHitDebug({ car, G, NET, bots }) {
   function drawCar(id, x, y, z, h) {
     y += LIFT;
     drawPoly(id, x, y + .04, z, h);
-    circle(x, y, z, ALLOW, COL.car); cross(x, y, z, .25, COL.car);
+    cross(x, y, z, .25, COL.poly);
     const fx = Math.sin(h), fz = Math.cos(h);
-    circle(x + fx * BUMP.OFF, y + .02, z + fz * BUMP.OFF, BUMP.R, COL.bump, 20);
-    circle(x - fx * BUMP.OFF, y + .02, z - fz * BUMP.OFF, BUMP.R, COL.bump, 20);
-    line(x, y, z, x + fx * 2.6, y, z + fz * 2.6, COL.bump);                          // the nose
-  }
-  const corner = (x, z, s, k, a, b, i) => { BOX[i] = x + a * k + b * s; BOX[i + 1] = z - a * s + b * k; };
-  const BOX = new Float64Array(8);
-  function drawBox(x, y, z, yaw, hw, hl, c) {
-    const s = Math.sin(yaw), k = Math.cos(yaw);
-    corner(x, z, s, k, -hw, -hl, 0); corner(x, z, s, k, hw, -hl, 2); corner(x, z, s, k, hw, hl, 4); corner(x, z, s, k, -hw, hl, 6);
-    for (let i = 0; i < 8; i += 2) { const j = (i + 2) % 8; line(BOX[i], y, BOX[i + 1], BOX[j], y, BOX[j + 1], c); }
+    line(x, y, z, x + fx * 1.2, y, z + fz * 1.2, COL.poly);                          // the nose
   }
   // the last contact: kept 3 s
   let shown = null, shownAt = 0;
@@ -131,7 +123,7 @@ export function createHitDebug({ car, G, NET, bots }) {
   box.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:8px;z-index:99;font:12px/1.35 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.6);padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre';
   document.body.append(box);
   let boxT = 0;
-  const legend = `\u25a0 yellow wall circle ${ALLOW} m  \u25a0 white car-to-car circles  \u25a0 pink hitbox (model)\n\u25a0 cyan drawn wall  \u25a0 red centre limit  \u25a0 orange body limit\n\u25a0 magenta >5 cm apart  \u25a0 green last contact`;
+  const legend = `\u25a0 pink hitbox (walls, cars, traffic)  \u25a0 cyan drawn wall\n\u25a0 red centre stop (car along the road)  \u25a0 orange its body\n\u25a0 magenta >5 cm off / through  \u25a0 green last contact`;
 
   return {
     frame(now = performance.now()) {
@@ -146,13 +138,14 @@ export function createHitDebug({ car, G, NET, bots }) {
       if (!track) {
         // the highway: the rails as drawn (inner face at RAIL), the centre's limit, the body's
         const z0 = car.z - 120, z1 = car.z + 320;
+        const half = bodyOf(car.carId).half;                       // (the car's half width: where its centre stops, side on to the rail)
         for (const s of [1, -1]) {
           line(s * RAIL, LIFT, z0, s * RAIL, LIFT, z1, COL.drawn);
-          line(s * (RAIL - ALLOW), LIFT, z0, s * (RAIL - ALLOW), LIFT, z1, COL.limit);
+          line(s * (RAIL - half), LIFT, z0, s * (RAIL - half), LIFT, z1, COL.limit);
           line(s * RAIL, LIFT + .04, z0, s * RAIL, LIFT + .04, z1, COL.body);
         }
         const src = bots && bots();
-        if (src) for (const b of src.bots) { const T = TYPES[b.t], p = botPose(b, src.alpha); if (Math.abs(p.z - car.z) < 200) { drawBox(p.x, LIFT, p.z, p.yaw, T.wid / 2, T.len / 2, COL.bump); drawPoly('bot:' + T.name, p.x, LIFT + .04, p.z, p.yaw); } }
+        if (src) for (const b of src.bots) { const T = TYPES[b.t], p = botPose(b, src.alpha); if (Math.abs(p.z - car.z) < 200) drawPoly('bot:' + T.name, p.x, LIFT + .04, p.z, p.yaw); }
       }
       const L = HITLOG.last;
       if (L && (!shown || L.seq !== shown.seq)) { shown = L; shownAt = now; }

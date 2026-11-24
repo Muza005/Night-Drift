@@ -1,5 +1,6 @@
-// Car-to-car hits (net/bump.js, stage 8): the maths of one hit, who decides it and how the
-// other player gets it, and the hitter's picture of the hit car with 150 ms between them.
+// Car-to-car hits (net/bump.js, stage 8; plan 3 stage 4: between the hitbox polygons, two
+// rigid bodies): the maths of one hit, who decides it and how the other player gets it, a
+// slow push, and the hitter's picture of the hit car with 150 ms between them.
 // (The full two-player scenario, with rear-end, side and corner hits at 60-180 km/h, is in
 // the stage 8 report; tests/sync/sync-check.mjs measures a hit in the browser.)
 import { test } from 'node:test';
@@ -244,9 +245,9 @@ test('a slow push rams: at 20 km/h the rear car pushes the front one, both move 
     // off the line, the first touch (a 20 km/h bump) turns the front car a little (struck at
     // its tail's right, it turns left; the push after it does not: the tyres hold its small
     // impulses), but nobody slides off: the pusher goes straight on, its nose on the tail
-    else assert.ok(Math.abs(B.h) < 0.14 && Math.abs(A.x - off) < 0.05 && B.z - A.z - (hb.front + hb.rear) < 0.1,
+    else assert.ok(Math.abs(B.h) < 0.14 && Math.abs(A.x - off) < 0.15 && B.z - A.z - (hb.front + hb.rear) < 0.1,
       `${off} m off: B turned ${(B.h * 180 / Math.PI).toFixed(1)}°, A ${(A.x - B.x).toFixed(2)} m off B's line`);
-    assert.ok(B.z - A.z - (hb.front + hb.rear) > -0.02, 'not inside each other');
+    assert.ok(gap(A, B) > -0.03, `not inside each other (${gap(A, B).toFixed(3)} m)`);
   }
 });
 

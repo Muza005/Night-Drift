@@ -6,19 +6,19 @@
 //     corners are checked, which is exact for every point of the strip.
 //  2. walls: the drawn wall against the collision wall, along a ray out from every track
 //     point and every shortcut sample to both sides (modes/track/wall-lines.js measures the
-//     collision wall with constrainToTrack itself). More than 5 cm apart: an invisible wall
-//     (the car's body stops short of any drawn wall) or a wall the car goes through.
+//     collision wall with constrainToTrack itself, with a car pointing along the road whose
+//     body is its hitbox, stage 3). An invisible wall: the body is stopped with no drawn
+//     wall within 5 cm of it; a wall the car goes through: its body reaches past the drawn
+//     wall along the ray, or nothing stops it before that wall.
 //  3. shortcut mouths: where a shortcut's drawn wall meets the main road's, the arc that
 //     rounds the corner (its radius, the angle it turns through), and the sharpest joint
 //     between two segments of wall round the mouth (none sharper than the arc's own steps);
 //     every wall polyline closed (no wall ends, no holes between them).
 //  (stage 2) 4. one source: the drawn walls are the collision polylines (geometry.js WALLS,
 //     the wallsNear() query finds every drawn point on a wall); holes: points of the
-//     drivable space (rays out to the walls) that no strip covers (the ground would show);
-//     and the walls stage 3 will collide with: the same rays with a car whose centre keeps
-//     WALL_ALLOW from the polylines (today's one-point check, on the new walls): invisible
-//     and see-through rays there (should be none). Section 2 is then exactly what stage 3
-//     fixes: today's collision against these polylines.
+//     drivable space (rays out to the walls) that no strip covers (the ground would show).
+//     (Stage 2 also checked here the one-point wall of before stage 3, the car's centre
+//     kept 1.25 m from these polylines; since stage 3 section 2 measures the real thing.)
 //   npm run scan:maps [-- map ...]
 import { createRequire } from 'node:module';
 const R = new URL('../../', import.meta.url).href;
@@ -28,7 +28,6 @@ const W = await import(R + 'public/js/modes/track/wall-lines.js');
 const { MAPS, MAP_IDS } = await import(R + 'public/js/modes/track/maps/index.js');
 const { STRIP_Y: SY } = W;
 const { wallsNear: near0 } = await import(R + 'public/js/modes/track/walls.js');
-const { WALL_ALLOW } = await import(R + 'public/js/core/contact.js');
 
 const ids = process.argv.slice(2).filter(a => !a.startsWith('-'));
 const unknown = ids.filter(id => !Object.hasOwn(MAPS, id));
@@ -97,7 +96,7 @@ for (const id of maps) {
 
   // 2. walls
   const rays = W.measureWalls();
-  const bad = { invisible: [], through: [] }, grazing = rays.filter(r => r.type === 'grazing').length;
+  const bad = { invisible: [], through: [] };
   for (const r of rays) if (bad[r.type]) bad[r.type].push(r);
   // places: runs of bad rays along one line (same road, same side)
   const places = [];
@@ -110,14 +109,14 @@ for (const id of maps) {
       for (const g of runs(flags, n, key.startsWith('main'))) {
         const r = g.worst.r, o = Math.min(isFinite(r.body) ? r.body : 1e9, isFinite(r.drawn) ? r.drawn : 1e9);
         places.push({ type, where: `${key} ${g.from}-${g.to}`, rays: g.count, miss: g.worst.v, open: !isFinite(r.c) || !isFinite(r.drawn),
-          centre: r.c, body: r.body, drawn: r.drawn, x: r.ox + r.dx * o, z: r.oz + r.dz * o });
+          centre: r.c, body: r.body, touch: r.touch, drawn: r.drawn, x: r.ox + r.dx * o, z: r.oz + r.dz * o });
       }
     }
   }
   places.sort((a, b) => b.miss - a.miss);
   const worst = t => { const l = bad[t].filter(r => isFinite(r.body) && isFinite(r.drawn)); return l.length ? Math.max(...l.map(r => r.miss)) : 0; };
-  console.log(`walls: ${rays.length} rays (${grazing} meet the wall too obliquely to judge); invisible ${bad.invisible.length} (worst with both walls ${worst('invisible').toFixed(2)} m), through ${bad.through.length} (worst ${worst('through').toFixed(2)} m), ${places.length} places`);
-  if (places.length) console.table(places.slice(0, 12).map(p => ({ type: p.type, where: p.where, rays: p.rays, 'miss m': (p.open ? '≥' : '') + p.miss.toFixed(2), 'centre m': f2(p.centre), 'body m': f2(p.body), 'drawn m': f2(p.drawn), x: f0(p.x), z: f0(p.z) })));
+  console.log(`walls (the probe: the coupe's hitbox, pointing along the road): ${rays.length} rays; invisible ${bad.invisible.length} (worst with both walls ${worst('invisible').toFixed(2)} m), through ${bad.through.length} (worst ${worst('through').toFixed(2)} m), ${places.length} places`);
+  if (places.length) console.table(places.slice(0, 12).map(p => ({ type: p.type, where: p.where, rays: p.rays, 'miss m': (p.open ? '≥' : '') + p.miss.toFixed(2), 'centre m': f2(p.centre), 'body m': f2(p.body), 'touch m': f2(p.touch), 'drawn m': f2(p.drawn), x: f0(p.x), z: f0(p.z) })));
 
   // 3. shortcut mouths: the arcs, the joints round them, the chains closed
   const turnAt = (L, k) => { const n = L.n, a = (k - 1 + n) % n, b = (k + 1) % n;
@@ -140,7 +139,7 @@ for (const id of maps) {
   if (D.problems.length) console.log('wall build problems:', D.problems);
   const blades = mouths.filter(m => !m.ok);
 
-  // 4. one source; holes; the walls stage 3 collides with
+  // 4. one source; holes
   let srcMiss = 0, srcPts = 0; const NB = [];
   for (const L of D.lines) for (let k = 0; k < L.n; k++) { srcPts++;
     const c = near0(T.WALLS, L.x[k], L.z[k], L.y[k], .01, NB); if (!(c && NB[0].d < 1e-9)) srcMiss++; }
@@ -164,45 +163,16 @@ for (const id of maps) {
     return false; };
   const holes = [];
   const scanRay = (ox, oz, dx, dz, upto, i0, where) => { for (let o = .25; o < upto - .1; o += .25) { const x = ox + dx * o, z = oz + dz * o; if (!covered(x, z, i0)) { holes.push({ where, x, z }); return; } } };
-  // the stage-3 wall: the first point along a ray where the centre comes within WALL_ALLOW of
-  // a polyline (wallsNear), and the point of wall it touches there
-  const polyLimit = (ox, oz, oy, bank, dx, dz, max) => {
-    const dist = o => { const n = near0(T.WALLS, ox + dx * o, oz + dz * o, oy + bank * o, WALL_ALLOW + .6, NB); return n ? NB[0] : null; };
-    let prev = 0;
-    for (let o = .25; o <= max + 1e-9; o += .25) { const e = dist(o);
-      if (e && e.d < WALL_ALLOW) { let a = prev, b = o; for (let k = 0; k < 12; k++) { const m = (a + b) / 2, q = dist(m); if (q && q.d < WALL_ALLOW) b = m; else a = m; }
-        const q = dist(b), cx = ox + dx * b - q.px, cz = oz + dz * b - q.pz, l = Math.hypot(cx, cz) || 1; return { c: b, cos: Math.abs(cx * dx + cz * dz) / l, px: q.px, pz: q.pz, y: q.y }; }
-      prev = o; }
-    return { c: NaN, cos: 1 }; };
-  // the drawn walls' segments, searched one by one (not through the grid wallsNear uses)
-  const drawnSegs = []; for (const L of D.lines) for (let k = 0; k < (L.closed ? L.n : L.n - 1); k++) { const j = (k + 1) % L.n; drawnSegs.push([L.x[k], L.z[k], L.x[j], L.z[j], (L.y[k] + L.y[j]) / 2]); }
-  const toDrawn = (x, z, y) => { let best = Infinity; for (const [ax, az, bx, bz, sy] of drawnSegs) { if (Math.abs(sy - y) > T.SAME_LEVEL) continue;
-      const ex = bx - ax, ez = bz - az, L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0, d = Math.hypot(x - ax - ex * t, z - az - ez * t); if (d < best) best = d; } return best; };
-  // invisible: the body stops against a point that is on no drawn wall; through: the centre
-  // passes a drawn wall before it is stopped; beside: the body touches a drawn wall beside the
-  // ray, not where the ray meets one (corners, arcs, the narrow shortcuts): fine, counted only
-  const s3 = { invisible: 0, through: 0, beside: 0, worst: 0, at: null };
-  const judge3 = r => { const L = polyLimit(r.ox, r.oz, r.oy, r.bank, r.dx, r.dz, r.max);
-    const where = () => r.kind === 'main' ? `main ${r.ref} ${r.s > 0 ? 'L' : 'R'}` : `cut ${r.ref[0]}:${r.ref[1]} ${r.s > 0 ? 'L' : 'R'}`;
-    const bad = (type, miss, x, z) => { s3[type]++; if (miss > s3.worst) { s3.worst = miss; s3.at = { type, x, z, where: where() }; } };
-    if (isFinite(r.drawn) && (!isFinite(L.c) || r.drawn < L.c - W.TOL)) { bad('through', isFinite(L.c) ? L.c - r.drawn : r.max - r.drawn, r.ox + r.dx * r.drawn, r.oz + r.dz * r.drawn); return; }
-    if (!isFinite(L.c)) return;
-    const off = toDrawn(L.px, L.pz, L.y); if (off > W.TOL) { bad('invisible', off, L.px, L.pz); return; }
-    const body = L.c + WALL_ALLOW / Math.max(L.cos, .2), d = isFinite(r.drawn) ? r.drawn : r.max + WALL_ALLOW / Math.max(L.cos, .2);
-    if (Math.abs(body - d) > W.TOL) s3.beside++; };
   for (const r of rays) {
     const i0 = r.kind === 'main' ? r.ref : (SHORTCUTS[r.ref[0]].E + Math.round(SHORTCUTS[r.ref[0]].span * r.ref[1] / (SHORTCUTS[r.ref[0]].n - 1))) % N;
     if (isFinite(r.drawn)) scanRay(r.ox, r.oz, r.dx, r.dz, r.drawn, i0, r.kind === 'main' ? `main ${r.ref}` : `cut ${r.ref[0]}:${r.ref[1]}`);
-    judge3(r);
   }
   console.log(`one source: ${srcPts} drawn wall points, ${srcMiss} not on a collision polyline; holes (drivable space no strip covers): ${holes.length}${holes.length ? ': ' + holes.slice(0, 8).map(h => `${h.where} (x ${h.x.toFixed(1)} z ${h.z.toFixed(1)})`).join(', ') : ''}`);
-  console.log(`stage 3 walls (the polylines, centre point + ${WALL_ALLOW} m): invisible ${s3.invisible}, through ${s3.through}${s3.at ? ` (worst ${s3.at.type} ${s3.worst.toFixed(2)} m, ${s3.at.where}, x ${f0(s3.at.x)} z ${f0(s3.at.z)})` : ''}; ${s3.beside} rays where the body touches a drawn wall beside the ray`);
 
   summary.push({ map: id, name: T.MAP.name, 'ground y': gy, puddles: puddles.length, 'deepest m': puddles.length ? puddles[0].depth.toFixed(2) : '0', 'min clear m': minClear.toFixed(3), holes: holes.length,
-    'invisible rays': bad.invisible.length, grazing, 'through rays': bad.through.length, 'wall places': places.length, 'worst both m': Math.max(worst('invisible'), worst('through')).toFixed(2),
+    'invisible rays': bad.invisible.length, 'through rays': bad.through.length, 'wall places': places.length, 'worst both m': Math.max(worst('invisible'), worst('through')).toFixed(2),
     'not one source': srcMiss, 'open lines': open, 'mouths (arcs)': mouths.length, 'not rounded': blades.length,
-    'arc r m': mouths.length ? `${Math.min(...mouths.map(m => +m['arc r m'])).toFixed(1)}–${Math.max(...mouths.map(m => +m['arc r m'])).toFixed(1)}` : '—',
-    'stage 3: invisible': s3.invisible, 'stage 3: through': s3.through, 'stage 3: beside': s3.beside });
+    'arc r m': mouths.length ? `${Math.min(...mouths.map(m => +m['arc r m'])).toFixed(1)}–${Math.max(...mouths.map(m => +m['arc r m'])).toFixed(1)}` : '—' });
 }
 console.log('\n=== summary');
 console.table(summary);

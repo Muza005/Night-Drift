@@ -3,21 +3,25 @@
 // what is checked: the ?debug=hit overlay (core/hitdebug.js) and the map scan
 // (tests/tools/map-scan.mjs). Pure (no DOM, no rendering): Node runs it.
 //
-// Two kinds of wall, which today are not the same line:
+// Two kinds of wall, which up to stage 2 were not the same line:
 // - drawn: drawnWalls(), the polylines scene.js puts the wall meshes on (stage 2: walls.js,
 //   built by geometry.js setMap as WALLS; stage 3 collides with the same lines).
 // - collision: where constrainToTrack really stops the car. Not computed from the rules
-//   but measured: a still car is put at a point and constrainToTrack is run once; if it
-//   moved the car, the point is outside. Along a ray (out from the centre line, or from a
-//   shortcut's centre line) the first such point is the limit for the car's centre; the
-//   car's body (its allowance, WALL_ALLOW) reaches that much further, measured along the
-//   wall's normal there (the direction the car was pushed back).
+//   but measured: a still car (the coupe, pointing along the road) is put at a point and
+//   constrainToTrack is run once; if it moved the car, the point is outside. Along a ray
+//   (out from the centre line, or from a shortcut's centre line) the first such point is
+//   the limit for the car's centre. Since stage 3 the car's body is its hitbox polygon
+//   (core/hitboxes.js), stopped where the polygon meets a wall: at the limit the body must
+//   rest on a drawn wall (anywhere, not only where the ray meets one: on a bend a corner of
+//   the car touches first), and reach no drawn wall along the ray before it.
+//   (Up to stage 2 the check was one point, the car's centre, kept WALL_ALLOW from the
+//   wall, whatever the car's heading and shape.)
 import { P, NM, TG, Y, TB, N, WALL, SHORTCUTS, SAME_LEVEL, WALLS, safeOffsets, constrainToTrack } from './geometry.js';
 import { offsetLineOf } from './walls.js';
-import { WALL_ALLOW } from '../../core/contact.js';
+import { bodyOf } from '../../core/contact.js';
+import { worldPoly } from '../../core/hitboxes.js';
 import { HITLOG } from '../../core/hitlog.js';
 
-export const ALLOW = WALL_ALLOW;        // m: how close the car's centre may come to a wall
 // Heights above the road of the flat strips scene.js draws (m). The main road, its curbs and
 // run-off lie on the road itself: they never overlap, and the ground under them and the
 // shortcuts' strips over them are kept apart by polygonOffset (scene.js LAYER), not by
@@ -69,11 +73,13 @@ export function drawnWalls(){ return WALLS; }
 const HOOKS = { onWall(){}, onLap(){}, onLand(){}, onTakeoff(){} };
 const probe = {};
 const PUSH = { x: 0, z: 0 };
-// whether constrainToTrack moves a still car at (x, z) (car.idx idx, on shortcut cut or -1);
-// PUSH: where it moved it. (Not a contact of a real car: nothing goes to HITLOG.)
-function pushed(x, z, y, idx, cut){
+// The probe: the coupe (its hitbox), pointing along the road (h)
+export const PROBE_CAR = 'coupe';
+// whether constrainToTrack moves a still car at (x, z) heading h (car.idx idx, on shortcut
+// cut or -1); PUSH: where it moved it. (Not a contact of a real car: nothing goes to HITLOG.)
+function pushed(x, z, y, idx, cut, h){
   const c=probe, log=HITLOG.on;
-  c.x=x; c.z=z; c.y=y; c.idx=idx; c.cut=cut; c.h=0; c.hPrev=0; c.vx=c.vz=c.vF=c.vR=c.vy=0; c.steer=0; c.spinV=0;
+  c.carId=PROBE_CAR; c.x=x; c.z=z; c.y=y; c.idx=idx; c.cut=cut; c.h=h; c.hPrev=h; c.vx=c.vz=c.vF=c.vR=c.vy=0; c.steer=0; c.spinV=0;
   c.air=false; c.yawRate=0; c.prog=0; c.gate=0; c.off=false; c.squash=0;
   HITLOG.on=false;
   try { constrainToTrack(c, 1/120, HOOKS); } finally { HITLOG.on=log; }
@@ -85,8 +91,8 @@ function pushed(x, z, y, idx, cut){
 // between the ray and the wall's normal there (the push, just past the limit). bank: the
 // road's height change per m along the ray.
 const LIM = { c: NaN, cos: 1 };
-function limitAlong(ox, oz, oy, bank, dx, dz, idx, cut, max){
-  const at=o=>pushed(ox+dx*o, oz+dz*o, oy+bank*o, idx, cut);
+function limitAlong(ox, oz, oy, bank, dx, dz, idx, cut, max, h){
+  const at=o=>pushed(ox+dx*o, oz+dz*o, oy+bank*o, idx, cut, h);
   let prev=0; LIM.c=NaN; LIM.cos=1;
   for(let o=.5;o<=max+1e-9;o+=.5){
     if(at(o)){ let a=prev, b=o; for(let k=0;k<8;k++){ const m=(a+b)/2; if(at(m)) b=m; else a=m; }
@@ -103,8 +109,13 @@ function wallGrid(D){
     const x0=Math.floor(Math.min(ax,bx)/cell), x1=Math.floor(Math.max(ax,bx)/cell), z0=Math.floor(Math.min(az,bz)/cell), z1=Math.floor(Math.max(az,bz)/cell);
     for(let gx=x0;gx<=x1;gx++) for(let gz=z0;gz<=z1;gz++){ const k=gx+','+gz; if(!grid.has(k)) grid.set(k,[]); grid.get(k).push(id); } };
   for(const L of D.lines){ const m=L.closed?L.n:L.n-1; for(let k=0;k<m;k++){ const j=(k+1)%L.n; add(L.x[k],L.z[k],L.x[j],L.z[j],(L.y[k]+L.y[j])/2); } }
+  // the drawn wall pieces within r of (x, z) at about height y: [ax, az, bx, bz, y] each
+  const around = (x, z, y, r) => { const out=[], seen=new Set();
+    for(let gx=Math.floor((x-r)/cell); gx<=Math.floor((x+r)/cell); gx++) for(let gz=Math.floor((z-r)/cell); gz<=Math.floor((z+r)/cell); gz++){ const l=grid.get(gx+','+gz); if(!l) continue;
+      for(const id of l){ if(seen.has(id)) continue; seen.add(id); if(Math.abs(segs[id][4]-y)<=SAME_LEVEL) out.push(segs[id]); } }
+    return out; };
   // the nearest drawn wall along a ray (m), at about the ray's height (bank: per m), or NaN
-  return (ox, oz, oy, bank, dx, dz, max) => {
+  const ray = (ox, oz, oy, bank, dx, dz, max) => {
     const seen=new Set(); let best=NaN;
     for(let o=0;o<=max+cell;o+=cell/2){ const gx=Math.floor((ox+dx*o)/cell), gz=Math.floor((oz+dz*o)/cell);
       for(let ax=-1;ax<=1;ax++) for(let az=-1;az<=1;az++){ const l=grid.get((gx+ax)+','+(gz+az)); if(!l) continue;
@@ -116,34 +127,55 @@ function wallGrid(D){
           if(!(t>=best)) best=t; } } }
     return best;
   };
+  return { ray, around };
+}
+// The distance between the polygon P (nv vertices) and the wall pieces (0: they touch or cross)
+const segDist = (x, z, ax, az, bx, bz) => { const ex=bx-ax, ez=bz-az, L2=ex*ex+ez*ez, t=L2?Math.max(0, Math.min(1, ((x-ax)*ex+(z-az)*ez)/L2)):0; return Math.hypot(x-ax-ex*t, z-az-ez*t); };
+const cross2 = (ax, az, bx, bz, cx, cz, dx, dz) => { const ex=bx-ax, ez=bz-az, fx=dx-cx, fz=dz-cz, den=ex*fz-ez*fx; if(Math.abs(den)<1e-12) return false;
+  const wx=cx-ax, wz=cz-az, t=(wx*fz-wz*fx)/den, u=(wx*ez-wz*ex)/den; return t>=0 && t<=1 && u>=0 && u<=1; };
+function polyToWalls(P, nv, pieces){
+  let best=Infinity;
+  for(const [ax,az,bx,bz] of pieces){
+    for(let i=0;i<nv;i++){ const j=(i+1)%nv;
+      if(cross2(P[2*i],P[2*i+1],P[2*j],P[2*j+1],ax,az,bx,bz)) return 0;
+      best=Math.min(best, segDist(P[2*i],P[2*i+1],ax,az,bx,bz)); }
+    for(const [x,z] of [[ax,az],[bx,bz]]) for(let i=0;i<nv;i++){ const j=(i+1)%nv; best=Math.min(best, segDist(x,z,P[2*i],P[2*i+1],P[2*j],P[2*j+1])); } }
+  return best;
 }
 
 // Both walls along every ray: out from each track point to each side (main: ray 2i for
 // the left, 2i+1 for the right), then out from each shortcut sample to each side (cuts, on
 // the shortcut; ref [shortcut, sample]). Per ray: the origin (ox, oy, oz), direction (dx, dz),
 // height change per m (bank), the reach (max, m, for the centre), and
-//   c      the limit of the car's centre (NaN: open within reach)
-//   cos    the cosine between the ray and the collision wall's normal at c
-//   body   c + ALLOW / cos: where the body touches, along the ray
-//   drawn  the nearest drawn wall (NaN: none within reach)
-//   type   'ok' (both within 5 cm, or neither), 'invisible' (the body is stopped before any
-//          drawn wall), 'through' (the body goes through a drawn wall), 'grazing' (the ray
-//          meets the collision wall at under 0.2 cosine: too uncertain along it, not judged;
-//          the rays beside it are)
+//   c      the limit of the centre of the probe car, pointing along the road (NaN: open within reach)
+//   cos    the cosine between the ray and the push out of the wall at c (information)
+//   body   how far the probe's body (its hitbox) reaches along the ray there
+//   touch  the distance from the body at c to the nearest drawn wall (anywhere around it)
+//   drawn  the nearest drawn wall along the ray (NaN: none within reach)
+//   type   'ok' (the body rests on a drawn wall, and the ray's drawn wall is not inside it;
+//          or neither wall within reach), 'invisible' (the body is stopped with no drawn
+//          wall within TOL of it), 'through' (the body reaches past the drawn wall along the
+//          ray, or no collision stops it before the drawn wall)
 //   miss   by how much (m; with NaN on one side: at least this much, to the end of reach)
 export const TOL = .05;
 // The rays one at a time (a generator: the overlay measures a few per idle moment);
 // measureWalls() runs it through.
 export function* wallRays(D=drawnWalls()){
-  const near=wallGrid(D);
-  const ray=(kind, ref, s, ox, oz, oy, bank, dx, dz, idx, cut, max) => {
-    const L=limitAlong(ox, oz, oy, bank, dx, dz, idx, cut, max), c=L.c, cos=L.cos;
-    const reach=max+ALLOW/Math.max(cos, .2), drawn=near(ox, oz, oy, bank, dx, dz, reach), body=c+ALLOW/Math.max(cos, .2);
-    const b=isFinite(body)?body:reach, d=isFinite(drawn)?drawn:reach, miss=Math.abs(b-d);
-    const type=isFinite(c) && cos<.2 ? 'grazing' : miss<=TOL ? 'ok' : b<d ? 'invisible' : 'through';
-    return { kind, ref, s, ox, oz, oy, bank, dx, dz, max, c, cos, body, drawn, type, miss }; };
-  for(let i=0;i<N;i++) for(const s of [1,-1]) yield ray('main', i, s, P[i].x, P[i].z, Y[i], s*TB[i], NM[i].x*s, NM[i].z*s, i, -1, WALL+3);
+  const G=wallGrid(D), B=bodyOf(PROBE_CAR), PW=new Float64Array(64);
+  const ray=(kind, ref, s, ox, oz, oy, bank, dx, dz, idx, cut, max, tx, tz) => {
+    const h=Math.atan2(tx, tz), L=limitAlong(ox, oz, oy, bank, dx, dz, idx, cut, max, h), c=L.c, cos=L.cos;
+    worldPoly(PROBE_CAR, 0, 0, h, PW); let sup=-Infinity; for(let i=0;i<B.nv;i++) sup=Math.max(sup, PW[2*i]*dx+PW[2*i+1]*dz);
+    const reach=max+sup, drawn=G.ray(ox, oz, oy, bank, dx, dz, reach);
+    let body=NaN, touch=NaN, type='ok', miss=0;
+    if(isFinite(c)){
+      const o=c-.003, x=ox+dx*o, z=oz+dz*o; body=c+sup;
+      worldPoly(PROBE_CAR, x, z, h, PW); touch=polyToWalls(PW, B.nv, G.around(x, z, oy+bank*o, B.r+1));
+      if(isFinite(drawn) && body-drawn>TOL){ type='through'; miss=body-drawn; }
+      else if(!(touch<=TOL)){ type='invisible'; miss=isFinite(touch)?touch:B.r+1; }
+    } else if(isFinite(drawn)){ type='through'; miss=reach-drawn; }
+    return { kind, ref, s, ox, oz, oy, bank, dx, dz, max, c, cos, body, touch, drawn, type, miss }; };
+  for(let i=0;i<N;i++) for(const s of [1,-1]) yield ray('main', i, s, P[i].x, P[i].z, Y[i], s*TB[i], NM[i].x*s, NM[i].z*s, i, -1, WALL+3, TG[i].x, TG[i].z);
   for(const sc of SHORTCUTS) for(let k=0;k<sc.n;k++){ const idx=(sc.E+Math.round(sc.span*k/(sc.n-1)))%N;
-    for(const s of [1,-1]) yield ray('cut', [sc.k,k], s, sc.x[k], sc.z[k], sc.y[k], 0, sc.nx[k]*s, sc.nz[k]*s, idx, sc.k, sc.wall+3); }
+    for(const s of [1,-1]) yield ray('cut', [sc.k,k], s, sc.x[k], sc.z[k], sc.y[k], 0, sc.nx[k]*s, sc.nz[k]*s, idx, sc.k, sc.wall+3, sc.tx[k], sc.tz[k]); }
 }
 export function measureWalls(D=drawnWalls()){ return [...wallRays(D)]; }

@@ -413,8 +413,6 @@ export function moduleText(items) {
 /* ---------- the picture ---------- */
 
 export async function picture(items, file) {
-  const { BUMP } = await import('../../public/js/net/bump.js');
-  const { WALL_ALLOW } = await import('../../public/js/core/contact.js');
   const S = 80, pad = 14, head = 54;                 // px per m
   const cars = items.filter(i => !i.id.startsWith('bot:')), bots = items.filter(i => i.id.startsWith('bot:'));
   const cellW = it => Math.max(2.9, it.raw.right + it.raw.left + 0.6) * S;
@@ -425,7 +423,7 @@ export async function picture(items, file) {
   const height = rowH.reduce((a, b) => a + b, 0) + pad + 40;
   const svg = [`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(width)}" height="${Math.ceil(height)}" font-family="DejaVu Sans, sans-serif">`,
     `<rect width="100%" height="100%" fill="#0f1117"/>`,
-    `<text x="${pad}" y="26" fill="#e6e8ee" font-size="16">Plan view, nose up, ${S} px/m. grey: model top view (all of it)  white: body outline (bumps &lt; ${PROTRUDE * 100} cm cut)  pink: hitbox polygon  dashed: today's 2 × ${BUMP.R} m circles  yellow: wall allowance ${WALL_ALLOW} m</text>`];
+    `<text x="${pad}" y="26" fill="#e6e8ee" font-size="16">Plan view, nose up, ${S} px/m. grey: model top view (all of it)  white: body outline (bumps &lt; ${PROTRUDE * 100} cm cut)  pink: hitbox polygon (what walls, other cars and traffic hit)</text>`];
   let y = 40;
   rows.forEach((row, ri) => {
     let x = pad;
@@ -441,13 +439,6 @@ export async function picture(items, file) {
       svg.push(`<path d="${dots.join('')}" stroke="#6b7280" stroke-width="3" stroke-linecap="round"/>`);
       const od = []; for (let k = 0; k < it.O.pts.length; k += 2) od.push(`M${X(it.O.pts[k])} ${Z(it.O.pts[k + 1])}h0.01`);
       svg.push(`<path d="${od.join('')}" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>`);
-      if (!it.id.startsWith('bot:')) {
-        for (const k of [1, -1]) svg.push(`<circle cx="${X(0)}" cy="${Z(k * BUMP.OFF)}" r="${BUMP.R * S}" fill="none" stroke="#9aa4b8" stroke-width="1.2" stroke-dasharray="5 4"/>`);
-        svg.push(`<circle cx="${X(0)}" cy="${Z(0)}" r="${WALL_ALLOW * S}" fill="none" stroke="#f5c400" stroke-width="1.2" stroke-dasharray="2 3"/>`);
-      } else {
-        // the box modes/traffic/collide.js uses today
-        const T = it.size; svg.push(`<rect x="${X(-T[0] / 2)}" y="${Z(T[2] / 2)}" width="${T[0] * S}" height="${T[2] * S}" fill="none" stroke="#9aa4b8" stroke-width="1.2" stroke-dasharray="5 4"/>`);
-      }
       const pp = []; for (let k = 0; k < it.poly.length; k += 2) pp.push(`${X(it.poly[k])},${Z(it.poly[k + 1])}`);
       svg.push(`<polygon points="${pp.join(' ')}" fill="rgba(255,64,160,0.10)" stroke="#ff40a0" stroke-width="1.8"/>`);
       for (let k = 0; k < it.poly.length; k += 2) svg.push(`<circle cx="${X(it.poly[k])}" cy="${Z(it.poly[k + 1])}" r="2.2" fill="#ff40a0"/>`);

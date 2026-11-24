@@ -23,7 +23,11 @@
    another car, 30 otherwise, evenly (the remainder of a frame is kept); the prediction
    carries the change of speed and its corrections fade on a spring (ghostsync.js), so a
    correction never shows as a jump; ?debug=net shows ping, jitter, update age and how far
-   the picture of each car was off. */
+   the picture of each car was off.
+
+   Plan 3, stage 4: car-to-car hits between the cars' hitbox polygons (bump.js), and the
+   protocol number sent on creating or joining a room (protocol.js): a server of another
+   version turns the game away with "the game was updated, reload the page". */
 import { $, G, NET, serverNow } from '../state.js';
 import { car, applyLook } from '../player.js';
 import { choice } from '../ui/garage.js';

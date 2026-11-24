@@ -398,10 +398,12 @@ class RaceRoom extends Room {
       if (!from || !to || m.to === client.sessionId || from.finished || to.finished) return;
       const now = Date.now();
       if (now < from.ghostUntil || now < to.ghostUntil) return;   // a crashed, blinking car can't push or be pushed
-      if (Math.hypot(from._s.x - to._s.x, from._s.z - to._s.z) > 25) return;   // they weren't even close (positions here are a ping old)
+      const sf = this.speedOf(from), st = this.speedOf(to);
+      // a cheap first look: the centres no farther than the body rule below could ever allow
+      if (Math.hypot(from._s.x - to._s.x, from._s.z - to._s.z) > 13 + (sf + st) * 0.5) return;
       // the cars' bodies (their hitboxes at the last reported poses, net/bump.js gap) no
       // farther apart than the two can close in the age of those poses (~0.5 s), plus 3 m
-      if (this.bumps.gap(from._s, to._s, from.car, to.car) > 3 + (this.speedOf(from) + this.speedOf(to)) * 0.5) return;
+      if (this.bumps.gap(from._s, to._s, from.car, to.car) > 3 + (sf + st) * 0.5) return;
       const target = this.clients.find(c => c.sessionId === m.to);
       if (!target) return;
       const key = client.sessionId + '>' + m.to, r = this.bumpRate.get(key) || { tokens: 3, t: now };
@@ -411,7 +413,9 @@ class RaceRoom extends Room {
       const B = this.bumps.BUMP, mass = this.bumps.carMass;
       const mf = mass(from.car), mt = mass(to.car);
       // the speeds as the server saw the cars move, not as claimed (speedOf)
-      const closing = this.speedOf(from) + this.speedOf(to) + 3;
+      // + 3 m/s of slack (a scrape between two already spinning cars can close up to ~6 m/s more
+      // at the contact point; such a hit is scaled down here a little: plan 3 stage 6)
+      const closing = sf + st + 3;
       const most = Math.min(B.MAX_DV, (1 + B.E) * Math.hypot(1, B.MU) * closing * mf / (mf + mt));
       let jx = finite(m.jx, -B.MAX_DV, B.MAX_DV), jz = finite(m.jz, -B.MAX_DV, B.MAX_DV);
       const j = Math.hypot(jx, jz); if (j > most) { jx *= most / j; jz *= most / j; }
