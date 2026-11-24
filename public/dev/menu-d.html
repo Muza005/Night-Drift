@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Night Drift — макет D «Стойка»</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500..800&family=Manrope:wght@400..800&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../css/tokens.css">
+<style>
+/* U1 mock D, «Стойка». Your car stands on its lit podium in the middle of the night city and
+   never leaves it: every menu level is a deck of slanted cards that rolls past under it.
+   ← → slides the deck so the chosen card sits under the car, opens wide and lights its frame
+   from the game; the readout above the deck says what it is. Enter rolls the deck on to the
+   next level (it leaves to the left, the next comes in from the right, the car leans into the
+   move); Esc rolls it back. «С друзьями» is a card of the first deck, next to the two modes:
+   one press for the common case (drive alone), one card away for a room, and the friend with
+   a code finds «Войти по коду» right behind it. */
+:root {
+  --slant: 26px;
+  --card: 150px;                       /* a card at rest */
+  --card-open: 380px;                  /* the card under the car */
+  --card-h: clamp(150px, 26vh, 250px);
+  --deck-gap: 10px;
+  --dur-focus: 220ms;
+  --dur-level: 320ms;
+  --gutter: clamp(16px, 3vw, 40px);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+body { font: 400 var(--fs-md)/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--c-rose); color: var(--c-night-1); }
+
+/* ---------- the scene: the painted city and the car on its stand ---------- */
+.scene { position: fixed; inset: 0; z-index: 0; background: url(u1/city-wide.webp) center 60% / cover no-repeat, var(--c-night-1); }
+.scene::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 6, 16, 0.7) 0%, rgba(5, 6, 16, 0.2) 30%, rgba(5, 6, 16, 0.35) 55%, rgba(5, 6, 16, 0.95) 80%); }
+.car { position: fixed; z-index: 0; left: 50%; top: calc(var(--top) + 36px); width: min(66vw, 780px); aspect-ratio: 940 / 520; translate: -50% 0;
+  -webkit-mask-image: radial-gradient(ellipse 50% 48% at 50% 50%, #000 58%, transparent 100%); mask-image: radial-gradient(ellipse 50% 48% at 50% 50%, #000 58%, transparent 100%); }
+.car img { width: 100%; height: 100%; display: block; }
+
+.app { position: relative; z-index: 1; height: 100dvh; display: grid; grid-template-rows: auto 1fr auto auto auto; }
+
+.top { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--top) var(--gutter) 0; }
+.logo { margin: 0; font: 800 var(--fs-lg)/1 var(--f-display); white-space: nowrap; }
+.logo span { color: var(--brand); }
+.path { display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; font: 600 var(--fs-sm)/1 var(--f-body); color: var(--text-quiet); }
+.path li + li::before { content: "/"; margin-inline-end: var(--sp-2); color: var(--text-off); }
+.path li:last-child { color: var(--text); }
+
+/* ---------- the readout: what the card under the car is ---------- */
+.readout { display: grid; gap: var(--sp-2); justify-items: center; text-align: center; padding: 0 var(--gutter) var(--sp-4); width: min(100%, 640px); margin-inline: auto; min-height: 5.5rem; align-content: end; }
+.readout .meta { justify-content: center; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
+.readout p { margin: 0; font-size: var(--fs-md); color: var(--c-ink-0); max-width: 52ch; text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); color: var(--c-ink-1); }
+.meta .num { font: 700 var(--fs-sm)/1 var(--f-num); color: var(--text); }
+.meta .none { color: var(--text-quiet); font-weight: 600; }
+.dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ink-3); }
+.dots i.on { background: var(--brand); }
+.tag { padding: 2px var(--sp-2); border-radius: var(--r-pill); border: 1px solid var(--line-strong); font: 600 var(--fs-xs)/1.4 var(--f-body); }
+.readout .swap { transition: opacity 140ms var(--ease-out), translate 200ms var(--ease-out); }
+.readout .swap.out { opacity: 0; translate: 0 6px; transition-duration: 1ms; }
+
+/* ---------- the deck ---------- */
+.deck { position: relative; height: calc(var(--card-h) + var(--sp-2)); overflow: hidden; }
+.track { position: absolute; top: 0; left: 0; display: flex; gap: var(--deck-gap); height: var(--card-h); transition: transform var(--dur-focus) var(--ease-out); will-change: transform; }
+.track[inert] { pointer-events: none; }
+.card {
+  position: relative; flex: 0 0 var(--card); height: 100%; border: 0; padding: 0; cursor: pointer; background: var(--c-night-2);
+  margin-inline-end: calc(var(--slant) * -1);
+  clip-path: polygon(var(--slant) 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%);
+  transition: flex-basis var(--dur-focus) var(--ease-out);
+  outline: none;
+}
+.card[aria-selected="true"] { flex-basis: var(--card-open); }
+.card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--fx, 50%) 50%; opacity: 0.45; transition: opacity var(--dur-focus) var(--ease-out); }
+.card[aria-selected="true"] img { opacity: 1; }
+.card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 6, 16, 0) 40%, rgba(5, 6, 16, 0.85)); }
+.card .name { position: absolute; z-index: 1; left: calc(var(--slant) * 0.2 + var(--sp-3)); right: calc(var(--slant) + var(--sp-2)); bottom: var(--sp-3); font: 700 var(--fs-sm)/1.15 var(--f-display); color: var(--c-ink-1); }
+.card[aria-selected="true"] .name { color: var(--text); font-size: var(--fs-md); }
+.card .bar { position: absolute; z-index: 1; left: 0; right: var(--slant); bottom: 0; height: 3px; background: var(--accent, var(--action)); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); }
+.card[aria-selected="true"] .bar { opacity: 1; }
+.card:focus-visible .bar { opacity: 1; height: 5px; }
+.card[aria-disabled="true"] img { filter: grayscale(1); }
+.card .soon { position: absolute; z-index: 1; top: var(--sp-3); right: calc(var(--slant) + var(--sp-2)); font: 700 var(--fs-xs)/1 var(--f-body); color: var(--text-quiet); }
+.card .room { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1; color: var(--brand); }
+
+/* ---------- the action under the deck ---------- */
+.act { display: flex; align-items: center; justify-content: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-4) var(--gutter) 0; }
+.keys { justify-content: center; }
+.go { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: var(--btn-h); padding: 0 var(--sp-5); border: 0; border-radius: var(--r-pill); background: linear-gradient(180deg, var(--action-hi), var(--action)); color: var(--on-action); font: 800 var(--fs-md)/1 var(--f-display); box-shadow: var(--glow-action); cursor: pointer; white-space: nowrap; transition: transform var(--dur-press) var(--ease-out); }
+.go:active { transform: scale(0.97); }
+.go:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.go[aria-disabled="true"] { opacity: 0.42; box-shadow: none; cursor: not-allowed; }
+.go kbd, .keys kbd { font: 700 var(--fs-xs)/1 var(--f-num); }
+.go kbd { padding: 3px 6px; border-radius: var(--r-xs); background: rgba(7, 8, 15, 0.18); }
+.code { display: none; gap: var(--sp-2); }
+.code.on { display: flex; }
+.code input { width: 8.5em; min-height: var(--btn-h); padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface-sunk); color: var(--text); font: 700 var(--fs-lg)/1 var(--f-num); letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
+.code input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-color: var(--action); }
+.keys { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); align-items: center; padding: var(--sp-3) var(--gutter) var(--bot); font: 600 var(--fs-sm)/1 var(--f-body); color: var(--text-quiet); }
+.keys kbd { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; margin-inline-end: 6px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); box-shadow: inset 0 -2px 0 var(--line); color: var(--c-ink-1); }
+.keys button { display: inline-flex; align-items: center; min-height: var(--btn-h); border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.keys button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-radius: var(--r-xs); }
+.keys button[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  :root { --card: 84px; --card-open: 62vw; --slant: 18px; --card-h: clamp(140px, 24vh, 200px); --deck-gap: 6px; }
+  .car { width: 118vw; top: calc(var(--top) + 30px); }
+  .readout { min-height: 6rem; }
+  .keys .hint { display: none; }
+  .act .go { flex: 1 1 auto; justify-content: center; }
+}
+@media (max-height: 500px) {
+  :root { --card-h: 120px; }
+  .car { width: 46vw; left: auto; right: var(--gutter); translate: 0 0; top: var(--top); }
+  .readout { min-height: 0; width: 50vw; margin: 0; justify-items: start; text-align: start; }
+  .readout .meta, .act { justify-content: flex-start; }
+  .readout p { display: none; }
+  .keys { display: none; }
+  .act { padding-bottom: var(--bot); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track, .card, .card img, .card .bar, .readout .swap { transition-duration: 1ms; }
+}
+</style>
+</head>
+<body>
+<div class="scene" aria-hidden="true"></div>
+<div class="car" id="car" aria-hidden="true"><img src="u1/car-stand.webp" alt=""></div>
+<div class="app">
+  <header class="top">
+    <p class="logo">Night <span>Drift</span></p>
+    <ol class="path" id="path" aria-label="Где вы"></ol>
+  </header>
+  <div></div>
+  <section class="readout" aria-live="polite" id="readout"></section>
+  <main class="deck" id="deck"></main>
+  <div class="act">
+    <button type="button" class="go" id="go"></button>
+    <form class="code" id="code" onsubmit="return false"><input aria-label="Код комнаты" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false"></form>
+  </div>
+  <footer class="keys">
+    <span class="hint"><kbd>←</kbd><kbd>→</kbd>выбор</span>
+    <span class="hint"><kbd>Enter</kbd>дальше</span>
+    <button type="button" id="back" hidden><kbd>Esc</kbd>назад</button>
+  </footer>
+</div>
+<script type="module">
+const DIFF = ['', 'лёгкая', 'средняя', 'сложная'];
+const dots = n => `<span class="dots" aria-label="Сложность ${n} из 3">${[1, 2, 3].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>`;
+const km = m => (m / 1000).toFixed(2).replace('.', ',') + ' км';
+const none = '<span class="none">Рекорда пока нет</span>';
+const MAPS = [
+  ['neon', 'Ночной город', 1433.4, 1, [], 43, 'Неоновый круг между небоскрёбами: длинные дуги и две тугие шпильки.'],
+  ['estakada', 'Эстакада', 1972.2, 2, ['мост'], 42, 'Цветок из петель вокруг развязки: мост над двумя тоннелями, насыпи и вираж.'],
+  ['serpantin', 'Серпантин', 2473.6, 3, ['срезка'], 41, 'Извилистая змейка, тугая гармошка, длинная прямая и три срезки.'],
+  ['parking', 'Паркинг', 1646.2, 3, ['этажи'], 58, 'Многоэтажная парковка: спираль вверх, три этажа между колоннами, крыша над городом.'],
+  ['pereval', 'Перевал', 2514.8, 2, ['мост', 'уклоны'], 43, 'Горный перевал в лесу: холмы, виражи, два трамплина и спираль под собственным мостом.'],
+  ['razvyazka', 'Развязка', 2803.3, 2, ['мост', 'срезка'], 43, 'Портовая развязка: две петли под своими мостами, шпильки гармошкой и четыре срезки.'],
+].map(([id, name, len, diff, tags, x, desc]) => ({ id, name, len, diff, tags, x, desc }));
+const room = { on: false };
+const modeCards = () => [
+  { id: 'track', name: 'Дрифт', img: 'u1/map-neon.webp', x: 43, accent: 'var(--brand)', text: 'Круг по одной из шести карт. Очки за занос, время круга.', meta: `<span>6 карт</span><span>1–10 кругов</span>${none}`, go: 'Выбрать карту' },
+  { id: 'traffic', name: 'Трасса', img: 'u1/traffic-pass.webp', x: 50, accent: 'var(--action)', text: room.on ? 'Шоссе в потоке на время: 1–10 минут, плотность на выбор хозяина.' : 'Бесконечное шоссе в потоке. Очки за обгон впритирку, множитель до ×5.', meta: room.on ? '<span>до 6 машин</span>' : `<span>4 полосы</span>${none}`, go: room.on ? 'Создать комнату' : 'Поехали' },
+];
+const LEVELS = {
+  home: { path: [], items: () => [
+    ...modeCards(),
+    { id: 'friends', name: 'С друзьями', img: 'u1/city-tall.webp', x: 50, accent: 'var(--brand)', text: 'Своя комната до шести машин или вход по коду друга. Те же режимы и машины, общий старт.', meta: '<span>до 6 игроков</span><span>код и ссылка</span>', go: 'Дальше' },
+    { id: 'career', name: 'Карьера', img: 'u1/city-wide.webp', x: 50, soon: true, text: 'Скоро: сезон заездов и свой гараж.', meta: '' },
+  ] },
+  friends: { path: ['С друзьями'], items: () => [
+    { id: 'host', name: 'Создать комнату', img: 'u1/city-tall.webp', x: 50, accent: 'var(--brand)', text: 'Вы хозяин: выбираете режим и карту, друзья входят по ссылке или коду.', meta: '<span>до 6 игроков</span>', go: 'Выбрать режим' },
+    { id: 'join', name: 'Войти по коду', img: 'u1/city-wide.webp', x: 30, accent: 'var(--record)', text: 'Друг уже создал комнату? Четыре буквы из его ссылки.', meta: '', go: 'Войти', code: true },
+  ] },
+  mode: { path: ['С друзьями', 'Комната'], items: modeCards },
+  map: { path: () => room.on ? ['С друзьями', 'Комната', 'Дрифт'] : ['Дрифт'], items: () => MAPS.map(m => ({ id: m.id, name: m.name, img: `u1/map-${m.id}.webp`, x: m.x, accent: 'var(--brand)', small: km(m.len),
+    text: m.desc, meta: `<span class="num">${km(m.len)}</span><span>${dots(m.diff)} ${DIFF[m.diff]}</span>${m.tags.map(t => `<span class="tag">${t}</span>`).join('')}${room.on ? '' : none}`, go: room.on ? 'Создать комнату' : 'Поехали' })) },
+};
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+const $ = id => document.getElementById(id);
+const deck = $('deck'), readout = $('readout'), go = $('go'), back = $('back'), code = $('code'), car = $('car');
+const history = []; let cur = null;
+const px = v => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(v));
+
+function renderPath(id) {
+  const p = LEVELS[id].path; const list = typeof p === 'function' ? p() : p;
+  $('path').innerHTML = ['Главная', ...list].map(s => `<li>${s}</li>`).join('');
+}
+function build(id) {
+  const t = document.createElement('div');
+  t.className = 'track'; t.setAttribute('role', 'listbox'); t.setAttribute('aria-orientation', 'horizontal'); t.setAttribute('aria-label', id === 'map' ? 'Карта' : id === 'friends' ? 'С друзьями' : 'Режим');
+  const items = LEVELS[id].items(); t._items = items;
+  items.forEach((it, i) => {
+    const c = document.createElement('div');
+    c.className = 'card'; c.id = `${id}-${it.id}`; c.setAttribute('role', 'option'); c.tabIndex = -1; c.dataset.id = it.id;
+    c.setAttribute('aria-label', it.name);
+    if (it.soon) c.setAttribute('aria-disabled', 'true');
+    c.style.setProperty('--fx', it.x + '%'); if (it.accent) c.style.setProperty('--accent', it.accent);
+    c.innerHTML = `<img src="${it.img}" alt="" ${i > 3 ? 'loading="lazy"' : ''}><span class="name">${it.name}</span><span class="bar"></span>${it.soon ? '<span class="soon">Скоро</span>' : ''}`;
+    c.addEventListener('click', () => { if (c.getAttribute('aria-selected') === 'true') enter(); else focusAt(i); });
+    t.appendChild(c);
+  });
+  return t;
+}
+// The card in focus sits under the car: the deck slides so its centre is the screen's centre.
+function place(t, i) {
+  const w = px('--card'), wo = deck.clientWidth < 700 ? innerWidth * 0.62 : px('--card-open'), gap = px('--deck-gap') - px('--slant');
+  const left = i * (w + gap);
+  t.style.transform = `translateX(${Math.round(deck.clientWidth / 2 - left - wo / 2)}px)`;
+}
+function fillReadout(it) {
+  readout.innerHTML = `<h1 class="vh">${it.name}</h1><div class="swap out"><p>${it.text}</p></div>${it.meta ? `<div class="swap out meta">${it.meta}</div>` : ''}`;
+  requestAnimationFrame(() => readout.querySelectorAll('.swap').forEach((s, k) => { s.style.transitionDelay = k * 40 + 'ms'; s.classList.remove('out'); }));
+  go.innerHTML = it.soon ? 'Скоро' : `${it.go} <kbd>Enter</kbd>`;
+  go.setAttribute('aria-disabled', it.soon ? 'true' : 'false');
+  code.classList.toggle('on', !!it.code);
+}
+function focusAt(i, moveFocus = true) {
+  const cs = [...cur.el.children]; i = Math.max(0, Math.min(cs.length - 1, i)); cur.i = i;
+  cs.forEach((c, k) => { c.setAttribute('aria-selected', k === i ? 'true' : 'false'); c.tabIndex = k === i ? 0 : -1; });
+  place(cur.el, i); fillReadout(cur.el._items[i]);
+  if (moveFocus) cs[i].focus({ preventScroll: true });
+}
+// One level to the next: the deck under the car rolls away to one side and the next rolls in
+// from the other; the car leans a little into the move and settles back.
+function show(id, dir, at = 0) {
+  const old = cur && cur.el, t = build(id);
+  t.style.transition = 'none'; deck.appendChild(t); cur = { id, el: t, i: 0 }; focusAt(at);
+  t.getBoundingClientRect(); t.style.transition = '';
+  renderPath(id); back.hidden = history.length === 0;
+  if (!old) return;
+  old.inert = true;
+  const d = px('--dur-level') || 320, ease = 'cubic-bezier(0.22, 1, 0.36, 1)';
+  if (reduce.matches) {
+    old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished.then(() => old.remove());
+    t.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160 });
+    return;
+  }
+  const from = old.style.transform;
+  old.animate([{ transform: from, opacity: 1 }, { opacity: 0, offset: 0.75 }, { transform: `${from} translateX(${-dir * 60}vw)`, opacity: 0 }], { duration: d * 0.8, easing: 'cubic-bezier(0.55, 0, 0.75, 0.4)', fill: 'forwards' }).finished.then(() => old.remove());
+  t.animate([{ transform: `${t.style.transform} translateX(${dir * 70}vw)`, opacity: 0 }, { transform: t.style.transform, opacity: 1 }], { duration: d, delay: 40, easing: ease, fill: 'backwards' });
+  car.animate([{ translate: '-50% 0' }, { translate: `calc(-50% + ${-dir * 1.6}vw) 0`, offset: 0.4 }, { translate: '-50% 0' }], { duration: d + 160, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', composite: 'replace' });
+}
+function enter() {
+  const it = cur.el._items[cur.i]; if (!it || it.soon) return;
+  if (cur.id === 'home' || cur.id === 'mode') {
+    if (it.id === 'track') { history.push(cur); show('map', 1); }
+    else if (it.id === 'friends') { history.push(cur); show('friends', 1); }
+  } else if (cur.id === 'friends') {
+    if (it.id === 'host') { room.on = true; history.push(cur); show('mode', 1); }
+    else code.querySelector('input').focus();
+  }
+}
+function goBack() {
+  const prev = history.pop(); if (!prev) return;
+  if (prev.id === 'friends' || prev.id === 'home') room.on = prev.id !== 'home' ? false : room.on;
+  if (prev.id === 'home') room.on = false;
+  show(prev.id, -1, prev.i);
+}
+go.addEventListener('click', enter);
+back.addEventListener('click', goBack);
+document.addEventListener('keydown', e => {
+  const typing = e.target.matches('input');
+  if (e.key === 'Escape') { e.preventDefault(); if (typing) cur.el.children[cur.i].focus(); else goBack(); return; }
+  if (typing) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); focusAt(cur.i + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); focusAt(cur.i - 1); }
+  else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
+  else if (e.key === 'End') { e.preventDefault(); focusAt(99); }
+  else if ((e.key === 'Enter' || e.key === ' ') && !e.target.matches('button')) { e.preventDefault(); enter(); }
+});
+let sx = null;
+deck.addEventListener('pointerdown', e => { sx = e.clientX; });
+deck.addEventListener('pointerup', e => { if (sx === null) return; const dx = e.clientX - sx; sx = null; if (Math.abs(dx) > 40) focusAt(cur.i + (dx < 0 ? 1 : -1)); });
+addEventListener('resize', () => cur && place(cur.el, cur.i));
+const q = new URLSearchParams(location.search);
+show('home', 1, 0);
+if (q.get('at') === 'map') { history.push(cur); show('map', 1); }
+</script>
+</body>
+</html>
