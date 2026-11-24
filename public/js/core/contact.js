@@ -220,3 +220,85 @@ export function pushOut(p, B, detect){
   }
   return moved;
 }
+
+// --- car against car (plan 3, stage 4) ---
+// Two cars' hitbox polygons (world, counter-clockwise; worldPoly). Separating axes: every
+// edge normal of both polygons; the axis with the least overlap is the contact normal (out
+// of B, toward A), that overlap the depth. A rear-end hit is judged by the flat nose and
+// tail (the normal straight along the cars), a corner by its rounded pieces (a slanted
+// normal): what the bodies really touch with, not two circles' centre line.
+// The contact point: the middle of the overlap (A's vertices inside B, B's inside A, and
+// where their edges cross); the lever arm of the hit is from it.
+// out: { px, pz, nx, nz, depth } on contact (true); separated, out.gap is the largest
+// separation along an axis (m, > 0: a lower bound of the distance between the bodies).
+export const CAR = {
+  E_MAX: .05,                 // restitution at most: cars crumple. The wall's curve (none below E_FROM, rising to E_TO), lower: a rear-end hit leaves both cars near the common speed (plan 3 stage 4: 90-100 km/h after 180 into a stopped car)
+  MU: WALL.MU,                // body to body friction: the wall's
+};
+export const carRestitution = vin => CAR.E_MAX * Math.min(1, Math.max(0, (vin - WALL.E_FROM) / (WALL.E_TO - WALL.E_FROM)));
+
+const inside = (P, n, x, z) => {           // (x, z) inside convex P (on an edge: inside)
+  for(let i = 0; i < n; i++){ const j = i + 1 < n ? i + 1 : 0, ax = P[2 * i], az = P[2 * i + 1];
+    if((P[2 * j] - ax) * (z - az) - (P[2 * j + 1] - az) * (x - ax) < 0) return false; }
+  return true;
+};
+export function polyContact(PA, na, PB, nb, out){
+  let best = -Infinity, bnx = 0, bnz = 0;
+  for(let pass = 0; pass < 2; pass++){
+    const P = pass ? PB : PA, n = pass ? nb : na, Q = pass ? PA : PB, m = pass ? na : nb;
+    for(let i = 0; i < n; i++){
+      const j = i + 1 < n ? i + 1 : 0, ax = P[2 * i], az = P[2 * i + 1], ex = P[2 * j] - ax, ez = P[2 * j + 1] - az, l = Math.sqrt(ex * ex + ez * ez);
+      if(l < 1e-9) continue;
+      const ox = ez / l, oz = -ex / l;                                   // the edge's outward normal
+      let s = Infinity;
+      for(let k = 0; k < m; k++){ const d = (Q[2 * k] - ax) * ox + (Q[2 * k + 1] - az) * oz; if(d < s) s = d; }
+      if(s > best){ best = s; if(pass){ bnx = ox; bnz = oz; } else { bnx = -ox; bnz = -oz; } }
+    }
+  }
+  if(best >= 0){ out.gap = best; return false; }
+  // the overlap's middle
+  let sx = 0, sz = 0, c = 0;
+  for(let k = 0; k < na; k++) if(inside(PB, nb, PA[2 * k], PA[2 * k + 1])){ sx += PA[2 * k]; sz += PA[2 * k + 1]; c++; }
+  for(let k = 0; k < nb; k++) if(inside(PA, na, PB[2 * k], PB[2 * k + 1])){ sx += PB[2 * k]; sz += PB[2 * k + 1]; c++; }
+  for(let i = 0; i < na; i++){ const i2 = i + 1 < na ? i + 1 : 0, ax = PA[2 * i], az = PA[2 * i + 1], ex = PA[2 * i2] - ax, ez = PA[2 * i2 + 1] - az;
+    for(let k = 0; k < nb; k++){ const k2 = k + 1 < nb ? k + 1 : 0, bx = PB[2 * k], bz = PB[2 * k + 1], fx = PB[2 * k2] - bx, fz = PB[2 * k2 + 1] - bz;
+      const den = ex * fz - ez * fx; if(Math.abs(den) < 1e-12) continue;
+      const wx = bx - ax, wz = bz - az, t = (wx * fz - wz * fx) / den, u = (wx * ez - wz * ex) / den;
+      if(t >= 0 && t <= 1 && u >= 0 && u <= 1){ sx += ax + ex * t; sz += az + ez * t; c++; } } }
+  if(!c){ // (cannot happen for two overlapping convex polygons; numerically: B's deepest vertex)
+    let d = Infinity; for(let k = 0; k < nb; k++){ const v = PB[2 * k] * bnx + PB[2 * k + 1] * bnz; if(v < d){ d = v; sx = PB[2 * k]; sz = PB[2 * k + 1]; } } c = 1; }
+  out.px = sx / c; out.pz = sz / c; out.nx = bnx; out.nz = bnz; out.depth = -best; out.gap = best;
+  return true;
+}
+
+// The impulse between two cars at contact C (polyContact: n out of B toward A, point
+// px, pz) as two rigid bodies, the wall's model with the other car movable: masses mA, mB
+// (kg), yaw inertias IA, IB (the bodies' I: bodyOf; the tyres take part of the turn,
+// WALL.YAW_K, as at the wall), the cars' velocities (vax, vaz), (vbx, vbz) and spins wa, wb
+// (rad/s, a hit's: car.spinV). Normal impulse from the contact point's closing speed (at
+// most `cap`, what the cars' centres really do, plus what their spins add),
+// restitution by how hard (carRestitution), friction along the contact up to CAR.MU × the
+// normal impulse. Into out: jx, jz (the impulse on A, N s; B gets minus it), closing (m/s),
+// jn, jt (its normal and tangential parts), kA, kB (lever: the yaw change per N s of
+// impulse along the impulse's direction is (k × J) / I, see below); false if moving apart.
+export function carImpulse(ax, az, vax, vaz, wa, mA, IA, bx, bz, vbx, vbz, wb, mB, IB, C, cap, out){
+  const nx = C.nx, nz = C.nz, tx = -nz, tz = nx;
+  // the contact point's velocity per rad/s of yaw (car.h grows: forward (sin h, cos h) turns towards +x): (rz, -rx)
+  const kax = C.pz - az, kaz = -(C.px - ax), kbx = C.pz - bz, kbz = -(C.px - bx);
+  const iA = WALL.YAW_K / IA, iB = WALL.YAW_K / IB;
+  // the contact point's relative velocity, the cars' spins (car.spinV) in it: once a hit
+  // has turned them, the points part even if the centres still close in (no second impulse)
+  const rvx = vax + wa * kax - vbx - wb * kbx, rvz = vaz + wa * kaz - vbz - wb * kbz, vn = rvx * nx + rvz * nz;
+  if(vn >= 0) return false;
+  const closing = Math.min(-vn, cap + Math.abs(wa) * Math.hypot(kax, kaz) + Math.abs(wb) * Math.hypot(kbx, kbz));
+  const kna = kax * nx + kaz * nz, knb = kbx * nx + kbz * nz, kta = kax * tx + kaz * tz, ktb = kbx * tx + kbz * tz;
+  const Kn = 1 / mA + 1 / mB + kna * kna * iA + knb * knb * iB;
+  const jn = (1 + carRestitution(closing)) * closing / Kn;
+  // friction: the contact's sliding speed after the normal impulse (its turn included), evened out up to MU × jn
+  const vt = rvx * tx + rvz * tz + jn * (kta * kna * iA + ktb * knb * iB);
+  const Kt = 1 / mA + 1 / mB + kta * kta * iA + ktb * ktb * iB;
+  let jt = -vt / Kt; const lim = CAR.MU * jn; jt = jt > lim ? lim : jt < -lim ? -lim : jt;
+  out.jx = nx * jn + tx * jt; out.jz = nz * jn + tz * jt; out.jn = jn; out.jt = jt; out.closing = closing;
+  out.kax = kax; out.kaz = kaz; out.kbx = kbx; out.kbz = kbz; out.iA = iA; out.iB = iB;
+  return true;
+}

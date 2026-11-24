@@ -43,6 +43,7 @@ import { roster, seatOf, seatHex } from '../ui/seats.js';
 import { carMass, keepOut, newMem, collideStep, takeOut, receive, catchUp, kickStart, kickAt, kickUpdate } from './bump.js';
 import { predict, newView, correct, settle, reset as resetView, newStats, statArrive, statErr, errPct } from './ghostsync.js';
 import { decodeState } from './statecodec.js';
+import { PROTOCOL, UPDATED, UPDATED_CODE } from './protocol.js';
 
 function endpoint(){
   try{ const q=new URLSearchParams(location.search).get('server'); if(q) return q; }catch(e){}
@@ -54,6 +55,8 @@ function endpoint(){
 }
 function errText(e){
   const m=String((e&&e.message)||e||'');
+  // the server is of another version than this tab (net/protocol.js): reloading gets the game it plays with
+  if((e&&e.code)===UPDATED_CODE || m===UPDATED) return UPDATED;
   if(/not found/i.test(m)) return 'Комнаты с таким кодом нет. Проверьте код.';
   if(/locked|full/i.test(m)) return 'В комнате нет мест или заезд уже идёт. Дождитесь конца заезда.';
   // the room said no to this player: the host sent them out of it earlier
@@ -86,7 +89,7 @@ export async function connectRoom(kind){
   netStatus('netStatus', kind==='create' ? 'Создаю комнату…' : 'Подключаюсь…');
   try{
     NET.client=new Colyseus.Client(ep);
-    const room=kind==='create' ? await NET.client.create('race',{name:myName(),pid:PID,mode:NET.wantMode||'track',map:G.soloMap||'neon',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{name:myName(),pid:PID,car:choice.car,paint:choice.paint});
+    const room=kind==='create' ? await NET.client.create('race',{proto:PROTOCOL,name:myName(),pid:PID,mode:NET.wantMode||'track',map:G.soloMap||'neon',density:G.density||'mid',car:choice.car,paint:choice.paint}) : await NET.client.joinById(code,{proto:PROTOCOL,name:myName(),pid:PID,car:choice.car,paint:choice.paint});
     netStatus('netStatus','');
     try{ bindRoom(room); }
     catch(e){ console.error('joining the room failed', e); try{ room.leave(true); }catch(_){} leaveOnline('Не получилось войти в комнату. Обновите страницу.'); }
@@ -356,7 +359,7 @@ export function updateGhosts(dt){
     }
     g.last=s1; g.lastPrev=s0; g.stats.age=nowS-s1.t;
     const kd=kickAt(g.kick,nowS,s1.t); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
-    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz;   // (rv: as reported, without our guess)
+    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz; g.spinV=kd.w;   // (rv: as reported, without our guess; spinV: our guess's spin, the hit's lever)
     // (held while the car rests against ours, below: the spring would pull it back inside)
     if(g.pinned){ g.view.ov.x=g.view.ov.z=0; } else settle(g.view,dt);
     g.off=g.view.off;
@@ -374,7 +377,7 @@ export function updateGhosts(dt){
     // held, so each frame only pushes it out by the little its prediction moved in (a clear
     // direction), not from deep inside (where the direction out flips from frame to frame).
     g.pinned=false;
-    if(g.mem && touchable(g,nowS)){ const bx=s.x, bz=s.z; keepOut(s,car,g.mem,performance.now(),NET.rtt);
+    if(g.mem && touchable(g,nowS)){ const bx=s.x, bz=s.z; keepOut(s,car,g.mem,performance.now(),NET.rtt,g.car);
       if(s.x!==bx || s.z!==bz){ g.view.off.x+=s.x-bx; g.view.off.z+=s.z-bz; g.pinned=true;
         // a long push (they keep driving into us) must not build up to a reset-sized offset
         const o=g.view.off, n=Math.hypot(o.x,o.z), cap=PIN_MAX; if(n>cap){ o.x*=cap/n; o.z*=cap/n; } } }

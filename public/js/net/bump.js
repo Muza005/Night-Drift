@@ -2,8 +2,10 @@
    Pure logic (no three.js, no DOM): net.js runs it in the game, tests/bump.test.mjs and
    the two-player scenario in Node.
 
-   Shapes: each car is two overlapping circles (front and rear), the long box shape
-   closely and cheaply.
+   Shapes (plan 3, stage 4): each car is its hitbox, the convex polygon of its body from
+   its model (core/hitboxes.js), the same one the walls see; the contact point and normal
+   come from the real bodies (core/contact.js polyContact). Was: two 1.05 m circles, whose
+   centre line slid a rear-end hit or a slow push off to the side.
 
    One judge per hit. Each player sees the other car where it was a ping ago, moved
    forward by its speed (a prediction), so both players would see the same contact a
@@ -16,32 +18,42 @@
    trip and the contact goes on, it takes the hit itself (the other side may never have
    seen it), and a hit that then still arrives is ignored: one impulse per car per hit.
 
-   The hit (two point masses, the class masses of core/cars.js):
-   - along the normal, restitution E = 0.1: two cars crumple, they don't bounce;
-   - along the contact, friction up to MU × the normal impulse: a side swipe rubs (the two
-     cars' sideways speeds even out) instead of pushing them apart;
-   - spin from the impulse's lever arm, at most SPIN rad/s;
-   - the closing speed it works from is capped by what the cars really do, and one contact
-     never hands out more velocity than its closing speed can give (no "shot");
-   - positional push out of the overlap at most PUSH m per substep, the rest in the next;
+   The hit: the wall's model (core/contact.js) with the other car movable. Two rigid
+   bodies, masses in kg (core/cars.js class mass × WALL.KG) and yaw inertia from the
+   hitbox, at the contact point (contact.js carImpulse):
+   - along the normal, restitution by how hard (contact.js carRestitution): none below
+     10 km/h of closing speed (a slow touch rams: the cars meet and move on together), at
+     most CAR.E_MAX: two cars crumple, they don't bounce;
+   - along the contact, friction up to CAR.MU × the normal impulse (a side swipe rubs);
+   - the impulse's lever arm turns the cars: the tyres hold the first YAW_HOLD of its
+     moment (a slow push's small impulses never turn the pushed car), of the rest they take
+     part (WALL.YAW_K, as at the wall), at most SPIN rad/s;
+   - the closing speed it works from is capped by what the cars really do (their reported
+     speeds: the prediction may add to it);
+   - a contact goes on as long as the cars touch: each substep that they still close in
+     takes its own impulse (a push: the rear car hands its pull on to the front one, both
+     move as one); none once they move apart;
+   - push out of the overlap only along the normal and only by the depth, shared by mass,
+     at most PUSH m per substep, the rest in the next;
    - from HOP closing speed the cars are lifted a little (a short hop, no flips): on the
      track maps with heights a real one (car.air, the flight of modes/track/geometry.js),
      elsewhere drawn only (lift()). */
 import { carMass, carById } from '../core/cars.js';
 import { stepCar } from '../core/physics.js';
 import { HITLOG } from '../core/hitlog.js';
+import { worldPoly, hitbox } from '../core/hitboxes.js';
+import { WALL, CAR, bodyOf, polyContact, carImpulse } from '../core/contact.js';
 
 export const BUMP = Object.freeze({
-  R: 1.05, OFF: 1.15,     // circle radius, and how far ahead and behind the middle each circle sits (m)
-  I: 1.87,                // moment of inertia per unit mass (m²) of a 4.4 × 2 m car
-  SPIN_K: 0.6,            // part of the lever-arm spin a car really takes (tyres hold it)
-  E: 0.1,                 // restitution car to car
-  MU: 0.35,               // body-to-body friction
-  SPIN: 2,                // rad/s, at most
+  E: CAR.E_MAX,           // restitution car to car, at most (contact.js carRestitution)
+  MU: CAR.MU,             // body-to-body friction
+  YAW_HOLD: 0.1,          // N m s per kg: the yaw impulse a car's tyres take in one substep before it turns (their grip, μ g × half the wheelbase, over 1/120 s). A push's small impulses go straight on; a hard hit's barely notice it
+  SPIN: 1.2,              // rad/s, at most (was 2: with the real lever of an off-centre hit, a 180 km/h rear-end 1 m off the line spun the hit car 33° in 0.5 s, 3 m across)
   PUSH: 0.3,              // m per substep, at most
   TIE: 3,                 // m/s: speeds closer than this are a tie (both decide, the earlier hit stands)
   HOP: 80 / 3.6,          // m/s of closing speed from which a hit lifts the cars
   HOP_VY: 1.0, HOP_K: 0.04, HOP_MAX: 2.0,   // upward speed: 1 m/s at HOP, +0.04 per m/s more, at most 2 (≈ 20 cm)
+  HOP_DV: 0.4,            // ... and only for a car whose velocity changes by at least HOP_DV × HOP × its share (an off-centre hit's lever takes some: the server checks the same)
   WAIT: 120,              // ms past the round trip a non-judge waits before taking a hit itself
   QUIET: 300,             // ms: one contact. A hit from the other side this soon after we judged is ours already
   SEND_GAP: 100,          // ms between hits sent to one player (a scrape adds its impulses up)
@@ -50,24 +62,33 @@ export const BUMP = Object.freeze({
 
 export { carMass };
 const clamp = (v, a) => Math.max(-a, Math.min(a, v));
+// a car's id: our own car's carId, the other car's car (net.js ghosts), or (a pose) none: the first car
+const idOf = o => o.carId ?? o.car;
 
-export function circles(x, z, h) {
-  const fx = Math.sin(h), fz = Math.cos(h), o = BUMP.OFF;
-  return [[x + fx * o, z + fz * o], [x - fx * o, z - fz * o]];
+// The most spin (rad/s) a velocity change of dv (m/s) can give car id: its farthest point
+// from the centre (hitbox r) as the lever, the yaw inertia of carImpulse (the server's limit).
+export function spinPerDv(id) { const hb = hitbox(id); return hb.r * WALL.YAW_K * 12 / (hb.len * hb.len + hb.wid * hb.wid); }
+// The least velocity change (m/s) that comes with a hop for a car of mass m hit by one of mass mOther.
+export const hopDv = (m, mOther) => BUMP.HOP_DV * BUMP.HOP * mOther / (m + mOther);
+
+// The overlap of car a and car b ({x, z, h}; ids: their cars, default from a.carId / a.car),
+// or null. n points from b to a; (cx, cz): the contact point (the middle of the overlap);
+// pen: the overlap's depth along n.
+const PA = new Float64Array(64), PB = new Float64Array(64), CO = { px: 0, pz: 0, nx: 0, nz: 0, depth: 0, gap: 0 };
+export function contact(a, b, ia = idOf(a), ib = idOf(b)) {
+  const A = bodyOf(ia), B = bodyOf(ib), dx = a.x - b.x, dz = a.z - b.z, r = A.r + B.r;
+  if (dx * dx + dz * dz >= r * r) return null;
+  worldPoly(A.id, a.x, a.z, a.h || 0, PA); worldPoly(B.id, b.x, b.z, b.h || 0, PB);
+  if (!polyContact(PA, A.nv, PB, B.nv, CO)) return null;
+  return { nx: CO.nx, nz: CO.nz, pen: CO.depth, cx: CO.px, cz: CO.pz };
 }
-
-// Deepest overlap between car a and car b ({x, z, h}), or null. n points from b to a; the
-// contact point (cx, cz) is midway into the overlap.
-export function contact(a, b) {
-  let best = null;
-  for (const p of circles(a.x, a.z, a.h)) for (const q of circles(b.x, b.z, b.h)) {
-    const dx = p[0] - q[0], dz = p[1] - q[1], d = Math.hypot(dx, dz);
-    if (d < 2 * BUMP.R && (!best || d < best.d)) best = { d, dx, dz, q };
-  }
-  if (!best) return null;
-  const d = Math.max(best.d, 1e-3), nx = best.dx / d, nz = best.dz / d, pen = 2 * BUMP.R - d;
-  const r = BUMP.R - pen / 2;
-  return { nx, nz, pen, cx: best.q[0] + nx * r, cz: best.q[1] + nz * r };
+// The gap between the two bodies (m; <= 0: they overlap): a lower bound of their distance
+// (the server's check that a hit was possible).
+export function gap(a, b, ia = idOf(a), ib = idOf(b)) {
+  const A = bodyOf(ia), B = bodyOf(ib);
+  worldPoly(A.id, a.x, a.z, a.h || 0, PA); worldPoly(B.id, b.x, b.z, b.h || 0, PB);
+  polyContact(PA, A.nv, PB, B.nv, CO);
+  return CO.gap;
 }
 
 // Who decides this contact: the faster car, the one doing the catching up or the cutting
@@ -84,28 +105,32 @@ export function judges(me, other) {
 }
 
 // The hit between car `me` and car `other` at contact C (n from other to me), or null if
-// they are already moving apart. `real`: the most closing speed the two cars can really
-// have (their reported speeds; the prediction may add to it). Returns each car's change:
-// { vx, vz, w (spin), vy (upward, 0 below HOP) } and the closing speed.
-export function hitImpulse(me, other, C, mMe, mOther, real = Infinity) {
-  const rvx = me.vx - other.vx, rvz = me.vz - other.vz;
-  const vn = rvx * C.nx + rvz * C.nz;
-  if (vn >= 0) return null;
-  const closing = Math.min(-vn, real), mr = mMe * mOther / (mMe + mOther);
-  const jn = (1 + BUMP.E) * closing * mr;
-  // friction: the sideways relative speed at the contact, evened out up to MU × jn
-  const tx = -C.nz, tz = C.nx, vt = rvx * tx + rvz * tz;
-  const jt = clamp(-vt * mr, BUMP.MU * jn);
-  let Jx = C.nx * jn + tx * jt, Jz = C.nz * jn + tz * jt;
+// they are already moving apart. mMe, mOther: class masses (core/cars.js); `real`: the most
+// closing speed the two cars can really have (their reported speeds; the prediction may
+// add to it); ids: their hitboxes (inertia). Returns each car's change: { vx, vz, w (spin),
+// vy (upward, 0 below HOP) }, the closing speed and the impulse's normal and tangential
+// parts (jn, jt; per unit class mass: the velocity change of a car of mass 1).
+const IMP = { jx: 0, jz: 0, jn: 0, jt: 0, closing: 0, kax: 0, kaz: 0, kbx: 0, kbz: 0, iA: 0, iB: 0 };
+export function hitImpulse(me, other, C, mMe, mOther, real = Infinity, idMe = idOf(me), idOther = idOf(other)) {
+  const bm = bodyOf(idMe), bo = bodyOf(idOther), ma = WALL.KG * mMe, mb = WALL.KG * mOther;
+  // (the bodies' inertia is per kg: a car's class mass may differ from its hitbox's body)
+  const IA = bm.I / bm.m * ma, IB = bo.I / bo.m * mb;
+  if (!carImpulse(me.x, me.z, me.vx, me.vz, me.spinV || 0, ma, IA, other.x, other.z, other.vx, other.vz, other.spinV || 0, mb, IB,
+    { px: C.cx, pz: C.cz, nx: C.nx, nz: C.nz }, real, IMP)) return null;
+  let Jx = IMP.jx, Jz = IMP.jz;
   // no single hit beyond MAX_DV for the lighter car
-  const big = Math.hypot(Jx, Jz) / Math.min(mMe, mOther);
+  const big = Math.hypot(Jx, Jz) / Math.min(ma, mb);
   if (big > BUMP.MAX_DV) { Jx *= BUMP.MAX_DV / big; Jz *= BUMP.MAX_DV / big; }
-  const spin = (car, jx, jz, m) => clamp(((C.cz - car.z) * jx - (C.cx - car.x) * jz) / (m * BUMP.I) * BUMP.SPIN_K, BUMP.SPIN);
-  const hop = m => closing < BUMP.HOP ? 0 : Math.min(BUMP.HOP_MAX, (BUMP.HOP_VY + (closing - BUMP.HOP) * BUMP.HOP_K) * 2 / (1 + m / ((mMe + mOther) / 2)));
+  const closing = IMP.closing, kg = WALL.KG;
+  const hop = (dv, m, mo) => closing < BUMP.HOP || dv < hopDv(m, mo) ? 0
+    : Math.min(BUMP.HOP_MAX, (BUMP.HOP_VY + (closing - BUMP.HOP) * BUMP.HOP_K) * 2 / (1 + m / ((mMe + mOther) / 2)));
+  const dA = Math.hypot(Jx, Jz) / ma, dB = Math.hypot(Jx, Jz) / mb;
+  // the turn: the impulse's moment (N m s), less what the tyres hold, through the inertia
+  const turn = (L, m, i) => { const a = Math.abs(L) - BUMP.YAW_HOLD * m; return a > 0 ? clamp(Math.sign(L) * a * i, BUMP.SPIN) : 0; };
   return {
-    closing, jn, jt,
-    me: { vx: Jx / mMe, vz: Jz / mMe, w: spin(me, Jx, Jz, mMe), vy: hop(mMe) },
-    other: { vx: -Jx / mOther, vz: -Jz / mOther, w: spin(other, -Jx, -Jz, mOther), vy: hop(mOther) },
+    closing, jn: IMP.jn / kg, jt: IMP.jt / kg,
+    me: { vx: Jx / ma, vz: Jz / ma, w: turn(IMP.kax * Jx + IMP.kaz * Jz, ma, IMP.iA), vy: hop(dA, mMe, mOther) },
+    other: { vx: -Jx / mb, vz: -Jz / mb, w: turn(-(IMP.kbx * Jx + IMP.kbz * Jz), mb, IMP.iB), vy: hop(dB, mOther, mMe) },
   };
 }
 
@@ -139,17 +164,18 @@ export function lift(car, dt) {
 // A contact goes on while the cars touch again within GAP ms; its judge is decided once,
 // at its first closing touch (a scrape's normal swings about, and the rule must not flip).
 export const GAP = 100;
-export const newMem = () => ({ role: null, since: 0, seen: -1e9, judgedAt: -1e9, gotAt: -1e9, sentAt: -1e9, out: null, epDv: 0, epCap: 0, mine: null });
+export const newMem = () => ({ role: null, since: 0, seen: -1e9, judgedAt: -1e9, gotAt: -1e9, sentAt: -1e9, out: null, mine: null });
 
-// One physics substep of contact between my car and the other car g ({x, z, h, vx, vz};
-// rvx/rvz: its reported velocity, without our local guess of its reaction).
+// One physics substep of contact between my car and the other car g ({x, z, h, vx, vz,
+// car: its id; rvx/rvz: its reported velocity, without our local guess of its reaction;
+// spinV: the spin of our guess, net.js).
 // ctx: { now, tS, mMe, mOther, air }.
 // Returns null (no contact), { wait: true } (theirs to decide) or
 // { impact, other: the other car's change, push: [dx, dz] the other car's share of the push }.
 export function collideStep(car, g, mem, ctx) {
   const C = contact(car, g);
   if (!C) return null;
-  if (ctx.now - mem.seen > GAP) { mem.role = null; mem.since = ctx.now; mem.epDv = 0; mem.epCap = 0; }   // a new contact
+  if (ctx.now - mem.seen > GAP) { mem.role = null; mem.since = ctx.now; }   // a new contact
   mem.seen = ctx.now;
   const recent = mem.role === 'judge';
   const mine = ctx.mOther / (ctx.mMe + ctx.mOther);
@@ -171,15 +197,17 @@ export function collideStep(car, g, mem, ctx) {
   if (!mem.role) { mem.role = judges(car, g) ? 'judge' : 'wait'; mem.since = ctx.now; }
   if (mem.role === 'wait') { log(0); return { wait: true }; }
   const H = hitImpulse(car, g, C, ctx.mMe, ctx.mOther, real);
-  if (!H) return null;
-  // one contact hands out at most what its closing speed can give
-  mem.epCap = Math.max(mem.epCap, (1 + BUMP.E) * H.closing * mine + 0.5);
-  const dvMe = Math.hypot(H.me.vx, H.me.vz);
-  if (mem.epDv + dvMe > mem.epCap) {
-    const k = Math.max(0, mem.epCap - mem.epDv) / dvMe;
-    for (const d of [H.me, H.other]) { d.vx *= k; d.vz *= k; d.w *= k; }
+  if (!H) {
+    // the centres still close in, but the hit's spin already parts the contact points: only the push out
+    const p = Math.min(BUMP.PUSH, C.pen * mine);
+    car.x += C.nx * p; car.z += C.nz * p;
+    log(p);
+    return { impact: 0, other: null };
   }
-  mem.epDv += Math.hypot(H.me.vx, H.me.vz);
+  // (no cap per contact any more: each substep's impulse only evens out the closing speed
+  // left, so a push hands on the rear car's pull and nothing more. Version 2 capped what
+  // one contact gave at its first closing speed: a push ran out after 0.44 s and the cars
+  // then moved together on the push out alone, the speedometers 63 and 12 km/h.)
   applyHit(car, H.me, { air: ctx.air });
   // what this contact gave our car, in case the other side decided it first (receive)
   const mn = mem.mine && ctx.now - mem.judgedAt < BUMP.QUIET ? mem.mine : (mem.mine = { t: ctx.tS, vx: 0, vz: 0, w: 0 });
@@ -201,9 +229,10 @@ export function collideStep(car, g, mem, ctx) {
 // its drawn pose s): the prediction does not know about the hit yet and would drive it on
 // into ours. If nothing has come a round trip later and they still touch, the other player
 // never saw it: ours to decide (collideStep resolves it in the next substep).
-export function keepOut(s, car, mem, now, rtt) {
+// sid: the other car's id (its hitbox; s is only a pose).
+export function keepOut(s, car, mem, now, rtt, sid = s.car) {
   if (mem.role !== 'wait' || now - mem.seen > GAP) return;
-  const C = contact(s, car); if (!C) return;
+  const C = contact(s, car, sid, car.carId); if (!C) return;
   mem.seen = now;
   if (now - mem.since > (rtt || 250) + BUMP.WAIT && now - mem.gotAt > BUMP.QUIET) { mem.role = 'judge'; return; }
   s.x += C.nx * C.pen; s.z += C.nz * C.pen;

@@ -21,11 +21,12 @@
 // WALL from the centre line on this straight; highway: the rail's inner face at RAIL).
 // Cars (net/bump.js, both cars on one computer, the faster one decides the hit as in the
 // game, the other gets its share at once): a coupe at 180 km/h into the back of a stopped
-// coupe, one at 60 km/h into the side of a stopped one (at right angles), one pushing a
-// stopped one at 20 km/h (throttle held). Over 0.5 s (the push: 1 s) from the first contact:
-// speeds, how far the hit car moved along and across the striking car's line, spin, the
-// largest push out in one substep, how many substeps changed the velocities (a non-zero
-// impulse: once a contact has handed out what its closing speed allows, the rest are zero).
+// coupe (also 1 m off its line), one at 60 km/h into the side of a stopped one (at right
+// angles), one pushing a stopped one at 20 km/h (throttle held). 25 ms after the first
+// impulse (hit) and over 0.5 s (the push: 1 s) from it: speeds, how far the hit car moved
+// along and across the striking car's line, spin, the largest push out in one substep, how
+// many substeps changed the velocities (a non-zero impulse; stage 4: every substep the cars
+// still close in, a push hands its pull on).
 //
 // Shortcuts: a scripted driver takes every shortcut of every map, along its centre line and
 // along each edge (the car's side on the asphalt edge: centre half - 1 m off the middle) and
@@ -138,6 +139,7 @@ function carRun(kind) {
   aim(Bc, p.x, p.z, t.x, t.z, 0);
   const cfg = {
     rear: { kmh: 180, from: [-(4.4 + 50 * .1), 0], dir: t, input: NONE, span: 60 },
+    'rear 1 m off': { kmh: 180, from: [-(4.4 + 50 * .1), 1], dir: t, input: NONE, span: 60 },
     side: { kmh: 60, from: [0, 2.9 + 60 / 3.6 * .1], dir: { x: -n.x, z: -n.z }, input: NONE, span: 60 },
     push: { kmh: 20, from: [-(4.4 + .3), 0], dir: t, input: GAS, span: 120 },
   }[kind];
@@ -146,7 +148,7 @@ function carRun(kind) {
   A.idx = T.nearest(A, true); Bc.idx = T.nearest(Bc, true);
   const memA = B.newMem(), mA = B.carMass(A.carId), mB = B.carMass(Bc.carId);
   const d = cfg.dir, side = { x: d.z, z: -d.x };           // A's line of travel and across it
-  let t0 = -1, s0 = null, spinA = 0, spinB = 0, push = 0, apps = 0, mid = null, end = null;
+  let t0 = -1, s0 = null, spinA = 0, spinB = 0, push = 0, apps = 0, hit = null, mid = null, end = null;
   for (let k = 0; k < 400; k++) {
     stepCar(A, cfg.input, DT); T.constrainToTrack(A, DT, hooks);
     stepCar(Bc, NONE, DT); T.constrainToTrack(Bc, DT, hooks);
@@ -166,6 +168,7 @@ function carRun(kind) {
       return { vA: kmh(Math.hypot(A.vx, A.vz)), vB: kmh(Math.hypot(Bc.vx, Bc.vz)), bAlong: bdx * d.x + bdz * d.z, bAcross: bdx * side.x + bdz * side.z,
         aAcross: adx * side.x + adz * side.z, turnB: deg(angDiff(s0.bh, Bc.h)), relAcross: (Bc.x - A.x) * side.x + (Bc.z - A.z) * side.z, gap: (Bc.x - A.x) * d.x + (Bc.z - A.z) * d.z };
     };
+    if (k - t0 === 3) hit = snap();
     if (k - t0 === 60) mid = snap();
     if (k - t0 === cfg.span) { end = snap(); break; }
   }
@@ -173,10 +176,10 @@ function carRun(kind) {
   const row = (label, s) => ({ hit: kind, 'km/h': cfg.kmh, at: label, 'A km/h': s.vA.toFixed(0), 'B km/h': s.vB.toFixed(0), 'B along m': s.bAlong.toFixed(2), 'B across m': s.bAcross.toFixed(2),
     'A across m': s.aAcross.toFixed(2), 'B turn °': s.turnB.toFixed(1), 'spin A/B rad/s': spinA.toFixed(2) + '/' + spinB.toFixed(2), 'push max m': push.toFixed(3), 'non-zero impulses': apps,
     ...(kind === 'push' ? { 'B-A across m': s.relAcross.toFixed(2), 'B-A gap m': s.gap.toFixed(2) } : {}) });
-  return cfg.span > 60 ? [row('0.5 s', mid), row('1 s', end)] : [row('0.5 s', end)];
+  return [row('hit', hit), ...(cfg.span > 60 ? [row('0.5 s', mid), row('1 s', end)] : [row('0.5 s', end)])];
 }
-console.log('\nCar to car (coupe 1.0 vs coupe 1.0, net/bump.js; A strikes, B stands; across: + to the left of A\'s line)');
-console.table(['rear', 'side', 'push'].flatMap(carRun));
+console.log('\nCar to car (coupe 1.0 vs coupe 1.0, net/bump.js: hitbox polygons, rigid bodies; A strikes, B stands; across: + to the left of A\'s line; hit: 25 ms after the first impulse)');
+console.table(['rear', 'rear 1 m off', 'side', 'push'].flatMap(carRun));
 
 // --- shortcuts ---
 // The line to drive: the main road's centre for 40 points before the mouth, the shortcut at

@@ -9,6 +9,17 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import * as Colyseus from 'colyseus.js';
+import { PROTOCOL } from '../public/js/net/protocol.js';
+
+// The game sends its protocol number when it creates or joins a room (net/protocol.js), and
+// the server turns away any client without it. The tests' clients send it too: every
+// create/join here gets { proto: PROTOCOL } unless the options name their own (an old
+// client: proto: undefined).
+for (const k of ['create', 'joinById', 'join', 'joinOrCreate']) {
+  const f = Colyseus.Client.prototype[k];
+  Colyseus.Client.prototype[k] = function (name, options, ...rest) { return f.call(this, name, { proto: PROTOCOL, ...options }, ...rest); };
+}
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../server');
 const sleep = ms => new Promise(r => setTimeout(r, ms));

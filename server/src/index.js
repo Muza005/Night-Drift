@@ -17,7 +17,7 @@ const http = require('http');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const express = require('express');
-const { Server, Room, matchMaker } = require('colyseus');
+const { Server, Room, matchMaker, ServerError } = require('colyseus');
 const { WebSocketTransport } = require('@colyseus/ws-transport');
 const { Schema, MapSchema, defineTypes } = require('@colyseus/schema');
 
@@ -81,6 +81,12 @@ let BUMPS = null;
 async function bumpLib() {
   if (!BUMPS) BUMPS = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'net', 'bump.js')).href);
   return BUMPS;
+}
+// The room's protocol number (public/js/net/protocol.js): a game with another one is turned away.
+let PROTO = null;
+async function protoLib() {
+  if (!PROTO) PROTO = await import(pathToFileURL(path.join(__dirname, '..', '..', 'public', 'js', 'net', 'protocol.js')).href);
+  return PROTO;
 }
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -169,6 +175,8 @@ async function freeCode() {
 
 class RaceRoom extends Room {
   async onCreate(options) {
+    this.proto = await protoLib();
+    this.checkProtocol(options);         // (no room at all for a game of another version)
     this.maxClients = MAX_PLAYERS;
     this.cars = await carsLib();
     this.maps = await mapsLib();
@@ -373,8 +381,9 @@ class RaceRoom extends Room {
     // Car-to-car hits: the player who decided the hit (net/bump.js: the faster car) sends
     // the other car's share, and the server passes it on. A modified client can't launch
     // anyone off the map:
-    // - only between two racing cars that are close (positions here are a ping old), neither
-    //   finished nor a blinking crashed car;
+    // - only between two racing cars that are close (positions here are a ping old: their
+    //   hitboxes, the game's, no farther apart than their speeds can close in ~0.5 s, + 3 m),
+    //   neither finished nor a blinking crashed car;
     // - the velocity change can't be more than a hit between these two cars at their last
     //   reported speeds can give, a speed never above what the server saw the car move at
     //   (speedOf: a modified client can't claim speed for a bigger hit) (restitution,
@@ -390,6 +399,9 @@ class RaceRoom extends Room {
       const now = Date.now();
       if (now < from.ghostUntil || now < to.ghostUntil) return;   // a crashed, blinking car can't push or be pushed
       if (Math.hypot(from._s.x - to._s.x, from._s.z - to._s.z) > 25) return;   // they weren't even close (positions here are a ping old)
+      // the cars' bodies (their hitboxes at the last reported poses, net/bump.js gap) no
+      // farther apart than the two can close in the age of those poses (~0.5 s), plus 3 m
+      if (this.bumps.gap(from._s, to._s, from.car, to.car) > 3 + (this.speedOf(from) + this.speedOf(to)) * 0.5) return;
       const target = this.clients.find(c => c.sessionId === m.to);
       if (!target) return;
       const key = client.sessionId + '>' + m.to, r = this.bumpRate.get(key) || { tokens: 3, t: now };
@@ -406,11 +418,10 @@ class RaceRoom extends Room {
       let dx = finite(m.dx, -B.PUSH, B.PUSH), dz = finite(m.dz, -B.PUSH, B.PUSH);
       const d = Math.hypot(dx, dz); if (d > B.PUSH) { dx *= B.PUSH / d; dz *= B.PUSH / d; }
       // spin and hop come only with a hit's strength: the spin of a velocity change of |j|
-      // at the far end of the car (lever arm OFF + R, SPIN_K of it taken, +0.1 slack); a hop
-      // only from HOP of closing speed, whose share for this car is at least ~0.9 of
-      // (1 + E) × HOP × mf / (mf + mt)
-      const jj = Math.hypot(jx, jz), spinMost = Math.min(B.SPIN, (B.OFF + B.R) * B.SPIN_K / B.I * jj + 0.1);
-      const hops = closing >= B.HOP && jj >= 0.9 * (1 + B.E) * B.HOP * mf / (mf + mt);
+      // at the far end of the target's hitbox (bump.js spinPerDv, +0.1 slack); a hop only
+      // from HOP of closing speed and a velocity change of at least hopDv (the game's rule)
+      const jj = Math.hypot(jx, jz), spinMost = Math.min(B.SPIN, this.bumps.spinPerDv(to.car) * jj + 0.1);
+      const hops = closing >= B.HOP && jj >= this.bumps.hopDv(mt, mf) - 1e-9;
       target.send('bump', {
         from: client.sessionId, jx, jz, dx, dz,
         w: finite(m.w, -spinMost, spinMost), vy: hops ? finite(m.vy, 0, B.HOP_MAX) : 0,
@@ -419,9 +430,18 @@ class RaceRoom extends Room {
     });
   }
 
+  // A game of another version (public/js/net/protocol.js; an old tab sends none) can't come
+  // in: it would play by other rules than the room (a hit it decides, the other cars' games
+  // would not). Its join fails with the message it shows: "the game was updated, reload".
+  checkProtocol(options) {
+    const P = this.proto;
+    if (!options || options.proto !== P.PROTOCOL) throw new ServerError(P.UPDATED_CODE, P.UPDATED);
+  }
+
   // A player the host kicked out can't come back: not on that connection (a reconnect
   // keeps the sessionId) and not as the same player (pid: the game's id for this browser).
   onAuth(client, options) {
+    this.checkProtocol(options);
     if (this.banned.has(client.sessionId)) return false;
     const pid = options && typeof options.pid === 'string' ? options.pid.slice(0, 64) : '';
     if (pid && this.banned.has('pid:' + pid)) return false;
