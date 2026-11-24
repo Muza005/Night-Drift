@@ -3,6 +3,8 @@
 //
 //   yellow   each car's wall shape today: its centre and the allowance circle (1.25 m)
 //   white    each car's car-to-car shape (net/bump.js: two circles); traffic bots: their box
+//   pink     each car's and bot's hitbox from its model (core/hitboxes.js, plan 3 stage 1):
+//            not used by the collision code yet, drawn next to today's shapes to compare
 //   cyan     the walls as drawn (scene.js: safeOffsets, the gaps at the shortcuts)
 //   red      where the car's centre is really stopped (measured with constrainToTrack,
 //            modes/track/wall-lines.js; on the highway RAIL - WALL_ALLOW)
@@ -21,8 +23,9 @@ import { drawnWalls, wallRays, ALLOW } from '../modes/track/wall-lines.js';
 import { RAIL } from '../modes/traffic/geometry.js';
 import { TYPES } from '../modes/traffic/sim.js';
 import { botPose } from '../modes/traffic/collide.js';
+import { worldPoly, hitbox } from './hitboxes.js';
 
-const COL = { car: [1, .85, .1], bump: [1, 1, 1], drawn: [.25, .95, 1], limit: [1, .15, .15], body: [1, .55, .1], bad: [1, .2, 1], hit: [.2, 1, .3] };
+const COL = { car: [1, .85, .1], bump: [1, 1, 1], poly: [1, .25, .63], drawn: [.25, .95, 1], limit: [1, .15, .15], body: [1, .55, .1], bad: [1, .2, 1], hit: [.2, 1, .3] };
 const LIFT = .12;               // m above the road
 const mat = () => new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, depthWrite: false, transparent: true, opacity: .95, toneMapped: false });
 
@@ -101,8 +104,14 @@ export function createHitDebug({ car, G, NET, bots }) {
   };
   const circle = (x, y, z, r, c, n = 24) => { for (let k = 0; k < n; k++) { const a = k / n * 6.2832, b = (k + 1) / n * 6.2832; line(x + Math.sin(a) * r, y, z + Math.cos(a) * r, x + Math.sin(b) * r, y, z + Math.cos(b) * r, c); } };
   const cross = (x, y, z, r, c) => { line(x - r, y, z, x + r, y, z, c); line(x, y, z - r, x, y, z + r, c); line(x, y - r, z, x, y + r, z, c); };
-  function drawCar(x, y, z, h) {
+  const PW = new Float64Array(64);
+  function drawPoly(id, x, y, z, h) {
+    worldPoly(id, x, z, h, PW); const n = hitbox(id).poly.length;
+    for (let i = 0; i < n; i += 2) { const j = (i + 2) % n; line(PW[i], y, PW[i + 1], PW[j], y, PW[j + 1], COL.poly); }
+  }
+  function drawCar(id, x, y, z, h) {
     y += LIFT;
+    drawPoly(id, x, y + .04, z, h);
     circle(x, y, z, ALLOW, COL.car); cross(x, y, z, .25, COL.car);
     const fx = Math.sin(h), fz = Math.cos(h);
     circle(x + fx * BUMP.OFF, y + .02, z + fz * BUMP.OFF, BUMP.R, COL.bump, 20);
@@ -122,7 +131,7 @@ export function createHitDebug({ car, G, NET, bots }) {
   box.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:8px;z-index:99;font:12px/1.35 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,.6);padding:6px 8px;border-radius:6px;pointer-events:none;white-space:pre';
   document.body.append(box);
   let boxT = 0;
-  const legend = `\u25a0 yellow wall circle ${ALLOW} m  \u25a0 white car-to-car circles\n\u25a0 cyan drawn wall  \u25a0 red centre limit  \u25a0 orange body limit\n\u25a0 magenta >5 cm apart  \u25a0 green last contact`;
+  const legend = `\u25a0 yellow wall circle ${ALLOW} m  \u25a0 white car-to-car circles  \u25a0 pink hitbox (model)\n\u25a0 cyan drawn wall  \u25a0 red centre limit  \u25a0 orange body limit\n\u25a0 magenta >5 cm apart  \u25a0 green last contact`;
 
   return {
     frame(now = performance.now()) {
@@ -132,8 +141,8 @@ export function createHitDebug({ car, G, NET, bots }) {
       if (limitLines) limitLines.visible = track;
       nv = 0; ox = Math.round(car.x / 64) * 64; oz = Math.round(car.z / 64) * 64; dyn.position.set(ox, 0, oz);
       // the player and the other players
-      drawCar(car.x, car.root ? car.root.position.y : (car.y || 0), car.z, car.h);
-      for (const g of NET.ghosts.values()) if (g.m && g.m.root.visible && g.x !== undefined) drawCar(g.x, g.m.root.position.y, g.z, g.h);
+      drawCar(car.carId, car.x, car.root ? car.root.position.y : (car.y || 0), car.z, car.h);
+      for (const g of NET.ghosts.values()) if (g.m && g.m.root.visible && g.x !== undefined) drawCar(g.car, g.x, g.m.root.position.y, g.z, g.h);
       if (!track) {
         // the highway: the rails as drawn (inner face at RAIL), the centre's limit, the body's
         const z0 = car.z - 120, z1 = car.z + 320;
@@ -143,7 +152,7 @@ export function createHitDebug({ car, G, NET, bots }) {
           line(s * RAIL, LIFT + .04, z0, s * RAIL, LIFT + .04, z1, COL.body);
         }
         const src = bots && bots();
-        if (src) for (const b of src.bots) { const T = TYPES[b.t], p = botPose(b, src.alpha); if (Math.abs(p.z - car.z) < 200) drawBox(p.x, LIFT, p.z, p.yaw, T.wid / 2, T.len / 2, COL.bump); }
+        if (src) for (const b of src.bots) { const T = TYPES[b.t], p = botPose(b, src.alpha); if (Math.abs(p.z - car.z) < 200) { drawBox(p.x, LIFT, p.z, p.yaw, T.wid / 2, T.len / 2, COL.bump); drawPoly('bot:' + T.name, p.x, LIFT + .04, p.z, p.yaw); } }
       }
       const L = HITLOG.last;
       if (L && (!shown || L.seq !== shown.seq)) { shown = L; shownAt = now; }
