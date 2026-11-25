@@ -356,6 +356,26 @@ function onBump(m){
   if(mem.undone) g.kick=null;                               // their hit stands, not ours: their car as they report it
   if(hit>3) crash(hit);
 }
+// The air behind our own car: the players behind us see our slipstream (each from their
+// game, the loop below), and so do we, the same white trails out of our car, while one of
+// them is close behind us (the same wake() maths, with them as the follower).
+let own=null;
+const ownLead={x:0,z:0,y:0,h:0,vx:0,vz:0}, follower={x:0,z:0,vx:0,vz:0};
+function updateOwnWake(dt, drafting, nowS){
+  if(!own){ own={fx:createWake(true), trail:createTrail()}; scene.add(own.fx.root); }
+  const show=NET.online && (G.state==='count'||G.state==='race');
+  if(!show){ trailReset(own.trail); updateWake(own.fx,null,null,null,dt,camera.position); return; }
+  ownLead.x=car.x; ownLead.z=car.z; ownLead.y=car.y||0; ownLead.h=car.h; ownLead.vx=car.vx; ownLead.vz=car.vz;
+  trailPush(own.trail,ownLead.x,ownLead.z,ownLead.y,ownLead.h,dt);
+  let best=null;
+  if(drafting) for(const g of NET.ghosts.values()){
+    if(!g.m.root.visible || nowS<g.p.ghostUntil || g.p.finished || Math.abs(g.y-ownLead.y)>(G.mode.sameLevel||3)) continue;
+    follower.x=g.x; follower.z=g.z; follower.vx=g.vx||0; follower.vz=g.vz||0;
+    const wk=wake(follower,ownLead,own.trail);
+    if(wk && (!best || wk.show>best.show)) best=wk;
+  }
+  updateWake(own.fx,best,ownLead,own.trail,dt,camera.position,scene.fog&&scene.fog.density);
+}
 export function updateGhosts(dt){
   if(NET.online && NET.clock) NET.offset=clockTick(NET.clock, dt, racing());   // (clocksync.js: no step while racing)
   const show=NET.online && (G.state==='count'||G.state==='race'||G.state==='results');
@@ -445,6 +465,7 @@ export function updateGhosts(dt){
   }
   // how much slipstream push our car gets (main.js passes it to stepCar as input.draft)
   stepDraft(NET.draft, inPocket, dt);
+  updateOwnWake(dt, drafting, nowS);
   if(NET_DEBUG) drawNetDebug(dt);
 }
 
