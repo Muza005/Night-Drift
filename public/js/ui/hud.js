@@ -15,30 +15,107 @@ export function info(text){ const d=el('div','info',text); document.querySelecto
 // move, the scene behind stays still), a CSS class otherwise. A second change while the
 // first is still running takes over from it (the browser skips the first). Returns a
 // promise kept once the new screen is in the page (to move focus there).
-const PANELS=['pHome','pModes','pGarage','pPause','pLobby','pResults','pOver'];
+// Shared pictures: an element with data-vt="name" in the screen you leave and one with the
+// same name in the screen you come to are one picture that moves (the map's diagram from its
+// card into the garage's header and back). With the API: one view-transition-name on both
+// (both get it here, for this change only).
+// Without: the coming one is measured and flown in from where the leaving one was (FLIP:
+// translate and scale only). With reduced motion it is simply there.
+const PANELS=['pHome','pGarage','pPause','pLobby','pResults','pOver'];
+const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
 let panelGen=0;
 // A run starting hides the menu: a screen change still on its way must not show it again.
 export function cancelPanels(){ panelGen++; }
+const visible=e=>e.getClientRects().length>0;
 export function showPanel(id, dir){
   const menu=$('menu'), to=$(id), gen=++panelGen;
   const from=menu.hidden ? null : PANELS.map(p=>$(p)).find(p=>!p.hidden);
   for(const p of PANELS) $(p).style.viewTransitionName='';
-  const swap=()=>{ if(gen!==panelGen) return; for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
+  const swap=()=>{ if(gen!==panelGen) return; dropPicture(); menu.classList.remove('leaving'); menu.inert=false; for(const p of PANELS) $(p).hidden=p!==id; menu.hidden=false; };
   if(!dir || !from || from===to){ swap(); return Promise.resolve(); }
   document.documentElement.dataset.nav=dir;
+  // the shared pictures on the way out: name → its element (only one that is on screen)
+  const shared=new Map();
+  for(const e of from.querySelectorAll('[data-vt]')) if(visible(e) && !shared.has(e.dataset.vt)) shared.set(e.dataset.vt, e);
   if(document.startViewTransition){
     from.style.viewTransitionName='screen-out';
-    const vt=document.startViewTransition(()=>{ from.style.viewTransitionName=''; swap(); to.style.viewTransitionName='screen-in'; });
+    const temp=[...shared].map(([n, e])=>{ e.style.viewTransitionName=n; return e; });
+    const vt=document.startViewTransition(()=>{
+      from.style.viewTransitionName=''; for(const e of temp) e.style.viewTransitionName='';
+      swap(); to.style.viewTransitionName='screen-in';
+      // the same pictures in the screen you come to take the names (for this change only)
+      for(const e of to.querySelectorAll('[data-vt]')) if(shared.has(e.dataset.vt) && !temp.some(x=>x.style.viewTransitionName===e.dataset.vt) && visible(e)){ e.style.viewTransitionName=e.dataset.vt; temp.push(e); }
+    });
     vt.ready.catch(()=>{});              // skipped (a resize, a phone turned): the swap still happened
-    vt.finished.finally(()=>{ to.style.viewTransitionName=''; }).catch(()=>{});
+    // (only what still holds this change's names, and only if no newer change has started:
+    // a skipped transition finishes late and must not undo the names the next one just gave)
+    vt.finished.finally(()=>{ if(gen!==panelGen) return; if(to.style.viewTransitionName==='screen-in') to.style.viewTransitionName=''; for(const e of temp) if(e.style.viewTransitionName===e.dataset.vt) e.style.viewTransitionName=''; }).catch(()=>{});
     return vt.updateCallbackDone.catch(()=>{});
   } else {
+    const was=[...shared].map(([n, e])=>[n, e.getBoundingClientRect()]);
     swap();
     to.classList.remove('screen-enter','back'); void to.offsetWidth;
     to.classList.add('screen-enter'); to.classList.toggle('back', dir==='back');
     to.addEventListener('animationend',()=>to.classList.remove('screen-enter','back'),{once:true});
+    if(!reducedMotion.matches) for(const [n, a] of was){
+      const e=[...to.querySelectorAll('[data-vt]')].find(x=>x.dataset.vt===n && visible(x)); if(!e) continue;
+      const b=e.getBoundingClientRect(); if(!b.width || !b.height) continue;
+      e.animate([{ transformOrigin:'0 0', transform:`translate(${a.left-b.left}px, ${a.top-b.top}px) scale(${a.width/b.width}, ${a.height/b.height})` }, { transformOrigin:'0 0', transform:'none' }],
+        { duration:parseFloat(getComputedStyle(to).getPropertyValue('--dur-screen'))||320, easing:'cubic-bezier(0.23, 1, 0.32, 1)' });
+    }
     return Promise.resolve();
   }
+}
+// The way into a run (plan 3, U4). The last menu screen does not vanish at once:
+//   holdPicture(draw)  before the screen closes: its picture (the car on the street) is drawn
+//                      once more and copied onto a canvas over the game's, under the menu
+//   dismissMenu()      the menu dissolves (--dur-screen: opacity, a slight push toward the
+//                      street) and is hidden after; a screen shown meanwhile (the room gone)
+//                      takes over and the menu stays
+//   releasePicture()   once the run is in place: the copy dissolves into the first frames
+//                      of the race (the camera's flight to the grid is main.js's, ui/startFx.js)
+// With reduced motion: no copy, the menu is hidden at once.
+let shot=null;
+export function holdPicture(draw){
+  dropPicture();
+  if(reducedMotion.matches) return;
+  try{
+    draw(performance.now());                      // (in this task: the buffer is still there to copy)
+    const src=$('c'), c=document.createElement('canvas');
+    c.className='start-shot'; c.width=src.width; c.height=src.height; c.setAttribute('aria-hidden','true');
+    c.getContext('2d').drawImage(src,0,0);
+    src.after(c); shot=c;
+  }catch(e){ dropPicture(); }
+}
+const freeShot=c=>{ c.width=c.height=0; c.remove(); };   // (its pixels freed at once, not when collected)
+export function releasePicture(){
+  const c=shot; if(!c) return; shot=null;
+  // two frames: the first race frame is on the canvas under it before it starts to go
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    c.classList.add('go');
+    c.addEventListener('animationend',()=>freeShot(c),{once:true});
+  }));
+  // gone in any case (a hidden tab runs no frames and no animations)
+  setTimeout(()=>{ if(c.isConnected) freeShot(c); },1500);
+}
+export function dropPicture(){ shot=null; for(const c of document.querySelectorAll('.start-shot')) freeShot(c); }
+// The menu gone at once, no fade (a quick restart, the pause panel's «Заново»).
+export function hideMenu(){
+  const menu=$('menu'); panelGen++;
+  for(const p of PANELS) $(p).style.viewTransitionName='';
+  dropPicture(); menu.classList.remove('leaving'); menu.inert=false; menu.hidden=true;
+}
+// Returns a promise: true once the menu is gone, false if a screen took over meanwhile. The
+// run is put in place after it (its first frame is the heavy one: the menu's fade is done
+// by then, and the kept picture covers the wait).
+export function dismissMenu(){
+  const menu=$('menu'), gen=++panelGen;
+  for(const p of PANELS) $(p).style.viewTransitionName='';
+  if(menu.hidden) return Promise.resolve(true);
+  if(reducedMotion.matches){ menu.hidden=true; return Promise.resolve(true); }
+  menu.classList.add('leaving'); menu.inert=true;
+  const ms=parseFloat(getComputedStyle(menu).getPropertyValue('--dur-screen'))||320;
+  return new Promise(done=>setTimeout(()=>{ const ok=gen===panelGen; if(ok) menu.hidden=true; menu.classList.remove('leaving'); menu.inert=false; done(ok); },ms));
 }
 export function netStatus(id,text,err){ const s=$(id); s.textContent=text||''; s.classList.toggle('err',!!err); }
 

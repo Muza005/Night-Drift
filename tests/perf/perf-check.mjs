@@ -17,7 +17,9 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = Number(process.env.ND_PORT) || 2599;   // ND_PORT=4120 npm run test:perf: another port
+const PORT = +process.env.ND_PORT || 2599;     // ND_PORT: another port when this one is taken
+// a home card: the first click brings it to the middle, a click on the card in the middle goes in
+const enterCard = async (p, sel) => { await p.click(sel); await sleep(400); if (await p.$eval(sel, e => !e.closest('[hidden], [inert]') && e.getAttribute('aria-selected') === 'true').catch(() => false)) await p.click(sel); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {
@@ -65,12 +67,12 @@ try {
   let r = await read();
   check('home, 10 s: the race scene is not drawn under it', r.race === 0 && r.warm === 0, `race ${r.race}, warm-up ${r.warm}, other ${r.other}`);
   check('home, 10 s: no task over 50 ms', longOk(r.long), soft ? 'software renderer: not judged' : r.long.join(', '));
-  await page.click('#goSolo'); await sleep(1500); await reset(); await sleep(10000);
+  await enterCard(page, '#dTrack'); await sleep(1500); await reset(); await sleep(10000);
   r = await read();
-  check('mode cards, 10 s: the race scene is not drawn, no task over 50 ms', r.race === 0 && r.warm === 0 && longOk(r.long), `race ${r.race}, warm-up ${r.warm}, long ${r.long.join(', ') || 'none'}`);
+  check('map deck, 10 s: the race scene is not drawn, no task over 50 ms', r.race === 0 && r.warm === 0 && longOk(r.long), `race ${r.race}, warm-up ${r.warm}, long ${r.long.join(', ') || 'none'}`);
 
   // 2. the garage: the stand and the still only
-  await page.click('#mTrack');
+  await enterCard(page, '#homeDeck [role=listbox]:not([inert]) [aria-selected=true]');
   await page.waitForFunction(() => !document.getElementById('pGarage').hidden && /, цвет /.test(document.getElementById('garStand').getAttribute('aria-label')));
   // every model once, as a player browsing would (loading is not what is measured)
   for (let i = 0; i < 7; i++) { await page.keyboard.press('ArrowRight'); await sleep(450); }

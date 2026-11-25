@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Night Drift — макет B «Повтор»</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@200..900&family=Manrope:wght@400..800&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../css/tokens.css">
+<style>
+/* U1 mock B, «Повтор»: the home screen is a replay on a broadcast monitor. The focused mode's
+   loop fills the whole screen; the game's name is the channel mark in the corner; the modes are
+   two clips in a bin at the bottom, each with a scrubber that runs as its loop plays. Pointing
+   at a clip (or swiping the bin on a phone) cuts the screen to it; pressing it goes to the
+   garage. Static mock: «Дрифт» is on air, «Трасса» waits in the bin. */
+:root {
+  --mode: var(--c-rose);
+  --gutter: clamp(16px, 3.4vw, 56px);
+  --bin-w: clamp(300px, 30vw, 440px);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+body { font: 400 var(--fs-md)/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--c-cyan); color: var(--c-night-1); }
+
+/* ---------- on air: the whole screen is the focused mode's loop ---------- */
+.air { position: fixed; inset: 0; z-index: 0; background: url(u1/drift-serpantin.webp) 0% 0 / max(100%, 178dvh) auto no-repeat, var(--c-night-1); }
+/* the picture is cut, not dimmed: the type side and the bin side fall to night */
+.air::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5, 6, 16, 0.9) 0%, rgba(5, 6, 16, 0.55) 34%, rgba(5, 6, 16, 0) 60%),
+    linear-gradient(0deg, rgba(5, 6, 16, 0.95) 0%, rgba(5, 6, 16, 0.4) 30%, rgba(5, 6, 16, 0) 55%),
+    linear-gradient(180deg, rgba(5, 6, 16, 0.6) 0%, rgba(5, 6, 16, 0) 18%);
+}
+
+.home { overflow: clip;
+  position: relative; z-index: 1; min-height: 100dvh;
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--bin-w); grid-template-rows: auto 1fr auto auto;
+  column-gap: var(--sp-7);
+  padding: calc(var(--sp-5) + env(safe-area-inset-top, 0px)) var(--gutter) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+}
+
+/* the channel mark: the game's name, small and solid, top left, like a broadcaster's bug */
+.bar { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.bar .keys { margin-inline-start: auto; }
+.bug { margin: 0; font: 800 var(--fs-lg)/1 var(--f-display); letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.bug .d { color: var(--brand); }
+.bug::before { content: ""; inline-size: 10px; block-size: 10px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 3px rgba(255, 59, 107, 0.25); }
+
+.who { display: inline-flex; padding: 4px; border-radius: var(--r-pill); background: rgba(5, 6, 16, 0.7); border: 1px solid var(--line); backdrop-filter: var(--blur-panel); }
+.who button { min-block-size: var(--btn-h); padding: 0 var(--sp-4); border: 0; border-radius: var(--r-pill); background: none; color: var(--c-ink-1); font: 700 var(--fs-sm) var(--f-body); cursor: pointer; }
+.who button[aria-pressed="true"] { background: var(--c-ink-0); color: var(--c-night-1); }
+.who button:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- the caption: what is on air ---------- */
+.caption { position: relative; grid-column: 1; grid-row: 3; align-self: end; display: grid; gap: var(--sp-3); max-inline-size: 760px; }
+/* the caption's own shade: footage never sits bare behind small text */
+.caption::before { content: ""; position: absolute; z-index: -1; inset: -18% -12% -40% -30%; background: radial-gradient(closest-side, rgba(5, 6, 16, 0.78), rgba(5, 6, 16, 0)); pointer-events: none; }
+.title { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: clamp(64px, 11.5vw, 184px); line-height: 0.86; letter-spacing: -0.04em; margin: 0 0 0.1em -0.04em; text-shadow: 0 4px 40px rgba(5, 6, 16, 0.7); }
+.title-sub { margin: 0; color: var(--c-ink-1); font-size: var(--fs-lg); max-inline-size: 40ch; }
+.facts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); margin-block-start: var(--sp-2); }
+.rec { display: grid; gap: 2px; }
+.rec small { font: 600 var(--fs-sm) var(--f-body); color: var(--c-ink-1); }
+.rec b { font: 700 var(--fs-xl) var(--f-num); font-variant-numeric: tabular-nums; color: var(--record); letter-spacing: -0.02em; }
+.go {
+  min-block-size: 52px; padding: 0 var(--sp-6); border: 0; border-radius: var(--r-pill); cursor: pointer;
+  background: var(--action); color: var(--on-action); font: 800 var(--fs-md) var(--f-display);
+  box-shadow: var(--glow-action); transition: scale var(--dur-press) var(--ease-out), background-color var(--dur-hover) var(--ease-out);
+}
+.go:active { scale: 0.97; }
+.go:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+@media (hover: hover) and (pointer: fine) { .go:hover { background: var(--action-hi); } }
+
+/* ---------- the bin: two clips ---------- */
+.bin { grid-column: 2; grid-row: 3; align-self: end; display: grid; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.clip {
+  --mode: var(--c-cyan);
+  position: relative; inline-size: 100%; display: grid; grid-template-columns: 44% minmax(0, 1fr); align-items: center; gap: var(--sp-4);
+  padding: var(--sp-2); border-radius: var(--r-md); border: 1px solid var(--line);
+  background: rgba(8, 9, 20, 0.72); backdrop-filter: var(--blur-panel);
+  color: inherit; font: inherit; text-align: start; cursor: pointer;
+  transition: border-color var(--dur-hover) var(--ease-out), background-color var(--dur-hover) var(--ease-out);
+}
+.clip[data-mode="track"] { --mode: var(--c-rose); }
+.thumb { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: var(--r-xs); background: var(--c-night-2) center / cover no-repeat; overflow: hidden; }
+.clip[data-mode="track"] .thumb { background-image: url(u1/drift-serpantin.webp); background-position: 50% 60%; }
+.clip[data-mode="traffic"] .thumb { background-image: url(u1/traffic-pass.webp); background-position: 50% 70%; }
+.clip-name { font: 700 var(--fs-xl)/1 var(--f-display); letter-spacing: -0.01em; }
+.clip-txt { display: grid; gap: var(--sp-1); min-inline-size: 0; }
+.clip-meta { font: 700 var(--fs-sm) var(--f-num); color: var(--record); font-variant-numeric: tabular-nums; }
+.clip-meta.call { font: 600 var(--fs-sm) var(--f-body); color: var(--c-ink-1); }
+/* the scrubber: the loop's progress along the clip's foot, in the mode's colour */
+.scrub { position: absolute; inset-inline: var(--sp-2); inset-block-end: -1px; block-size: 3px; border-radius: var(--r-pill); background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.scrub i { position: absolute; inset: 0; background: var(--mode); transform-origin: left center; scale: 0 1; }
+.clip[aria-checked="true"] { border-color: var(--mode); background: rgba(14, 12, 30, 0.86); }
+.clip[aria-checked="true"] .scrub i { scale: 0.66 1; }
+.clip[aria-checked="true"] .clip-name { font-weight: 900; }
+.clip:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+@media (hover: hover) and (pointer: fine) { .clip:not([aria-checked="true"]):hover { border-color: var(--line-strong); } }
+
+.keys { min-block-size: var(--btn-h); padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line); background: rgba(5, 6, 16, 0.6); color: var(--c-ink-1); font: 600 var(--fs-sm) var(--f-body); cursor: pointer; backdrop-filter: var(--blur-panel); }
+.keys:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); }
+.soon { grid-column: 2; grid-row: 4; justify-self: end; margin: var(--sp-3) 0 0; color: var(--c-ink-1); font-size: var(--fs-sm); }
+
+/* ---------- phones: the picture on top, the bin under the thumb ---------- */
+@media (max-width: 760px) {
+  .air { inset: 0 0 auto; block-size: 62dvh; background-position: 46% 50%; }
+  .air::after { background: linear-gradient(0deg, var(--c-night-1) 0%, rgba(7, 8, 15, 0.5) 32%, rgba(7, 8, 15, 0) 60%), linear-gradient(180deg, rgba(5, 6, 16, 0.75) 0%, rgba(5, 6, 16, 0) 22%); }
+  .home { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto auto auto; column-gap: 0; row-gap: var(--sp-4); }
+  .who { flex: 1 1 100%; } .who button { flex: 1; min-block-size: var(--btn-h); }
+  .caption { grid-row: 3; align-self: end; gap: var(--sp-2); }
+  .air { background-size: cover; background-position: 46% 50%; }
+  .title { font-size: min(19vw, 84px); }
+  .title-sub { font-size: var(--fs-md); }
+  .go { flex: 1; }
+  .bin { grid-column: 1; grid-row: 4; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+  .clip { grid-template-columns: 1fr; gap: var(--sp-2); }
+  .clip-name { font-size: var(--fs-lg); }
+  .soon { grid-column: 1; grid-row: 5; justify-self: start; margin: 0; }
+  .facts { display: grid; grid-template-columns: 1fr; gap: var(--sp-3); }
+  .rec { grid-row: 1; grid-auto-flow: column; justify-content: start; align-items: baseline; gap: var(--sp-3); }
+  .rec b { font-size: var(--fs-lg); }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .title { font-size: 72px; }
+  .title-sub { display: none; }
+  .home { --bin-w: 330px; }
+}
+/* reduced motion or Save-Data: the poster stays on air, cuts are instant, the scrubber hides */
+@media (prefers-reduced-motion: reduce) { .scrub { display: none; } }
+</style>
+</head>
+<body>
+<div class="air" role="img" aria-label="Занос на «Серпантине», кадр из игры"></div>
+<main class="home">
+  <div class="bar">
+    <h1 class="bug">Night <span class="d">Drift</span></h1>
+    <button type="button" class="keys" aria-expanded="false">Управление</button>
+    <div class="who" role="group" aria-label="С кем ехать">
+      <button type="button" aria-pressed="true">Один</button>
+      <button type="button" aria-pressed="false">С друзьями</button>
+    </div>
+  </div>
+
+  <section class="caption">
+    <h2 class="title">Дрифт</h2>
+    <p class="title-sub">Держи занос в шпильках: угол и скорость дают очки, стена их сжигает. Шесть карт.</p>
+    <div class="facts">
+      <button type="button" class="go">Выбрать карту</button>
+      <span class="rec"><small>Лучший круг, Серпантин</small><b>1:12.48</b></span>
+    </div>
+  </section>
+
+  <ul class="bin" role="radiogroup" aria-label="Режим">
+    <li><button type="button" class="clip" data-mode="track" role="radio" aria-checked="true">
+      <span class="thumb" aria-hidden="true"></span>
+      <span class="clip-txt"><span class="clip-name">Дрифт</span><span class="clip-meta">1:12.48</span></span>
+      <span class="scrub" aria-hidden="true"><i></i></span>
+    </button></li>
+    <li><button type="button" class="clip" data-mode="traffic" role="radio" aria-checked="false" tabindex="-1">
+      <span class="thumb" aria-hidden="true"></span>
+      <span class="clip-txt"><span class="clip-name">Трасса</span><span class="clip-meta call">Поставь первый рекорд</span></span>
+      <span class="scrub" aria-hidden="true"><i></i></span>
+    </button></li>
+  </ul>
+  <p class="soon">Карьера скоро: сезон заездов и свой гараж</p>
+</main>
+</body>
+</html>

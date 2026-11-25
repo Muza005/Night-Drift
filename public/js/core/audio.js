@@ -43,6 +43,15 @@ export function thud(power){
   g.gain.setValueAtTime(Math.min(.9,power*.06),c.currentTime); g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.35);
   s.connect(f); f.connect(g); g.connect(A.master); s.start(); s.stop(c.currentTime+.4);
 }
+// The countdown's beat: a short tone on 3, 2 and 1, a higher, longer one on «Старт!» (the
+// number on screen lands with it, main.js showCount).
+export function beep(go){
+  if(!A||muted) return; const c=A.ctx, t=c.currentTime;
+  const o=c.createOscillator(); o.type='triangle'; o.frequency.value=go?1320:660;
+  const g=c.createGain(), len=go?.5:.16;
+  g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.22,t+.008); g.gain.exponentialRampToValueAtTime(.001,t+len);
+  o.connect(g); g.connect(A.master); o.start(t); o.stop(t+len+.02);
+}
 // Near miss: a short rush of air on the side the bot passed (pan -1 left … 1 right),
 // louder for closer passes (strength 0..1).
 export function whoosh(pan,strength){

@@ -11,7 +11,9 @@ export function launchOptions(argv = process.argv, extra = []) {
   const show = argv.includes('--show'), gpu = show || argv.includes('--headed');
   const args = !gpu ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
     : show ? ['--ignore-gpu-blocklist']
-    : ['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu'];
+    // (hardware video decoding in a windowless Chrome takes the GPU process down, and the
+    // WebGL context with it, as soon as a home card's loop plays: software decoding here)
+    : ['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu', '--disable-accelerated-video-decode'];
   return {
     headless: !show,
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
