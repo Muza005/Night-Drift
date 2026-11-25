@@ -111,7 +111,7 @@ function drawMap(car){
 }
 
 export const trackMode = {
-  ghostBounds(s, g){ keepInWalls(s, g.walls || (g.walls = {})); },   // another player's predicted car stays inside the walls
+  ghostBounds(s, g){ const m = g.walls || (g.walls = {}); m.car = g.car; keepInWalls(s, m); },   // another player's predicted car stays inside the walls
   // the active map (records.js keeps the records per map)
   get mapId(){ return MAP.id; },
   get mapName(){ return MAP.name; },

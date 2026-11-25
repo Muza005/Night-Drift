@@ -9,6 +9,7 @@ import path from 'node:path';
 import * as Colyseus from 'colyseus.js';
 import { startServer } from './server-start.mjs';
 import { decodeSnapshot } from '../public/js/modes/traffic/netcodec.js';
+import { decodeState } from '../public/js/net/statecodec.js';
 import { startPose } from '../public/js/modes/traffic/geometry.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,11 +31,12 @@ function player(room, slot) {
   // the car moves at me.vz like a real one (the server refuses teleports)
   // (me.quiet: nothing is sent, like the game on the results screen)
   const timer = setInterval(() => { me.z += me.vz * 0.033; if (!me.quiet) send(); }, 33);
-  const snaps = [];
+  const snaps = [], seen = new Map();   // seen: the other cars' states as the server passed them on
   room.onMessage('tr', m => snaps.push(m));
+  room.onMessage('st', m => { const s = decodeState(m); if (s) seen.set(s.id, s); });
   room.onMessage('bump', m => (me.bumps = (me.bumps || 0) + 1));
-  for (const t of ['pong', 'event', 'lapTime', 'st']) room.onMessage(t, () => {});
-  return { me, snaps, stop: () => clearInterval(timer) };
+  for (const t of ['pong', 'event', 'lapTime']) room.onMessage(t, () => {});
+  return { me, snaps, seen, stop: () => clearInterval(timer) };
 }
 
 test('online traffic: same bots for everyone, hits, crashes, timed run ranked by score', { timeout: 90000 }, async () => {
@@ -110,6 +112,16 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   assert.ok(after.hazard > 0, 'player B must see the hazard lights of the bot A hit');
   assert.ok(after.v < near.v - 3, `bot should have slowed (from ${near.v} to ${after.v})`);
 
+  // B comes up next to A (1 m ahead, at A's speed). The server takes no teleport: B's states
+  // are refused until a car could have covered the distance (A is hundreds of metres down the
+  // road), so wait until the server has B there. (The test used to go on at once: the bump
+  // below then met a B still far away, and B's score at the end was refused with its states
+  // whenever that took longer than the rest of the run: B came second, the test failed.)
+  pb.me.x = pa.me.x; pb.me.z = pa.me.z + 1; pb.me.vz = pa.me.vz;
+  const bThere = () => { const s = pa.seen.get(B.sessionId); return !!s && Math.abs(s.z - pb.me.z) <= 5 && Math.abs(s.x - pb.me.x) <= 1; };
+  for (let i = 0; i < 150 && !bThere(); i++) await sleep(100);
+  assert.ok(bThere(), 'the server never took B next to A');
+
   // 3. a crash: blinking for 3 s, ghosted for 4.5 s, counted; no bumps while ghosted
   A.send('wreck'); await sleep(300);
   const meA = A.state.players.get(A.sessionId);
@@ -117,16 +129,24 @@ test('online traffic: same bots for everyone, hits, crashes, timed run ranked by
   assert.equal(meA.wrecks, 1);
   A.send('wreck'); await sleep(200);
   assert.equal(A.state.players.get(A.sessionId).wrecks, 1, 'a second crash while ghosted must not count');
-  pb.me.x = pa.me.x; pb.me.z = pa.me.z + 1; await sleep(150);
+  await sleep(150);
   A.send('bump', { to: B.sessionId, jx: 3, jz: 0, w: 0, dx: 0, dz: 0 }); await sleep(300);
   assert.equal(pb.me.bumps || 0, 0, 'a ghosted car must not push anyone');
 
   // 4. scores: impossible jumps are capped; the run ends on time, ranked by score
   pa.me.score = 5_000_000; await sleep(300);
   assert.ok(A.state.players.get(A.sessionId).score < 100000, 'a score cannot jump by millions');
-  const capped = A.state.players.get(A.sessionId).score;
-  pa.me.score = capped; pb.me.score = capped + 3000;      // B pulls ahead (honestly: within the rate limit)
+  // A stops claiming more. The server's score of A is still climbing for the messages already
+  // on their way, and the room state we read lags it (patches every 50 ms; more under load):
+  // B's lead is set from A's score once it has stopped (it never goes down), not from the
+  // capped value read above, which A's own score could pass by more than the lead.
+  pa.me.score = A.state.players.get(A.sessionId).score;
+  let aScore = -1;
+  for (let i = 0; i < 50 && A.state.players.get(A.sessionId).score !== aScore; i++) { aScore = A.state.players.get(A.sessionId).score; await sleep(300); }
+  pb.me.score = aScore + 3000;                             // B pulls ahead (honestly: within the rate limit)
   await sleep(1000);
+  assert.equal(A.state.players.get(A.sessionId).score, aScore, 'A\'s score stays where it stopped');
+  assert.equal(A.state.players.get(B.sessionId).score, aScore + 3000, 'B\'s honest lead is taken');
   while (A.state.phase === 'race') await sleep(200);
   assert.equal(A.state.phase, 'results');
   const elapsed = (resultsAt - A.state.startAt) / 1000;

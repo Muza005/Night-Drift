@@ -17,6 +17,7 @@ const reducedMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-re
 const VERT = `
 attribute vec3 aData;            // x: -1..1 across the ribbon, y: brightness, z: odometer (m)
 uniform float uFog;
+uniform vec2 uNear;
 varying vec3 vData;
 varying float vFog;
 void main(){
@@ -24,8 +25,8 @@ void main(){
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float d = length(mv.xyz);
   // the scene's FogExp2; and the air thins out as it reaches the camera (it passes under
-  // our own car and would fill the screen)
-  vFog = exp(-uFog * uFog * d * d) * smoothstep(7.0, 17.0, d);
+  // our own car, or under the camera behind it, and would fill the screen)
+  vFog = exp(-uFog * uFog * d * d) * smoothstep(uNear.x, uNear.y, d);
   gl_Position = projectionMatrix * mv;
 }`;
 const FRAG = `
@@ -42,7 +43,10 @@ void main(){
   gl_FragColor = vec4(vec3(0.93, 0.96, 1.0), a);
 }`;
 
-export function createWake() {
+// own: the air behind our own car (others are in its pocket): the chase camera is only
+// ~6 m from its rear bumper, so the fade toward the camera starts much closer, and it is
+// a little fainter (it is behind us, not the thing we aim at).
+export function createWake(own = false) {
   const nV = STREAKS.length * PTS * 2;
   const g = new THREE.BufferGeometry();
   const pos = new THREE.BufferAttribute(new Float32Array(nV * 3), 3);
@@ -57,12 +61,12 @@ export function createWake() {
   g.setIndex(idx);
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false,
     side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-    uniforms: { uTime: { value: 0 }, uShim: { value: 1 }, uA: { value: 0 }, uFog: { value: .0058 } } });
+    uniforms: { uTime: { value: 0 }, uShim: { value: 1 }, uA: { value: 0 }, uFog: { value: .0058 }, uNear: { value: own ? new THREE.Vector2(2.6, 5.2) : new THREE.Vector2(7, 17) } } });
   const mesh = new THREE.Mesh(g, mat);
   mesh.frustumCulled = false; mesh.renderOrder = 3;      // world-space vertices: the bounds would be stale
   const root = new THREE.Group(); root.visible = false; root.add(mesh);
   // scratch: the centre line of one ribbon (x, y, z, age 0..1, odometer) per point
-  return { root, mesh, geo: g, mat, pos, data, line: new Float64Array(PTS * 5), a: 0, bright: .6, wide: 1, inside: false, time: 0 };
+  return { root, mesh, geo: g, mat, pos, data, line: new Float64Array(PTS * 5), a: 0, bright: .6, wide: 1, inside: false, time: 0, gain: own ? .75 : 1 };
 }
 
 // w: the result of wake() for this car (or null); lead: the car's drawn pose {x, z, y, h}
@@ -81,7 +85,7 @@ export function updateWake(fx, w, lead, trail, dt, cam, fog) {
   if (!fx.root.visible) return;
   fx.time += dt;
   const u = fx.mat.uniforms;
-  u.uA.value = fx.a * fx.bright; u.uTime.value = fx.time % 1000;
+  u.uA.value = fx.a * fx.bright * fx.gain; u.uTime.value = fx.time % 1000;
   u.uShim.value = reducedMotion.matches ? 0 : 1;
   if (fog != null) u.uFog.value = fog;
   if (lead && trail) build(fx, lead, trail, cam);

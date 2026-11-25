@@ -23,6 +23,7 @@ const newSeed = () => (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
 export const traffic = createTraffic(1);
 export const remote = createRemoteTraffic({ now: serverNow, send: (t, m) => NET.room && NET.room.send(t, m), rtt: () => NET.rtt });
 let src = traffic;
+export const botSource = () => src;          // (?debug=hit draws the bots in use)
 
 // Online crash: stopped and blinking for 3 s, then back on a free lane at traffic
 // speed and 1.5 s in which bots and other cars pass through (the server keeps the same
@@ -202,7 +203,7 @@ export const trafficMode = {
   inputBlocked(){ return wrecked(); },
   isGhost(){ return ghosted(); },
   // Online: a hard hit does not end the run. Stop, blink 3 s, come back.
-  ghostBounds(s){ keepOnRoad(s); },                     // another player's predicted car stays inside the rails
+  ghostBounds(s, g){ keepOnRoad(s, g && g.car); },                     // another player's predicted car stays inside the rails
   onHit(car, hit){ lastHit = hit; hitPopup(car, hit); if(!hit.hard) horn(Math.max(-1, Math.min(1, (hit.bot.x - car.x) / 4)), .9); },
   wreck(car){
     const t = serverNow();

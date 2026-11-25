@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Night Drift — макет C «Лента»</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500..800&family=Manrope:wght@400..800&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="../css/tokens.css">
+<style>
+/* U1 mock C, «Лента». The whole path to the grid is one strip of tall slanted panels:
+   Режим → Карта → Заезд. ← → moves along the strip of a level: the panel in focus opens wide
+   and shows its frame from the game and what you need to know; its neighbours fold into
+   narrow slats with the name on the edge. Enter goes one level on: the strip runs off to the
+   left and the next one comes in from the right; Esc runs it back. Behind everything, the
+   focused frame itself (the car on the road), blurred: the car never leaves the screen.
+   Who you drive with («Один», «Комната», «По коду») is the last level, the moment of the
+   start, because the mode, the map and the car are the same game either way. */
+:root {
+  --slant: 34px;                       /* how far a panel leans: the top edge is shifted this much */
+  --slat: 64px;                        /* the narrowest a folded panel gets */
+  --open: min(58vw, 860px);            /* the panel in focus */
+  --strip-gap: 6px;
+  --dur-focus: 200ms;                  /* a panel opening as focus reaches it */
+  --dur-level: 300ms;                  /* one level of the strip to the next */
+  --shade: linear-gradient(180deg, rgba(5, 6, 16, 0) 30%, rgba(5, 6, 16, 0.55) 58%, rgba(5, 6, 16, 0.94) 100%);
+  --shade-slat: linear-gradient(180deg, rgba(5, 6, 16, 0.55), rgba(5, 6, 16, 0.82));
+  --gutter: clamp(16px, 3vw, 40px);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+body { font: 400 var(--fs-md)/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--c-rose); color: var(--c-night-1); }
+button { font: inherit; color: inherit; }
+
+/* ---------- the scene behind the menu: the focused frame, out of focus ---------- */
+.scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--c-night-1); }
+.scene img { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover; filter: blur(22px) saturate(1.2) brightness(0.5); opacity: 0; transition: opacity 420ms var(--ease-out); }
+.scene img.on { opacity: 1; }
+.scene::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 60%, rgba(7, 8, 15, 0.2), rgba(7, 8, 15, 0.85)); }
+
+.app { position: relative; z-index: 1; height: 100dvh; display: grid; grid-template-rows: auto 1fr auto; }
+
+/* ---------- top: the name and where you are on the strip ---------- */
+.top { display: flex; align-items: center; gap: var(--sp-5); padding: var(--top) var(--gutter) var(--sp-3); }
+.logo { margin: 0; font: 800 var(--fs-lg)/1 var(--f-display); letter-spacing: -0.01em; white-space: nowrap; }
+.logo span { color: var(--brand); }
+.steps { display: flex; align-items: center; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; min-width: 0; }
+.steps li { display: flex; align-items: center; gap: var(--sp-2); padding: 6px var(--sp-3); border-radius: var(--r-pill); font: 600 var(--fs-sm)/1.2 var(--f-body); color: var(--text-quiet); white-space: nowrap; }
+.steps li b { font: 700 var(--fs-xs)/1 var(--f-num); color: var(--text-off); }
+.steps li .pick { color: var(--c-ink-1); font-weight: 700; }
+.steps li[aria-current="step"] { background: rgba(62, 240, 255, 0.1); color: var(--text); box-shadow: inset 0 0 0 1px rgba(62, 240, 255, 0.45); }
+.steps li[aria-current="step"] b { color: var(--action); }
+.steps li.done b { color: var(--c-ink-1); }
+.steps .sep { width: 14px; height: 1px; background: var(--line-strong); padding: 0; }
+
+/* ---------- the strip ---------- */
+.stage { position: relative; overflow: hidden; }
+.level { position: absolute; inset: 0; display: flex; align-items: stretch; gap: var(--strip-gap); padding: var(--sp-2) var(--gutter) var(--sp-4); }
+.level[inert] { pointer-events: none; }
+
+.panel {
+  position: relative; flex: 1 1 0; min-width: var(--slat); max-width: 360px;
+  margin-inline-end: calc(var(--slant) * -1 + var(--strip-gap));
+  border: 0; padding: 0; background: var(--c-night-2); cursor: pointer; text-align: start;
+  clip-path: polygon(var(--slant) 0, 100% 0, calc(100% - var(--slant)) 100%, 0 100%);
+  transition: flex var(--dur-focus) var(--ease-out), max-width var(--dur-focus) var(--ease-out);
+  outline: none;
+}
+.panel:last-child { margin-inline-end: 0; }
+.panel[aria-selected="true"] { flex: 0 0 min(var(--open), calc(100% - (var(--n) - 1) * (var(--slat) - var(--slant) + var(--strip-gap)) - var(--slant))); max-width: none; cursor: default; }
+.panel img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--focus-x, 50%) 50%; transition: opacity var(--dur-focus) var(--ease-out); opacity: 0.62; }
+.panel[aria-selected="true"] img { opacity: 1; }
+.panel::after { content: ""; position: absolute; inset: 0; background: var(--shade-slat); transition: opacity var(--dur-focus) var(--ease-out); }
+.panel[aria-selected="true"]::after { background: var(--shade); }
+/* the lit edge: the panel in focus carries the neon line along its slanted bottom */
+.panel .edge { position: absolute; left: 0; right: var(--slant); bottom: 0; height: 3px; background: var(--accent, var(--action)); opacity: 0; transition: opacity var(--dur-focus) var(--ease-out); z-index: 2; }
+.panel[aria-selected="true"] .edge { opacity: 1; }
+.panel:focus-visible .edge { opacity: 1; height: 5px; }
+.panel:focus-visible { filter: drop-shadow(0 0 0 transparent); }
+
+/* the slat: a folded panel shows only its name along the edge */
+.panel .slat { position: absolute; left: calc(var(--slant) * 0.3 + var(--sp-3)); bottom: var(--sp-5); z-index: 1; writing-mode: sideways-lr; font: 700 var(--fs-md)/1 var(--f-display); color: var(--c-ink-1); white-space: nowrap; transition: opacity 120ms var(--ease-out); }
+.panel[aria-selected="true"] .slat { opacity: 0; }
+
+/* the open panel: what you need to choose, on the frame */
+.panel .info { position: absolute; z-index: 1; left: calc(var(--slant) * 0.25 + var(--sp-5)); right: calc(var(--slant) + var(--sp-5)); bottom: var(--sp-5); display: grid; gap: var(--sp-2); opacity: 0; transform: translateX(12px); transition: opacity 160ms var(--ease-out), transform var(--dur-focus) var(--ease-out); pointer-events: none; max-width: 52ch; }
+.panel[aria-selected="true"] .info { opacity: 1; transform: none; transition-delay: 60ms; pointer-events: auto; }
+.info h2 { margin: 0; font: 800 var(--fs-xl)/1.05 var(--f-display); letter-spacing: -0.01em; text-wrap: balance; }
+.info p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--c-ink-1); }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); color: var(--c-ink-1); }
+.meta .num { font: 700 var(--fs-sm)/1 var(--f-num); font-variant-numeric: tabular-nums; color: var(--text); }
+.meta .rec { font: 700 var(--fs-sm)/1 var(--f-num); color: var(--record); }
+.meta .rec.none { font-family: var(--f-body); font-weight: 600; color: var(--text-quiet); }
+.dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--c-ink-3); }
+.dots i.on { background: var(--brand); }
+.tag { padding: 2px var(--sp-2); border-radius: var(--r-pill); border: 1px solid var(--line-strong); font: 600 var(--fs-xs)/1.4 var(--f-body); color: var(--c-ink-1); }
+.go { white-space: nowrap; justify-self: start; margin-top: var(--sp-2); display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--btn-h); padding: 0 var(--sp-5); border-radius: var(--r-pill); background: linear-gradient(180deg, var(--action-hi), var(--action)); color: var(--on-action); font: 800 var(--fs-md)/1 var(--f-display); box-shadow: var(--glow-action); }
+.go kbd { font: 700 var(--fs-xs)/1 var(--f-num); padding: 3px 6px; border-radius: var(--r-xs); background: rgba(7, 8, 15, 0.18); }
+.panel.soon { cursor: not-allowed; }
+.panel.soon img { filter: grayscale(1); }
+.soon-note { color: var(--text-quiet); font-weight: 600; }
+.code { display: none; gap: var(--sp-2); margin-inline-start: auto; }
+.code.on { display: flex; }
+.code .go { margin: 0; border: 0; cursor: pointer; }
+.code input { width: 8.5em; min-height: var(--btn-h); padding: 0 var(--sp-4); border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface-sunk); color: var(--text); font: 700 var(--fs-lg)/1 var(--f-num); letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
+.code input:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-color: var(--action); }
+
+/* ---------- bottom: what the keys do here ---------- */
+.keys { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); align-items: center; padding: 0 var(--gutter) var(--bot); font: 600 var(--fs-sm)/1 var(--f-body); color: var(--text-quiet); }
+.keys kbd { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; margin-inline-end: 6px; border-radius: var(--r-xs); border: 1px solid var(--line-strong); box-shadow: inset 0 -2px 0 var(--line); font: 700 var(--fs-xs)/1 var(--f-num); color: var(--c-ink-1); }
+.keys .back { display: inline-flex; align-items: center; min-height: var(--btn-h); border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.keys .back:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-gap); border-radius: var(--r-xs); }
+.keys .back[hidden] { display: none; }
+
+/* ---------- phones ---------- */
+@media (max-width: 760px) {
+  :root { --slant: 22px; --slat: 40px; --strip-gap: 4px; --open: 74vw; }
+  .top { flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+  .steps li { padding: 5px var(--sp-2); }
+  .steps li:not([aria-current]) .lbl { display: none; }
+  .steps .sep { width: 8px; }
+  .panel .slat { font-size: var(--fs-sm); left: calc(var(--slant) * 0.3 + 4px); }
+  .info h2 { font-size: var(--fs-xl); }
+  .panel .info { left: var(--sp-4); right: calc(var(--slant) + var(--sp-3)); bottom: var(--sp-4); }
+  .keys .hint { display: none; }
+}
+@media (max-height: 500px) {
+  .panel .info p { display: none; }
+  .top { padding-bottom: var(--sp-1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel, .panel img, .panel::after, .panel .info, .panel .edge, .scene img { transition-duration: 1ms; }
+  .panel .info { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="scene" aria-hidden="true"><img alt="" src="u1/map-neon.webp" class="on"><img alt="" src="u1/map-neon.webp"></div>
+<div class="app">
+  <header class="top">
+    <p class="logo">Night <span>Drift</span></p>
+    <ol class="steps" id="steps" aria-label="Путь до старта"></ol>
+  </header>
+  <main class="stage" id="stage"></main>
+  <footer class="keys">
+    <span class="hint"><kbd>←</kbd><kbd>→</kbd>выбор</span>
+    <span class="hint"><kbd>Enter</kbd>дальше</span>
+    <button type="button" class="back" id="back" hidden><kbd>Esc</kbd>назад</button>
+    <form class="code" id="code" onsubmit="return false"><input aria-label="Код комнаты" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false"><button type="submit" class="go">Войти</button></form>
+  </footer>
+</div>
+<script type="module">
+const DIFF = ['', 'лёгкая', 'средняя', 'сложная'];
+const dots = n => `<span class="dots" aria-label="Сложность ${n} из 3">${[1, 2, 3].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>`;
+const km = m => (m / 1000).toFixed(2).replace('.', ',') + ' км';
+const noRec = '<span class="rec none">Рекорда пока нет</span>';
+const MAPS = [
+  { id: 'neon', name: 'Ночной город', len: 1433.4, diff: 1, tags: [], x: 43, desc: 'Неоновый круг между небоскрёбами: длинные дуги и две тугие шпильки.' },
+  { id: 'estakada', name: 'Эстакада', len: 1972.2, diff: 2, tags: ['мост'], x: 42, desc: 'Цветок из петель вокруг развязки: мост над двумя тоннелями, насыпи и вираж.' },
+  { id: 'serpantin', name: 'Серпантин', len: 2473.6, diff: 3, tags: ['срезка'], x: 41, desc: 'Извилистая змейка, тугая гармошка, длинная прямая и три срезки.' },
+  { id: 'parking', name: 'Паркинг', len: 1646.2, diff: 3, tags: ['этажи'], x: 58, desc: 'Многоэтажная парковка: спираль вверх, три этажа между колоннами, крыша над городом.' },
+  { id: 'pereval', name: 'Перевал', len: 2514.8, diff: 2, tags: ['мост', 'уклоны'], x: 43, desc: 'Горный перевал в лесу: холмы, виражи, два трамплина и спираль под собственным мостом.' },
+  { id: 'razvyazka', name: 'Развязка', len: 2803.3, diff: 2, tags: ['мост', 'срезка'], x: 43, desc: 'Портовая развязка: две петли под своими мостами, шпильки гармошкой и четыре срезки.' },
+];
+const pick = { mode: null, map: null };
+const LEVELS = {
+  mode: { step: 0, label: 'Режим', items: () => [
+    { id: 'track', name: 'Дрифт', img: 'u1/map-neon.webp', x: 43, accent: 'var(--brand)', body: `<p>Круг по одной из шести карт. Очки за занос, время круга.</p><div class="meta"><span>6 карт</span><span>1–10 кругов</span>${noRec}</div>`, go: 'Выбрать карту' },
+    { id: 'traffic', name: 'Трасса', img: 'u1/traffic-pass.webp', x: 50, accent: 'var(--action)', body: `<p>Бесконечное шоссе в потоке. Очки за обгон впритирку, множитель до ×5.</p><div class="meta"><span>4 полосы</span>${noRec}</div>`, go: 'К заезду' },
+    { id: 'career', name: 'Карьера', img: 'u1/city-wide.webp', x: 50, soon: true, body: `<p class="soon-note">Скоро: сезон заездов и свой гараж.</p>` },
+  ] },
+  map: { step: 1, label: 'Карта', items: () => MAPS.map(m => ({ id: m.id, name: m.name, img: `u1/map-${m.id}.webp`, x: m.x, accent: 'var(--brand)',
+    body: `<p>${m.desc}</p><div class="meta"><span class="num">${km(m.len)}</span><span>${dots(m.diff)} ${DIFF[m.diff]}</span>${m.tags.map(t => `<span class="tag">${t}</span>`).join('')}${noRec}</div>`, go: 'К заезду' })) },
+  who: { step: 3, label: 'Заезд', items: () => [
+    { id: 'solo', name: 'Один', img: 'u1/car-stand.webp', x: 50, accent: 'var(--action)', body: `<p>Старт сразу. Рекорд круга и очков сохранится в этом браузере.</p>`, go: 'Поехали' },
+    { id: 'room', name: 'Комната', img: pick.map ? `u1/map-${pick.map}.webp` : 'u1/traffic-pass.webp', x: 50, accent: 'var(--brand)', body: `<p>Вы хозяин: код и ссылка для друзей, до шести машин на одном старте.</p>`, go: 'Создать комнату' },
+    { id: 'code', name: 'По коду', img: 'u1/city-tall.webp', x: 50, accent: 'var(--record)', body: `<p>Друг уже создал комнату? Четыре буквы из его ссылки.</p>`, go: 'Ввести код', code: true },
+  ] },
+};
+const STEPS = ['Режим', 'Карта', 'Машина', 'Заезд'];
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+const stage = document.getElementById('stage'), stepsEl = document.getElementById('steps'), back = document.getElementById('back');
+const scene = [...document.querySelectorAll('.scene img')]; let sceneOn = 0;
+const history = []; let cur = null;
+
+function setScene(src) {
+  if (scene[sceneOn].getAttribute('src') === src) return;
+  sceneOn ^= 1; scene[sceneOn].src = src; scene[sceneOn].classList.add('on'); scene[sceneOn ^ 1].classList.remove('on');
+}
+function renderSteps(id) {
+  const at = LEVELS[id].step;
+  const sum = [pick.mode === 'track' ? 'Дрифт' : pick.mode === 'traffic' ? 'Трасса' : '', MAPS.find(m => m.id === pick.map)?.name || (pick.mode === 'traffic' ? 'Шоссе' : ''), 'Aston Martin', ''];
+  stepsEl.innerHTML = STEPS.map((s, i) => (i ? '<li class="sep" aria-hidden="true"></li>' : '') +
+    `<li${i === at ? ' aria-current="step"' : i < at ? ' class="done"' : ''}><b>${i + 1}</b><span class="lbl">${s}</span>${i !== at && sum[i] && (i < at || i === 2) ? `<span class="pick">${sum[i]}</span>` : ''}</li>`).join('');
+}
+function build(id) {
+  const lv = document.createElement('div');
+  lv.className = 'level'; lv.setAttribute('role', 'listbox'); lv.setAttribute('aria-label', LEVELS[id].label); lv.setAttribute('aria-orientation', 'horizontal');
+  const items = LEVELS[id].items(); lv.style.setProperty('--n', items.length);
+  items.forEach((it, i) => {
+    const p = document.createElement('div');
+    p.className = 'panel' + (it.soon ? ' soon' : ''); p.setAttribute('role', 'option'); p.id = `${id}-${it.id}`; p.dataset.id = it.id; p.tabIndex = -1;
+    if (it.soon) p.setAttribute('aria-disabled', 'true');
+    p.style.setProperty('--focus-x', it.x + '%'); if (it.accent) p.style.setProperty('--accent', it.accent);
+    p.innerHTML = `<img src="${it.img}" alt="" ${i > 2 ? 'loading="lazy"' : ''}><span class="slat" aria-hidden="true">${it.name}</span><span class="edge"></span>
+      <div class="info"><h2>${it.name}</h2>${it.body}${it.go ? `<span class="go" aria-hidden="true">${it.go} <kbd>Enter</kbd></span>` : ''}</div>`;
+    p.addEventListener('click', e => { if (e.target.closest('input')) return; if (p.getAttribute('aria-selected') === 'true') enter(); else focusAt([...lv.children].indexOf(p)); });
+    lv.appendChild(p);
+  });
+  return lv;
+}
+function focusAt(i, moveFocus = true) {
+  const ps = [...cur.el.children]; i = Math.max(0, Math.min(ps.length - 1, i)); cur.i = i;
+  ps.forEach((p, k) => { p.setAttribute('aria-selected', k === i ? 'true' : 'false'); p.tabIndex = k === i ? 0 : -1; });
+  setScene(ps[i].querySelector('img').getAttribute('src'));
+  document.getElementById('code').classList.toggle('on', cur.id === 'who' && ps[i].dataset.id === 'code');
+  if (moveFocus) ps[i].focus({ preventScroll: true });
+}
+// One level to the next: the old strip runs off to one side, the new one comes in from the other,
+// its panels a few frames apart so the strip reads as one piece moving past.
+function show(id, dir, at = 0) {
+  const old = cur && cur.el, el = build(id);
+  stage.appendChild(el); cur = { id, el, i: 0 }; focusAt(at);
+  renderSteps(id); back.hidden = history.length === 0;
+  if (!old) return;
+  old.inert = true;
+  const d = Number(getComputedStyle(document.documentElement).getPropertyValue('--dur-level').replace('ms', '')) || 300;
+  const ease = 'cubic-bezier(0.22, 1, 0.36, 1)';
+  if (reduce.matches) {
+    old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished.then(() => old.remove());
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160 });
+    return;
+  }
+  old.animate([{ transform: 'translateX(0)', opacity: 1 }, { transform: `translateX(${-dir * 55}%)`, opacity: 0 }], { duration: d * 0.85, easing: 'cubic-bezier(0.55, 0, 0.75, 0.4)', fill: 'forwards' }).finished.then(() => old.remove());
+  [...el.children].forEach((p, k) => {
+    const order = dir > 0 ? k : el.children.length - 1 - k;
+    p.animate([{ transform: `translateX(${dir * 70}vw)`, opacity: 0 }, { transform: 'translateX(0)', opacity: 1 }], { duration: d, delay: 30 + order * 28, easing: ease, fill: 'backwards' });
+  });
+}
+function enter() {
+  const it = cur.el.children[cur.i]; if (!it || it.getAttribute('aria-disabled') === 'true') return;
+  const id = it.dataset.id;
+  if (cur.id === 'mode') { pick.mode = id; pick.map = id === 'traffic' ? null : pick.map; history.push(cur); show(id === 'track' ? 'map' : 'who', 1); }
+  else if (cur.id === 'map') { pick.map = id; history.push(cur); show('who', 1); }
+  else if (cur.id === 'who' && id === 'code') document.querySelector('#code input').focus();
+}
+function goBack() {
+  const prev = history.pop(); if (!prev) return;
+  show(prev.id, -1, prev.i);
+}
+back.addEventListener('click', goBack);
+document.addEventListener('keydown', e => {
+  const typing = e.target.matches('input');
+  if (e.key === 'Escape') { if (typing) { cur.el.children[cur.i].focus(); return; } e.preventDefault(); goBack(); }
+  if (typing) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); focusAt(cur.i + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); focusAt(cur.i - 1); }
+  else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
+  else if (e.key === 'End') { e.preventDefault(); focusAt(99); }
+  else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enter(); }
+});
+// a thumb: swipe sideways along the strip
+let sx = null;
+stage.addEventListener('pointerdown', e => { sx = e.clientX; });
+stage.addEventListener('pointerup', e => { if (sx === null) return; const dx = e.clientX - sx; sx = null; if (Math.abs(dx) > 40) focusAt(cur.i + (dx < 0 ? 1 : -1)); });
+// ?at=map opens the mock one level in (screenshots)
+const q = new URLSearchParams(location.search);
+show('mode', 1, 0);
+if (q.get('at') === 'map') { history.push(cur); pick.mode = 'track'; show('map', 1); }
+</script>
+</body>
+</html>

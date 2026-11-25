@@ -19,12 +19,12 @@ export const newAlgo = {
     }
     g.last=s1; g.lastPrev=s0;
     const kd=B.kickAt(g.kick,nowS,s1.t); T.x+=kd.x; T.z+=kd.z; T.h+=kd.h;
-    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz;
+    g.vx=s1.vx+kd.vx; g.vz=s1.vz+kd.vz; g.rvx=s1.vx; g.rvz=s1.vz; g.spinV=kd.w;
     if(g.pinned){ g.view.ov.x=g.view.ov.z=0; } else S.settle(g.view,dt,P);
     const o=g.view.off, s={x:T.x+o.x,z:T.z+o.z,h:T.h+o.h,idx:s1.idx};
     if(keep) keep(s,g);
     g.pinned=false;
-    if(g.mem){ const bx=s.x, bz=s.z; B.keepOut(s,car,g.mem,cl.nowMs(),cl.rtt); if(s.x!==bx||s.z!==bz){ g.view.off.x+=s.x-bx; g.view.off.z+=s.z-bz; g.pinned=true; } }
+    if(g.mem){ const bx=s.x, bz=s.z; B.keepOut(s,car,g.mem,cl.nowMs(),cl.rtt,g.car); if(s.x!==bx||s.z!==bz){ g.view.off.x+=s.x-bx; g.view.off.z+=s.z-bz; g.pinned=true; } }
     g.x=s.x; g.z=s.z; g.h=s.h;
   },
   collide(cl, dt=1/120){

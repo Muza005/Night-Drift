@@ -13,6 +13,8 @@
 // plate under the settings shows the map to all; a new map: the guests get a short note
 // and every «Готово» goes; a player who comes in later sees the room's map; the race
 // starts on it in all three browsers.
+// «Призраки» (plan 3 stage 4b): off by default, shown to everyone in both modes, only the
+// host can switch it (a guest's message is refused too), a change takes back every «Готово».
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -21,7 +23,11 @@ import { launchOptions, onGpu } from '../browser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HEADED = onGpu();             // --headed: no window, real GPU; --show: a visible window
-const PORT = 2598;
+const PORT = +process.env.ND_PORT || 2598;     // ND_PORT: another port when this one is taken
+// SHOT_DIR=dir: screenshots of the lobby with «Призраки» on (the host's and a guest's view)
+const SHOT_DIR = process.env.SHOT_DIR;
+// a home card: the first click brings it to the middle, a click on the card in the middle goes in
+const enterCard = async (p, sel) => { await p.click(sel); await sleep(400); if (await p.$eval(sel, e => !e.closest('[hidden], [inert]') && e.getAttribute('aria-selected') === 'true').catch(() => false)) await p.click(sel); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function startServer() {
@@ -64,11 +70,11 @@ try {
   const CARS = await A.evaluate(async () => (await import('/js/core/cars.js')).CARS.map(c => [c.id, c.name]));
 
   // A makes a room from the Дрифт card; B and C come in by its code
-  await A.click('#goOnline'); await sleep(400); await A.click('#mTrack');
+  await enterCard(A, '#goOnline'); await sleep(400); await enterCard(A, '#fHost'); await sleep(400); await enterCard(A, '#rTrack');
   await A.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('roomCode').textContent !== '----');
   const code = (await A.innerText('#roomCode')).trim();
   for (const p of [B, C]) {
-    await p.click('#goOnline'); await sleep(400); await p.fill('#codeIn', code); await p.click('#joinRoom');
+    await enterCard(p, '#goOnline'); await sleep(400); await enterCard(p, '#fJoin'); await p.fill('#codeIn', code); await p.click('#joinRoom');
     await p.waitForFunction(() => !document.getElementById('pLobby').hidden);
     await sleep(300);                               // B is in before C: the order is by who came in
   }
@@ -77,6 +83,16 @@ try {
   const want = JSON.stringify([['1', 'Ann', true, false], ['2', 'Bob', false, false], ['3', 'Cid', false, false]]);
   check('all three see the same list: host first with the crown, then by order', lists.every(l => JSON.stringify(l) === want), JSON.stringify(lists[1]));
   check('three free seats are left', await A.$$eval('#plist .pl-empty', e => e.length) === 3);
+  // the first free seat invites: one press puts the room's link on the clipboard
+  await A.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://localhost:${PORT}` });
+  check('only the first free seat invites', await A.$$eval('#plist .pl-empty', e => e.map(x => !x.querySelector('.pl-ask').hidden).join()) === 'true,false,false');
+  await A.click('#plist .pl-invite .pl-ask');
+  await A.waitForFunction(() => document.querySelector('#plist .pl-invite .pl-ask').hasAttribute('data-copied'), null, { timeout: 3000 }).catch(() => {});
+  const link = await A.evaluate(() => navigator.clipboard.readText()).catch(e => 'unread: ' + e.message);
+  check('«Позвать» copies the room\'s link (?room=CODE) and says so', new URL(link, 'http://x').searchParams.get('room') === code && /скопирована/.test(await A.innerText('#plist .pl-invite .pl-ask-sub')), link);
+  // «Призраки» (stage 4b): the row is there only when the room's state has the setting
+  const ghost = await A.evaluate(() => ({ hidden: document.getElementById('cfgGhost').hidden, known: typeof __nd.NET.room.state.ghostMode === 'boolean' }));
+  check('«Призраки» shows only with a server that has it', ghost.hidden === !ghost.known, JSON.stringify(ghost));
   check('the host has «Старт», the others «Готово»', await A.innerText('#startRace') === 'Старт' && await B.innerText('#startRace') === 'Готово' && await C.innerText('#startRace') === 'Готово');
 
   // «Старт» lights only after both others are ready
@@ -109,15 +125,38 @@ try {
   await A.click('#cfgMinsUp'); await A.click('#cfgMinsUp'); await A.click('#cfgDens label:nth-child(3)');
   await B.waitForFunction(() => __nd.NET.room.state.duration === 300 && __nd.NET.room.state.density === 'high');
   check('«Трасса»: the host sets 5 minutes and high traffic, the others see them', await B.innerText('#cfgMins') === '5' && await B.$eval('#rowLaps', e => e.hidden) && await B.$eval('#cfgDens input[value="high"]', i => i.checked));
+  check('«Трасса»: «Призраки» is there too', await B.$eval('#cfgGhost', e => !e.hidden && e.offsetParent !== null));
   await A.click('#cfgMode label:nth-child(1)');
   await B.waitForFunction(() => __nd.NET.room.state.mode === 'track');
 
+  // «Призраки»: the host's switch, everyone sees it
+  const ghostUi = p => p.evaluate(() => ({ shown: document.getElementById('cfgGhost').offsetParent !== null,
+    on: document.querySelector('#cfgGhost input[value="on"]').checked, off: document.querySelector('#cfgGhost input[value="off"]').checked,
+    locked: [...document.querySelectorAll('#cfgGhost input')].every(i => i.disabled), state: __nd.NET.room.state.ghostMode }));
+  for (const p of [A, B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="off"]').checked);
+  let gs = await Promise.all([A, B, C].map(ghostUi));
+  check('«Призраки»: off by default, shown to everyone', gs.every(g => g.shown && g.off && !g.on && g.state === false), JSON.stringify(gs[1]));
+  check('…only the host can switch it', !gs[0].locked && gs[1].locked && gs[2].locked);
+  await B.evaluate(() => __nd.NET.room.send('config', { ghostMode: true })); await sleep(400);
+  check('…a guest\'s message is refused, «Готово» stays', await A.evaluate(() => __nd.NET.room.state.ghostMode) === false && !(await startOff(A)));
+  await A.click('#cfgGhost label:nth-child(2)');
+  for (const p of [B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="on"]').checked);
+  gs = await Promise.all([A, B, C].map(ghostUi));
+  check('the host turns it on: everyone sees «Вкл»', gs.every(g => g.on && g.state === true));
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'true');
+  check('…and every «Готово» is taken back', await B.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false' && await C.$eval('#startRace', b => b.getAttribute('aria-pressed')) === 'false');
+  if (SHOT_DIR) { await sleep(400); await A.screenshot({ path: path.join(SHOT_DIR, 'lobby-ghost-host.png') }); await B.screenshot({ path: path.join(SHOT_DIR, 'lobby-ghost-guest.png') }); }
+  await A.click('#cfgGhost label:nth-child(1)');
+  for (const p of [B, C]) await p.waitForFunction(() => document.querySelector('#cfgGhost input[value="off"]').checked);
+  await B.click('#startRace'); await C.click('#startRace');
+  await A.waitForFunction(() => document.getElementById('startRace').getAttribute('aria-disabled') === 'false');
+
   // the map: the plate for everyone, «Карта» for the host only
-  const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.bp') }));
+  const plate = p => p.evaluate(() => ({ shown: !document.getElementById('lobMap').hidden, name: document.getElementById('lobMapName').textContent, bp: !!document.querySelector('#lobMapThumb svg.dg') }));
   for (const p of [A, B, C]) await p.waitForFunction(() => !document.getElementById('lobMap').hidden);
   await A.waitForFunction(() => !document.getElementById('lobMapBtn').hidden);
   const plates = await Promise.all([A, B, C].map(plate));
-  check('the plate under the settings: «Ночной город» with its blueprint, for everyone', plates.every(x => x.shown && x.bp && x.name === 'Ночной город'), JSON.stringify(plates[1]));
+  check('the plate in the settings panel: «Ночной город» with its diagram, for everyone', plates.every(x => x.shown && x.bp && x.name === 'Ночной город'), JSON.stringify(plates[1]));
   check('«Карта» for the host only', !(await A.$eval('#lobMapBtn', b => b.hidden)) && await B.$eval('#lobMapBtn', b => b.hidden) && await C.$eval('#lobMapBtn', b => b.hidden));
   await B.evaluate(() => document.getElementById('lobMapBtn').click()); await sleep(250);
   check('a guest cannot open the picker', !(await B.evaluate(() => document.getElementById('mapPop').matches(':popover-open'))));
@@ -192,18 +231,18 @@ try {
   check('Esc cancels: nobody leaves, the host stays in the lobby', !(await A.evaluate(() => document.getElementById('kickPop').matches(':popover-open'))) && await A.evaluate(() => __nd.NET.room.state.players.size) === 3 && !(await A.$eval('#pLobby', e => e.hidden)));
   await A.click('#plist .pl:nth-child(3) .pl-kick');
   await A.click('#kickYes');
-  await C.waitForFunction(() => !document.getElementById('pModes').hidden && document.getElementById('noteToast').matches(':popover-open'), null, { timeout: 10000 });
+  await C.waitForFunction(() => !document.getElementById('pHome').hidden && document.getElementById('noteToast').matches(':popover-open'), null, { timeout: 10000 });
   check('the kicked player is back on the online cards, with the note', /исключили/.test(await C.innerText('#noteText')));
   await A.waitForFunction(() => __nd.NET.room.state.players.size === 2);
   check('the host and Bob now see two players', (await listOf(B)).length === 2);
-  await C.fill('#codeIn', code); await C.click('#joinRoom');
-  await C.waitForFunction(() => document.getElementById('netStatus').textContent.length > 0 && document.getElementById('pModes').getAttribute('aria-busy') !== 'true', null, { timeout: 10000 });
+  await enterCard(C, '#fJoin'); await C.fill('#codeIn', code); await C.click('#joinRoom');
+  await C.waitForFunction(() => document.getElementById('netStatus').textContent.length > 0 && document.getElementById('pHome').getAttribute('aria-busy') !== 'true', null, { timeout: 10000 });
   await sleep(500);
   check('…and cannot come back, and is told why', !(await C.evaluate(() => __nd.NET.online)) && await A.evaluate(() => __nd.NET.room.state.players.size) === 2 && /исключил/.test(await C.innerText('#netStatus')), await C.innerText('#netStatus'));
 
   // Dan comes in later: he sees the room's map
   const D = await player('Dan');
-  await D.click('#goOnline'); await sleep(400); await D.fill('#codeIn', code); await D.click('#joinRoom');
+  await enterCard(D, '#goOnline'); await sleep(400); await enterCard(D, '#fJoin'); await D.fill('#codeIn', code); await D.click('#joinRoom');
   await D.waitForFunction(() => !document.getElementById('pLobby').hidden && document.getElementById('lobMapName').textContent === 'Серпантин');
   check('a player who comes in later sees the room\'s map on the plate, and no note', (await plate(D)).bp && !(await toast(D)).open && await scene(D) === 'serpantin');
   await D.click('#startRace');
@@ -222,6 +261,8 @@ try {
   check('in the race the host sees Bob\'s model and paint', seenByA.car === bCar[0] && seenByA.paint === 0xd3202a, JSON.stringify(seenByA));
   check('…and Bob sees the host\'s', seenByB.car === CARS[0][0], JSON.stringify(seenByB));
   check('seat colours: the host cyan, the second rose', seenByB.accent === 0x3ef0ff && seenByA.accent === 0xff3b6b);
+  // (the menu dissolves into the run first: --dur-screen, then it is hidden)
+  await A.waitForFunction(() => document.getElementById('menu').hidden, null, { timeout: 2000 }).catch(() => {});
   check('the lobby is gone in the race (no menu, no stand drawing)', await A.evaluate(() => document.getElementById('menu').hidden));
   void cCar;
 

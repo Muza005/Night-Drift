@@ -116,16 +116,26 @@ test('lanes: 0 is the leftmost as the driver sees it (+X is to the left facing +
 test("another player's predicted car is never drawn through a rail or a wall", async () => {
   const { createRequire } = await import('node:module');
   globalThis.THREE ??= createRequire(import.meta.url)('three');
-  const lim = H.RAIL - 1.25;
+  const { worldPoly } = await import('../public/js/core/hitboxes.js');
+  const C = await import('../public/js/core/contact.js');
+  // (plan 3 stage 3) its hitbox is moved back across until it just touches the rail
+  const xs = (p, id) => { const P = worldPoly(C.bodyOf(id).id, p.x, p.z, p.h || 0); let lo = Infinity, hi = -Infinity; for (let i = 0; i < P.length; i += 2) { lo = Math.min(lo, P[i]); hi = Math.max(hi, P[i]); } return [lo, hi]; };
   assert.equal(H.keepOnRoad({ x: 3, z: 0 }).x, 3, 'inside: untouched');
-  const p = H.keepOnRoad({ x: lim + 4, z: 50 });
-  assert.ok(Math.abs(p.x - (lim - 1.5)) < 1e-9 && p.z === 50, 'past the rail: bounced back inside');
-  assert.ok(Math.abs(H.keepOnRoad({ x: -(lim + 1), z: 0 }).x + (lim - 0.45)) < 1e-9);
+  for (const [id, h] of [[undefined, 0], ['muscle', .4], ['super', -1.2]]) {
+    const p = H.keepOnRoad({ x: H.RAIL + 4, z: 50, h }, id);
+    assert.ok(Math.abs(xs(p, id)[1] - H.RAIL) < 1e-9 && p.z === 50, `${id} past the rail: back against it (${(xs(p, id)[1] - H.RAIL).toFixed(3)} m)`);
+    const q = H.keepOnRoad({ x: -(H.RAIL + 1), z: 0, h }, id);
+    assert.ok(Math.abs(xs(q, id)[0] + H.RAIL) < 1e-9, `${id}: the left rail too`);
+  }
   const T = await import('../public/js/modes/track/geometry.js');
+  // a drawn wall: no vertex of the hitbox behind it, the centre on the road's side
+  const NB = [], CON = {};
+  const inWall = p => { const B = C.bodyOf(undefined), P = worldPoly(B.id, p.x, p.z, p.h || 0), n = T.wallsNear(p.x, p.z, NaN, B.r + 2, NB);
+    return C.wallContact(T.WALLS, NB, n, P, B.nv, p.x, p.z, B.r, 3, CON) ? CON.depth : 0; };
   const i = 100, q = T.P[i], n = T.NM[i], memo = {};
   const out = T.keepInWalls({ x: q.x + n.x * (T.WALL + 3), z: q.z + n.z * (T.WALL + 3) }, memo);
   const lat = (out.x - q.x) * n.x + (out.z - q.z) * n.z;
-  assert.ok(lat < T.WALL - 1.25 && lat > 0, `bounced back inside the wall (lateral ${lat.toFixed(2)} m)`);
+  assert.ok(lat < T.WALL && lat > 0 && inWall(out) < 1e-6, `back inside the wall (lateral ${lat.toFixed(2)} m, ${(inWall(out) * 100).toFixed(1)} cm in it)`);
   assert.ok(memo.idx !== undefined);
   const inside = T.keepInWalls({ x: q.x, z: q.z }, memo);
   assert.ok(inside.x === q.x && inside.z === q.z);
